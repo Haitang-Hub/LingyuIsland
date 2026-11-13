@@ -25,13 +25,53 @@
   "scripts": {
     "start": "electron .",
     "test": "node test/run-tests.js",
-    "e2e": "cross-env-shell ISLAND_E2E=1 electron . || ISLAND_E2E=1 electron ."
+    "e2e": "cross-env-shell ISLAND_E2E=1 electron . || ISLAND_E2E=1 electron .",
+    "dist": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.lingyu.privacy-island",
+    "productName": "LingyuIsland",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json",
+      "!test/**"
+    ],
+    "win": {
+      "icon": "assets/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "灵屿·隐私灵动岛",
+      "artifactName": "LingyuIsland-Setup-${version}.${ext}"
+    }
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
     "iconv-lite": "^0.6.3"
   },
   "devDependencies": {
-    "electron": "^33.2.0"
+    "electron": "^33.2.0",
+    "electron-builder": "^26.18.0"
   }
 }
