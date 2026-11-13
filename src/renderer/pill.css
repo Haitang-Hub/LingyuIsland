@@ -1,0 +1,440 @@
+/* 灵屿胶囊 —— 深色浮岛（true-black-flat：亮度分层，色彩只落在数据与动作上） */
+
+:root {
+  --pill-bg: #0b0d11;
+  --pill-border: rgba(255, 255, 255, 0.10);
+  --ink: #e9ebef;
+  --ink-2: #98a0ac;
+  --accent: #0a84ff;
+  --green: #30d158;
+  /* 阴影必须完全落在窗口留白（上下各 4px）内，否则被窗口边界裁成硬边 */
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* hidden 属性必须始终生效（防止被 display:flex 等规则覆盖） */
+[hidden] { display: none !important; }
+
+html, body {
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
+  user-select: none;
+  cursor: default;
+}
+
+body { position: relative; display: flex; align-items: center; justify-content: center; padding: 4px 16px; }
+
+.pill {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 44px;
+  padding: 0 16px 0 14px;
+  border-radius: 22px;
+  background: var(--pill-bg);
+  border: 1px solid var(--pill-border);
+  box-shadow: var(--shadow);
+  transform: translate(var(--mx, 0px), var(--my, 0px));
+  transition: transform 200ms cubic-bezier(0.2, 0.9, 0.3, 1),
+              background 200ms ease, border-color 200ms ease;
+}
+
+.pill:hover { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(1.015); background: #10131a; }
+.pill:active { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(0.985); }
+
+/* 空闲文案轮换：轻轻浮入 */
+.pill.swap .label-idle { animation: lineSwap 420ms ease; }
+@keyframes lineSwap {
+  0%   { opacity: 0; transform: translateY(4px); }
+  100% { opacity: 1; transform: none; }
+}
+
+/* 状态点 */
+.dot {
+  flex: none;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  transition: background 240ms ease;
+}
+.dot.busy  { background: #ff9f0a; }
+.dot.clip  { background: var(--accent); }
+
+/* 文案：默认与悬停两层交叉淡入 */
+.labels { position: relative; flex: 1; min-width: 0; height: 18px; }
+.label {
+  position: absolute; inset: 0;
+  display: flex; align-items: center;
+  font-size: 12.5px; font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap; overflow: hidden;
+  transition: opacity 180ms ease;
+}
+.label-hover { color: var(--ink-2); opacity: 0; }
+.pill:hover .label-idle  { opacity: 0; }
+.pill:hover .label-hover { opacity: 1; }
+
+/* 剪贴板恢复提示 */
+.chip {
+  flex: none;
+  display: flex; align-items: center; gap: 5px;
+  max-width: 100%;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: rgba(10, 132, 255, 0.14);
+  border: 1px solid rgba(10, 132, 255, 0.35);
+  color: #79b8ff;
+  font-family: inherit;
+  font-size: 11.5px; font-weight: 500;
+  white-space: nowrap; overflow: hidden;
+  appearance: none;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  animation: chipIn 240ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.chip:hover { background: rgba(10, 132, 255, 0.26); border-color: rgba(10, 132, 255, 0.65); color: #a9d1ff; }
+.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chip:disabled { opacity: 0.55; cursor: default; }
+.chip svg { flex: none; }
+@keyframes chipIn { from { opacity: 0; transform: translateX(6px); } }
+
+/* 关闭还原提示的小 ×：低调幽灵按钮，悬停才点亮 */
+.chip-close {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin-left: 1px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--ink-2, #8b93a1);
+  appearance: none;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, transform 120ms ease;
+  animation: chipIn 240ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.chip-close:hover { background: rgba(255, 255, 255, 0.12); color: #dfe5ee; transform: scale(1.12); }
+.chip-close:active { transform: scale(0.92); }
+.chip-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* 出现「还原文本」时 × 与小表情的让位规则一致 */
+#clipChip:not([hidden]) ~ .chip-close { display: flex; }
+#clipChip:not([hidden]) ~ .face { opacity: 0; transform: scale(0.6); }
+
+/* ---------------- 右侧小家伙（极简双眼 · 会动会挤会看人） ----------------
+   右侧整块区域是它的「房间」：--face-x 在房间里左右走动，
+   --look-x 是眼球看向光标/文字的偏移，data-mood 决定表情。 */
+
+.face {
+  flex: none;
+  position: relative;
+  width: 40px;
+  height: 26px;
+  margin-right: -6px; /* 整体再靠右一点，贴近胶囊圆边 */
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+
+/* 右侧出现「还原文本」按钮时，小家伙先躲一下（规则在 .chip-close 附近统一维护） */
+
+.face-inner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  /* 身体在房间里二维移动（--face-x/--face-y）+ 朝光标歪头（--tilt） */
+  transform: translate(var(--face-x, 0px), var(--face-y, 0px)) rotate(var(--tilt, 0deg));
+  transform-origin: 80% 62%;
+  transition: transform 460ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 眼睛：竖长胶囊形（窄而高）。transform 既要走动(look)又要眨眼(blink)，合并写 */
+.eye {
+  width: 5.5px;
+  height: 14px;
+  border-radius: 3px;
+  background: #edf0f5;
+  transform: translate(var(--look-x, 0px), var(--look-y, 0px)) scaleY(var(--blink, 1));
+  transition: transform 130ms ease,
+              width 240ms cubic-bezier(0.2, 0.9, 0.3, 1),
+              height 240ms cubic-bezier(0.2, 0.9, 0.3, 1),
+              border 240ms ease, border-radius 240ms ease,
+              background 240ms ease, opacity 240ms ease;
+}
+
+/* 眨眼：JS 加 .blink，140ms 快速合拢再睁开；wink 只眨一只 */
+.face.blink .eye { --blink: 0.08; }
+.face.wink-l .eye.left  { --blink: 0.06; }
+.face.wink-r .eye.right { --blink: 0.06; }
+
+/* ---- 情绪：平和 idle ---- */
+.face[data-mood="idle"] .eye { height: 14px; }
+
+/* ---- 情绪：好奇 curious（光标在胶囊上）——眼睛睁大 + 歪头看 ---- */
+.face[data-mood="curious"] .eye { height: 15.5px; }
+
+/* ---- 情绪：温柔 warm（读到暖心文案）——眼睛变短变柔 ---- */
+.face[data-mood="warm"] .eye { height: 12px; }
+
+/* ---- 情绪：犯困 sleepy（夜深文案）——闭眼细线 + 缓慢漂移 ---- */
+.face[data-mood="sleepy"] .eye { height: 2.5px; width: 8px; opacity: 0.75; }
+.face[data-mood="sleepy"] .face-inner { animation: faceSway 5.2s ease-in-out infinite; }
+@keyframes faceSway {
+  0%, 100% { transform: translateX(1px); }
+  50%      { transform: translateX(6px); }
+}
+
+/* ---- 情绪：害羞 shy（被夸奖文案）——眼睛变短低头 + 歪头不好意思 ---- */
+.face[data-mood="shy"] .eye { height: 8px; --look-y: 2.5px; }
+.face[data-mood="shy"] .face-inner {
+  transform: translate(var(--face-x, 0px), calc(var(--face-y, 0px) + 1px)) rotate(calc(var(--tilt, 0deg) + 4deg));
+}
+
+/* ---- 情绪：惬意 content（阳光/安静文案）——放松眯起 + 微微上浮 ---- */
+.face[data-mood="content"] .eye { height: 12px; --look-y: -1.5px; }
+.face[data-mood="content"] .face-inner {
+  transform: translate(var(--face-x, 0px), calc(var(--face-y, 0px) - 1.5px)) rotate(var(--tilt, 0deg));
+}
+
+/* ---- 情绪：思考 think（深呼吸/别急文案）——看向左上 + 歪头琢磨 ---- */
+.face[data-mood="think"] .eye { height: 10px; --look-x: -3px; --look-y: -2.5px; }
+.face[data-mood="think"] .face-inner {
+  transform: translate(var(--face-x, 0px), var(--face-y, 0px)) rotate(calc(var(--tilt, 0deg) - 4deg));
+}
+
+/* ---- 情绪：惊讶 surprise（剪贴板出现还原内容）——瞪大 + 看向文字 ---- */
+.face[data-mood="surprise"] .eye { height: 16px; width: 6px; --look-x: -5px; }
+
+/* ---- 情绪：忙碌 busy——眯眼看进度，眼球小幅左右跟踪 ---- */
+.face[data-mood="busy"] .eye { height: 11px; --look-x: -5px; animation: eyeTrack 1.7s ease-in-out infinite; }
+@keyframes eyeTrack {
+  0%, 100% { --track: 0px; }
+  30%      { --track: 2.5px; }
+  65%      { --track: -1.5px; }
+}
+.face[data-mood="busy"] .eye {
+  transform: translate(calc(var(--look-x, 0px) + var(--track, 0px)), var(--look-y, 0px)) scaleY(0.82);
+}
+
+/* ---- 情绪：想冲出去 press（拖入文件）——挤到右边缘压扁，反复往外顶 ---- */
+.face[data-mood="press"] .eye { height: 16px; width: 6px; }
+.face[data-mood="press"] .face-inner { animation: facePress 1.5s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+@keyframes facePress {
+  0%, 100% { transform: translateX(3px) scaleX(0.94); }
+  22%      { transform: translateX(10px) scaleX(0.66); }
+  34%      { transform: translateX(7px) scaleX(0.86); }
+  48%      { transform: translateX(10.5px) scaleX(0.62); }
+  70%      { transform: translateX(6px) scaleX(0.9); }
+}
+
+/* ---- 情绪：欢呼 happy（成功）——弯弯笑眼 ⌒⌒ + 蹦跳 ---- */
+.face[data-mood="happy"] .eye {
+  width: 9px; height: 8px;
+  background: transparent;
+  box-sizing: border-box;
+  border: 2.6px solid transparent;
+  border-top-color: #edf0f5;
+  border-radius: 50%;
+}
+/* 蹦跳一下（celebrate 触发） */
+.face.cheer .face-inner { animation: faceHop 620ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+@keyframes faceHop {
+  0%   { transform: translate(var(--face-x, 0px), var(--face-y, 0px)) scale(1, 1); }
+  28%  { transform: translate(var(--face-x, 0px), calc(var(--face-y, 0px) - 7px)) scale(1.06, 1.06); }
+  52%  { transform: translate(var(--face-x, 0px), calc(var(--face-y, 0px) + 1px)) scale(0.96, 1.05); }
+  74%  { transform: translate(var(--face-x, 0px), calc(var(--face-y, 0px) - 2.5px)) scale(1, 1); }
+  100% { transform: translate(var(--face-x, 0px), var(--face-y, 0px)) scale(1, 1); }
+}
+
+/* 点头：新消息浮现时轻轻点头（「收到」） */
+.face.nod .face-inner { animation: faceNod 480ms cubic-bezier(0.34, 1.4, 0.64, 1); }
+@keyframes faceNod {
+  0%   { transform: translate(var(--face-x, 0px), var(--face-y, 0px)) rotate(var(--tilt, 0deg)); }
+  32%  { transform: translate(var(--face-x, 0px), calc(var(--face-y, 0px) + 3px)) rotate(var(--tilt, 0deg)); }
+  64%  { transform: translate(var(--face-x, 0px), calc(var(--face-y, 0px) - 1.4px)) rotate(var(--tilt, 0deg)); }
+  100% { transform: translate(var(--face-x, 0px), var(--face-y, 0px)) rotate(var(--tilt, 0deg)); }
+}
+
+/* 摇头：失败/不可用时轻轻摇头（「不行哦」） */
+.face.shake .face-inner { animation: faceShake 460ms ease-in-out; }
+@keyframes faceShake {
+  0%, 100% { transform: translate(var(--face-x, 0px), var(--face-y, 0px)) rotate(var(--tilt, 0deg)); }
+  18%      { transform: translate(calc(var(--face-x, 0px) - 3px), var(--face-y, 0px)) rotate(-3.5deg); }
+  42%      { transform: translate(calc(var(--face-x, 0px) + 3px), var(--face-y, 0px)) rotate(3.5deg); }
+  66%      { transform: translate(calc(var(--face-x, 0px) - 2px), var(--face-y, 0px)) rotate(-2deg); }
+  84%      { transform: translate(calc(var(--face-x, 0px) + 1px), var(--face-y, 0px)) rotate(1deg); }
+}
+
+/* 尊重系统减少动效：只留静态表情 */
+@media (prefers-reduced-motion: reduce) {
+  .face-inner, .face .eye { animation: none !important; transition: none !important; }
+}
+
+/* 剪贴板提示时的呼吸脉冲 */
+.pulse {
+  display: none;
+  position: absolute; inset: -1px;
+  border-radius: 22px;
+  border: 1px solid rgba(10, 132, 255, 0.5);
+  pointer-events: none;
+}
+.pill.clip .pulse { display: block; animation: breathe 2.2s ease-in-out infinite; }
+@keyframes breathe {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
+}
+
+/* 拖入状态：胶囊加深、边框点亮 */
+.pill.drag {
+  background: #0d1524;
+  border-color: rgba(10, 132, 255, 0.55);
+  transform: scale(1.03);
+}
+.pill.drag .label-hover, .pill.drag .label-idle { opacity: 0; }
+.pill.drag::after {
+  content: "松开鼠标，开始脱敏";
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12.5px; font-weight: 600;
+  color: #79b8ff;
+  border-radius: 22px;
+}
+
+/* 忙碌 */
+.pill.busy .label-idle { color: #ffb340; }
+.pill.ok .label-idle { color: var(--green); }
+
+/* ---------------- 收起态：屏幕顶边的细线 ----------------
+   主进程切到收起态时窗口已贴住屏幕顶边并开启点击穿透（悬停自动展开），
+   这里只负责胶囊↔线段的流畅过渡动画。 */
+
+.island-line {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 120px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--pill-bg);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transform: translateX(-50%) scale(0.2);
+  pointer-events: none;
+  transition: transform 380ms cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 280ms ease;
+}
+
+body.collapsed .island-line {
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
+}
+
+/* 胶囊收缩淡出（比展开稍快，避免与线段生长抢戏） */
+body.collapsed .pill {
+  transform: scale(0.5, 0.06);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 260ms cubic-bezier(0.4, 0, 0.6, 1),
+              opacity 200ms ease,
+              background 200ms ease,
+              border-color 200ms ease;
+}
+
+/* ---------------- 趣味微交互 ---------------- */
+
+/* 磁性光晕：跟随光标位置的柔光（--gx/--gy 由 JS 写入） */
+.fx-glow, .fx-shine {
+  position: absolute;
+  inset: 0;
+  border-radius: 21px;
+  pointer-events: none;
+}
+.fx-glow {
+  background: radial-gradient(130px 64px at var(--gx, 50%) var(--gy, 50%),
+              rgba(126, 160, 255, 0.13), transparent 72%);
+  opacity: 0;
+  transition: opacity 260ms ease;
+}
+.pill:hover .fx-glow { opacity: 1; }
+
+/* 高光扫过：成功反馈时一道柔光掠过胶囊 */
+.fx-shine { overflow: hidden; }
+.fx-shine::before {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: -80%;
+  width: 55%;
+  background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.10), transparent);
+  transform: skewX(-18deg);
+  opacity: 0;
+}
+.pill.shine .fx-shine::before { animation: shineSweep 920ms cubic-bezier(0.3, 0.6, 0.3, 1); }
+@keyframes shineSweep {
+  0%   { left: -80%; opacity: 0; }
+  15%  { opacity: 1; }
+  100% { left: 165%; opacity: 0; }
+}
+
+/* 成功弹跳：轻微压扁回弹，像开心地跳了一下 */
+.pill.pop { animation: pillPop 540ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+@keyframes pillPop {
+  0%   { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(1, 1); }
+  30%  { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(1.045, 0.95); }
+  60%  { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(0.985, 1.02); }
+  100% { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(1, 1); }
+}
+
+/* 文案弹跳：脱敏数量增加时数字区轻跳一下 */
+.pill.bump .labels {
+  transform-origin: left center;
+  animation: labelBump 460ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes labelBump {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+/* 拖入果冻：文件悬停上方时 Q 弹晃动 */
+.pill.drag { animation: jelly 620ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+@keyframes jelly {
+  0%   { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(1, 1); }
+  25%  { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(1.04, 0.95); }
+  50%  { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(0.965, 1.045); }
+  75%  { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(1.02, 0.985); }
+  100% { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(1.03, 1.03); }
+}
+
+/* 状态点：空闲呼吸，忙碌/剪贴板脉冲，成功时欢快地 ping 一下 */
+@keyframes dotBreathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(48, 213, 88, 0.35); }
+  55%      { box-shadow: 0 0 0 5px rgba(48, 213, 88, 0); }
+}
+@keyframes dotRing {
+  0%   { box-shadow: 0 0 0 0 var(--ring, rgba(48, 213, 88, 0.4)); }
+  70%  { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.dot { animation: dotBreathe 2.8s ease-in-out infinite; }
+.pill.busy .dot { --ring: rgba(255, 159, 10, 0.4);  animation: dotRing 1.4s ease-out infinite; }
+.pill.clip .dot { --ring: rgba(10, 132, 255, 0.45); animation: dotRing 1.8s ease-out infinite; }
+.pill.ok .dot, .pill.pop .dot { --ring: rgba(48, 213, 88, 0.5); animation: dotRing 640ms ease-out; }
+
+/* 收起线段的轻微呼吸：偶尔泛起微光，提示这里可以唤回灵动岛 */
+body.collapsed .island-line { animation: lineGlint 6s ease-in-out 2.4s infinite; }
+@keyframes lineGlint {
+  0%, 86%, 100% { border-color: rgba(255, 255, 255, 0.18); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); }
+  90%           { border-color: rgba(160, 190, 255, 0.55); box-shadow: 0 0 8px rgba(126, 160, 255, 0.35), 0 1px 4px rgba(0, 0, 0, 0.35); }
+  94%           { border-color: rgba(255, 255, 255, 0.18); }
+}

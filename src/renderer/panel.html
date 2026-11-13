@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
+<link rel="stylesheet" href="panel.css" />
+<title>灵屿 · 隐私灵动岛</title>
+</head>
+<body>
+  <div class="panel" data-ui>
+    <header class="titlebar">
+      <span class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22">
+          <rect x="2" y="8" width="20" height="8" rx="4" fill="#0a84ff" opacity="0.9"/>
+          <circle cx="7.5" cy="12" r="1.8" fill="#fff"/>
+          <rect x="11" y="10.6" width="6" height="2.8" rx="1.4" fill="#fff" opacity="0.75"/>
+        </svg>
+      </span>
+      <h1>灵屿 · 隐私灵动岛</h1>
+      <span class="vault-chip" id="vaultChip" title="脱敏映射库状态">—</span>
+      <span class="spacer"></span>
+      <button class="icon-btn" id="closeBtn" title="收起 (Esc)" aria-label="收起面板">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </header>
+
+    <nav class="tabs" role="tablist" aria-label="功能导航">
+      <button class="tab is-active" data-tab="home" role="tab" aria-selected="true">概览</button>
+      <button class="tab" data-tab="search" role="tab" aria-selected="false">快速查找</button>
+      <button class="tab" data-tab="restore" role="tab" aria-selected="false">文本恢复</button>
+      <button class="tab" data-tab="settings" role="tab" aria-selected="false">设置</button>
+    </nav>
+
+    <!-- 概览 -->
+    <section class="view is-active" id="view-home">
+      <div class="dropzone" id="dropzone" tabindex="0" aria-label="拖入文件脱敏，或点击选择文件">
+        <svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true">
+          <rect x="6" y="10" width="28" height="18" rx="5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M20 16v10m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+        <p class="dz-title">拖入文件，自动脱敏或还原</p>
+        <p class="dz-sub">按内容识别：明文 → 「文件名_脱敏」副本，含脱敏编码的文件 → 「文件名_还原」副本；根目录只保留结果，不生成原文件副本，原位置的文件也不会被改动</p>
+        <button class="btn btn-ghost" id="pickBtn">选择文件…</button>
+      </div>
+
+      <div class="root-row" id="rootRow">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" class="root-ico">
+          <path d="M1.5 4a1.5 1.5 0 0 1 1.5-1.5h3l1.5 2h6A1.5 1.5 0 0 1 15 6v6a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 2 12V4z" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        </svg>
+        <span class="root-label">根目录</span>
+        <span class="root-path" id="rootPath">未配置</span>
+        <span class="root-count" id="rootCount"></span>
+        <button class="btn btn-mini" id="rootBtn">更改</button>
+      </div>
+
+      <div class="list-head">
+        <h2>最近脱敏</h2>
+        <span class="list-total" id="histTotal"></span>
+        <span class="spacer"></span>
+        <button class="btn-mini ghost-btn" id="histClearBtn" hidden>清空</button>
+      </div>
+      <ul class="hist-list" id="histList"></ul>
+      <div class="empty" id="histEmpty" hidden>
+        <p>还没有脱敏记录</p>
+        <p class="empty-sub">把文件拖到屏幕顶部的灵动岛胶囊上，或拖到这里</p>
+      </div>
+    </section>
+
+    <!-- 快速查找 -->
+    <section class="view" id="view-search">
+      <div class="search-row">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" class="search-ico">
+          <circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <input id="searchInput" type="text" placeholder="查找根目录下的文件…" aria-label="查找文件" />
+        <button class="btn btn-mini" id="rescanBtn" title="重新扫描根目录">重建索引</button>
+      </div>
+      <div class="chips" id="catChips" role="tablist" aria-label="文件类别筛选"></div>
+      <p class="search-meta" id="searchMeta">输入文件名即可快速定位</p>
+      <ul class="search-list" id="searchList"></ul>
+      <div class="empty" id="searchEmpty" hidden>
+        <p>没有匹配的文件</p>
+        <p class="empty-sub">试试更短的关键词，或在设置中检查根目录</p>
+      </div>
+      <footer class="hint" id="searchHint">回车打开 · Shift+回车 定位 · ↑↓ 选择 · 类别栏 ←→ 切换</footer>
+    </section>
+
+    <!-- 文本恢复 -->
+    <section class="view" id="view-restore">
+      <p class="restore-note">粘贴带〔编码〕的文本，实时还原真实内容。编码未改动即可还原——从文件里复制出来的也一样。</p>
+      <div class="restore-field">
+        <div class="field-label">粘贴的原文</div>
+        <textarea id="restoreInput" rows="5" placeholder="例如：138****5678〔a3f2b1〕" aria-label="粘贴脱敏文本"></textarea>
+      </div>
+      <div class="restore-field" id="restoreResultField" hidden>
+        <div class="field-label">还原结果</div>
+        <div class="restore-out" id="restoreOut"></div>
+        <p class="restore-warn" id="restoreWarn" hidden></p>
+      </div>
+      <p class="restore-empty" id="restoreEmpty" hidden>未检测到〔编码〕——这段文字没有可还原的内容，上方原文即实际内容。</p>
+      <div class="restore-actions">
+        <button class="btn btn-primary" id="copyRestoreBtn" disabled>复制还原结果</button>
+        <button class="btn btn-ghost" id="clearRestoreBtn">清空</button>
+      </div>
+    </section>
+
+    <!-- 设置 -->
+    <section class="view" id="view-settings">
+      <div class="sec">
+        <h2>文件根目录</h2>
+        <div class="setting-row">
+          <span class="setting-path" id="settingRoot">未配置</span>
+          <button class="btn btn-mini" id="settingRootBtn">选择文件夹</button>
+        </div>
+        <p class="setting-desc" id="indexDesc">配置后可在「快速查找」中秒搜根目录下的所有文件。</p>
+      </div>
+
+      <div class="sec">
+        <h2>导入方式</h2>
+        <div class="seg-group" id="importSeg" role="radiogroup" aria-label="导入方式">
+          <button class="seg is-active" data-v="keep" role="radio" aria-checked="true">保留原文件</button>
+          <button class="seg" data-v="discard" role="radio" aria-checked="false">移入回收站</button>
+        </div>
+        <p class="setting-desc">直接读取拖入或选择的文件，只在根目录生成「_脱敏」或「_还原」结果，不会复制原文件；原位置的文件不会被改动。选择「移入回收站」时，处理完成后会把根目录外的原位置文件移入系统回收站，可随时找回。</p>
+      </div>
+
+      <div class="sec">
+        <h2>同名文件</h2>
+        <div class="seg-group" id="conflictSeg" role="radiogroup" aria-label="同名文件处理方式">
+          <button class="seg is-active" data-v="keep" role="radio" aria-checked="true">保留两份</button>
+          <button class="seg" data-v="overwrite" role="radio" aria-checked="false">覆盖同名</button>
+        </div>
+        <p class="setting-desc">结果文件与根目录中已有结果<b>同名</b>时：「保留两份」会自动加序号（如「_脱敏_02」），旧结果不动；「覆盖同名」会直接更新那份结果文件。还原产物再次脱敏会归回原名（「A_还原」→「A_脱敏」），不会堆成「A_还原_脱敏」。原位置的文件不受影响。</p>
+      </div>
+
+      <div class="sec">
+        <h2>检测项</h2>
+        <div id="toggleList"></div>
+        <p class="policy-note">性别、年龄、出生日期等依法用于判断的信息不作为敏感信息，不会脱敏。人民法院、人民检察院等国家机关名称保留，只脱敏律所、公司等民商事主体。</p>
+      </div>
+
+      <div class="sec">
+        <h2>行为</h2>
+        <div id="behaviorList"></div>
+        <div class="collapse-delay" id="collapseDelayRow">
+          <label class="delay-label" for="collapseDelayInput">自动收起时间</label>
+          <div class="delay-control">
+            <input id="collapseDelayInput" type="number" min="5" max="3600" step="1" value="20"
+                   inputmode="numeric" aria-label="自动收起时间（秒）" />
+            <span class="delay-unit">秒</span>
+            <span class="spacer"></span>
+            <span class="delay-hint" id="collapseDelayHint">修改后立即生效</span>
+          </div>
+          <div class="delay-presets" id="collapseDelayPresets" aria-label="快捷时长">
+            <button type="button" data-sec="20">20 秒</button>
+            <button type="button" data-sec="30">30 秒</button>
+            <button type="button" data-sec="60">1 分钟</button>
+            <button type="button" data-sec="300">5 分钟</button>
+            <button type="button" data-sec="600">10 分钟</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <h2>数据与还原</h2>
+        <p class="setting-desc" id="vaultDesc">映射库仅存本机，已通过系统加密保护。</p>
+        <div class="folder-row">
+          <button class="btn btn-ghost" id="vaultFolderBtn">打开映射库文件夹</button>
+          <span class="folder-note" id="vaultFolderPath"></span>
+        </div>
+        <div class="warning-note">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path d="M8 1.5L15 13.5H1L8 1.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+            <path d="M8 6v3.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            <circle cx="8" cy="11.4" r="0.9" fill="currentColor"/>
+          </svg>
+          <p>映射库（vault 文件）保存着〔编码〕↔ 原文的对应关系，是还原脱敏文件的<b>唯一钥匙</b>。修改、删除或损坏此文件夹中的文件后，已生成的脱敏文件将<b>永远无法还原</b>。请勿手动编辑、移动或重命名其中任何文件。</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <div class="modal-mask" id="confirmMask" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+      <p class="modal-title" id="confirmTitle">确认操作</p>
+      <p class="modal-text" id="confirmText"></p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="confirmCancel">取消</button>
+        <button class="btn btn-danger" id="confirmOk">确定</button>
+      </div>
+    </div>
+  </div>
+  <script src="mock.js"></script>
+  <script src="panel.js"></script>
+</body>
+</html>

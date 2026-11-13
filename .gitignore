@@ -1,0 +1,14 @@
+node_modules/
+temp/
+.workbuddy/
+
+# 测试数据（真实案卷/名册/截图，不公开）
+test/realtest/
+test/samples/
+test/samples-root/
+test/shots/
+test/tmp/
+test/e2e-results.json
+
+*.log
+.DS_Store

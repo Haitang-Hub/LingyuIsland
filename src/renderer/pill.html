@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
+<link rel="stylesheet" href="pill.css" />
+<title>灵屿</title>
+</head>
+<body>
+  <div class="pill" id="pill" role="group" tabindex="-1" aria-label="灵屿：拖入文件脱敏，点击展开面板">
+    <span class="dot" id="dot"></span>
+    <span class="labels">
+      <span class="label label-idle" id="labelIdle">灵屿 · 拖入文件即可脱敏</span>
+      <span class="label label-hover" id="labelHover">点击展开操作面板</span>
+    </span>
+    <button type="button" class="chip" id="clipChip" hidden aria-label="还原文本" title="还原当前复制文本中的脱敏信息">
+      <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+        <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        <path d="M13.7 1.8v3h-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span id="clipText">还原文本</span>
+    </button>
+    <button type="button" class="chip-close" id="clipClose" hidden aria-label="关闭还原提示" title="关闭还原提示">
+      <svg viewBox="0 0 12 12" width="9" height="9" aria-hidden="true">
+        <path d="M2.5 2.5l7 7M9.5 2.5l-7 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <span class="face" id="face" data-mood="idle" aria-hidden="true">
+      <span class="face-inner">
+        <span class="eye left"></span>
+        <span class="eye right"></span>
+      </span>
+    </span>
+    <span class="pulse" id="pulse"></span>
+    <span class="fx-glow" aria-hidden="true"></span>
+    <span class="fx-shine" aria-hidden="true"></span>
+  </div>
+  <span class="island-line" id="islandLine" aria-hidden="true"></span>
+  <script src="mock.js"></script>
+  <script src="pill.js"></script>
+</body>
+</html>
