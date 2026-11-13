@@ -11,7 +11,7 @@ const { COLLAPSE_MIN_SEC, COLLAPSE_MAX_SEC, DEFAULT_COLLAPSE_SEC } = require('./
 const path = require('path');
 
 function register(ctx) {
-  const { store, island, indexer, clipboardWatcher } = ctx;
+  const { store, island, indexer, clipboardWatcher, updater } = ctx;
 
   const ipc_handle = (channel, fn) => ipcMain.handle(channel, fn);
 
@@ -144,6 +144,26 @@ function register(ctx) {
 
   ipc_handle('app:open-path', (_e, p) => { shell.openPath(p); return true; });
   ipc_handle('app:reveal-path', (_e, p) => { shell.showItemInFolder(p); return true; });
+
+  /* ---------------- 版本更新 ---------------- */
+
+  // 手动检查更新（真实网络请求）
+  ipc_handle('update:check', () => updater.checkNow());
+  // 当前更新状态快照（不发网络请求，面板重开时恢复 UI）
+  ipc_handle('update:status', () => updater.getStatus());
+  // 下载并暂存新版本（update:progress / update:staged / update:error 广播进度）
+  ipc_handle('update:install', () => updater.installStaged());
+  // 应用暂存更新：拷贝覆盖 → 重启（before-quit 会先持久化映射库）
+  ipc_handle('update:apply', () => {
+    const r = updater.applyStaged();
+    if (r.ok) {
+      electronApp.relaunch();
+      electronApp.exit(0);
+    }
+    return r;
+  });
+  // 打开 npm 包页（用户选择手动下载时）
+  ipc_handle('update:open-page', () => { shell.openExternal(updater.getStatus().releasePage); return true; });
   ipc_handle('app:version', () => app_ref().getVersion());
   ipc_handle('app:quit', () => app_ref().quit());
   ipc_handle('panel:hide', () => { island.hidePanel(); return true; });

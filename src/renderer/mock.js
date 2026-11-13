@@ -164,7 +164,19 @@ if (!window.island) {
           return { ok: true, restoredPath: 'D:\\工作文档\\人事\\员工花名册_还原.xlsx', resolved: 24 };
         case 'app:open-path': case 'app:reveal-path': case 'app:quit':
         case 'panel:hide': case 'pill:expand': case 'panel:show-tab':
-        case 'app:version': case 'index:rescan':
+        case 'index:rescan':
+        case 'update:open-page':
+          return null;
+        case 'app:version':
+          return '1.0.0';
+        case 'update:check':
+          return { current: '1.0.0', latest: '1.0.0', hasUpdate: false, releasePage: '' };
+        case 'update:status':
+          return { state: 'idle', current: '1.0.0', latest: null, hasUpdate: false, depsChanged: false };
+        case 'update:install':
+          return { ok: false, reason: '浏览器演示模式不支持更新' };
+        case 'update:apply':
+          return { ok: false, reason: '浏览器演示模式不支持更新' };
         default:
           return null;
       }

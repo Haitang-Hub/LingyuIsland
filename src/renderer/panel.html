@@ -136,10 +136,17 @@
         <p class="setting-desc">结果文件与根目录中已有结果<b>同名</b>时：「保留两份」会自动加序号（如「_脱敏_02」），旧结果不动；「覆盖同名」会直接更新那份结果文件。还原产物再次脱敏会归回原名（「A_还原」→「A_脱敏」），不会堆成「A_还原_脱敏」。原位置的文件不受影响。</p>
       </div>
 
-      <div class="sec">
-        <h2>检测项</h2>
-        <div id="toggleList"></div>
-        <p class="policy-note">性别、年龄、出生日期等依法用于判断的信息不作为敏感信息，不会脱敏。人民法院、人民检察院等国家机关名称保留，只脱敏律所、公司等民商事主体。</p>
+      <div class="sec" id="detectSec">
+        <div class="detect-head" id="detectHead" role="button" tabindex="0" aria-expanded="false">
+          <h2>检测项</h2>
+          <span class="detect-summary" id="detectSummary"></span>
+          <span class="spacer"></span>
+          <button class="btn btn-mini" id="detectToggleBtn" tabindex="-1">展开</button>
+        </div>
+        <div id="detectBody" hidden>
+          <div id="toggleList" class="detect-grid"></div>
+          <p class="policy-note">性别、年龄、出生日期等依法用于判断的信息不作为敏感信息，不会脱敏。人民法院、人民检察院等国家机关名称保留，只脱敏律所、公司等民商事主体。</p>
+        </div>
       </div>
 
       <div class="sec">
@@ -178,6 +185,21 @@
             <circle cx="8" cy="11.4" r="0.9" fill="currentColor"/>
           </svg>
           <p>映射库（vault 文件）保存着〔编码〕↔ 原文的对应关系，是还原脱敏文件的<b>唯一钥匙</b>。修改、删除或损坏此文件夹中的文件后，已生成的脱敏文件将<b>永远无法还原</b>。请勿手动编辑、移动或重命名其中任何文件。</p>
+        </div>
+      </div>
+
+      <div class="sec" id="aboutSec">
+        <h2>关于</h2>
+        <div class="setting-row">
+          <span class="setting-path" id="aboutVersion">灵屿 · 隐私灵动岛</span>
+          <button class="btn btn-mini" id="updateCheckBtn">检查更新</button>
+        </div>
+        <div id="updateBox" hidden>
+          <p class="setting-desc" id="updateStatusText"></p>
+          <div class="folder-row" id="updateActions">
+            <button class="btn btn-ghost" id="updateInstallBtn">立即更新</button>
+            <button class="btn btn-ghost" id="updatePageBtn">打开下载页</button>
+          </div>
         </div>
       </div>
     </section>

@@ -8,6 +8,8 @@ const AdmZip = require('adm-zip');
 const { detect, isValidIdCard, luhnValid } = require('../src/core/detector');
 const { Vault, maskText, restoreText, buildMasked, hasCodes } = require('../src/core/masker');
 const { maskFile, restoreFile, decodeBuffer, encodeText, maskedPathOf } = require('../src/core/fileproc');
+const { compareVersions } = require('../src/core/version');
+const { copyTreeSync, depsEqual, SKIP_COPY, createUpdater } = require('../src/main/updater');
 
 /* ---------------- 动态构造合法样本 ---------------- */
 
@@ -801,6 +803,72 @@ test('脱敏/还原可写到指定路径，不传时行为不变', () => {
 
   const r2 = maskFile(src, v);
   assert.strictEqual(r2.maskedPath, path.join(dir, '源_脱敏.txt'), '不传 outPath 应保持原行为');
+});
+
+/* ---------------- 版本更新 ---------------- */
+
+test('compareVersions：相等/小于/大于', () => {
+  assert.strictEqual(compareVersions('1.0.0', '1.0.0'), 0);
+  assert.strictEqual(compareVersions('1.0.0', '1.0.1'), -1);
+  assert.strictEqual(compareVersions('1.0.1', '1.0.0'), 1);
+  assert.strictEqual(compareVersions('1.2.0', '9.9.9'), -1);
+});
+
+test('compareVersions：多位数与前缀 v', () => {
+  assert.strictEqual(compareVersions('v1.10.0', '1.9.0'), 1);
+  assert.strictEqual(compareVersions('2.0.0', '10.0.0'), -1, '逐段数字比较，不能按字符串比');
+  assert.strictEqual(compareVersions('1.0.0-rc1', '1.0.0'), 0, '预发布后缀段解析为 0，宽松处理');
+});
+
+test('compareVersions：非法输入不抛错', () => {
+  assert.strictEqual(compareVersions('', '1.0.0'), -1);
+  assert.strictEqual(compareVersions(null, '1.0.0'), -1);
+  assert.strictEqual(compareVersions('abc', '1.0.0'), -1);
+});
+
+test('depsEqual：依赖变化检测', () => {
+  assert.strictEqual(depsEqual({ a: '^1.0.0', b: '^2.0.0' }, { b: '^2.0.0', a: '^1.0.0' }), true);
+  assert.strictEqual(depsEqual({ a: '^1.0.0' }, { a: '^1.0.1' }), false);
+  assert.strictEqual(depsEqual({ a: '^1.0.0' }, { a: '^1.0.0', b: '^2.0.0' }), false);
+  assert.strictEqual(depsEqual(undefined, {}), true);
+  assert.strictEqual(depsEqual({}, undefined), true);
+});
+
+test('applyStaged：拷贝覆盖与跳过列表（临时目录模拟）', () => {
+  const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'lingyu-upd-'));
+  try {
+    // 模拟 appDir：含旧文件 + node_modules / .git / update-staging 应被跳过
+    const appDir = path.join(tmp, 'app');
+    fs.mkdirSync(path.join(appDir, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(appDir, 'node_modules', 'electron'), { recursive: true });
+    fs.mkdirSync(path.join(appDir, '.git'), { recursive: true });
+    fs.writeFileSync(path.join(appDir, 'src', 'old.txt'), 'OLD');
+    fs.writeFileSync(path.join(appDir, 'package.json'), '{"version":"1.0.0"}');
+    fs.writeFileSync(path.join(appDir, 'node_modules', 'electron', 'keep.txt'), 'MUST-STAY');
+    fs.writeFileSync(path.join(appDir, '.git', 'HEAD'), 'MUST-STAY');
+
+    // 模拟暂存包 staging/package
+    const pkg = path.join(tmp, 'stage', 'package');
+    fs.mkdirSync(path.join(pkg, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(pkg, 'src', 'old.txt'), 'NEW');
+    fs.writeFileSync(path.join(pkg, 'src', 'new.txt'), 'ADDED');
+    fs.writeFileSync(path.join(pkg, 'package.json'), '{"version":"9.9.9"}');
+
+    const up = createUpdater({ appDir, currentVersion: '1.0.0', onBroadcast: () => {} });
+    const r = up.applyStaged();
+    assert.strictEqual(r.ok, false, '未进入 staged 状态时不应应用');
+
+    // 直接验证 copyTreeSync（applyStaged 的核心动作），并用 SKIP_COPY 跳过运行时目录
+    copyTreeSync(pkg, appDir, SKIP_COPY);
+    assert.strictEqual(fs.readFileSync(path.join(appDir, 'src', 'old.txt'), 'utf8'), 'NEW', '旧文件被覆盖');
+    assert.strictEqual(fs.readFileSync(path.join(appDir, 'src', 'new.txt'), 'utf8'), 'ADDED', '新文件被加入');
+    assert.strictEqual(fs.readFileSync(path.join(appDir, 'package.json'), 'utf8'), '{"version":"9.9.9"}');
+    assert.strictEqual(fs.readFileSync(path.join(appDir, 'node_modules', 'electron', 'keep.txt'), 'utf8'),
+      'MUST-STAY', 'node_modules 不被触碰');
+    assert.strictEqual(fs.readFileSync(path.join(appDir, '.git', 'HEAD'), 'utf8'), 'MUST-STAY', '.git 不被触碰');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 /* ---------------- 输出 ---------------- */

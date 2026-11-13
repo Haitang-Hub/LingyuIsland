@@ -11,6 +11,7 @@ const INVOKE_CHANNELS = new Set([
   'clipboard:write-text',
   'app:open-path', 'app:reveal-path', 'app:version', 'app:quit',
   'app:open-vault-folder',
+  'update:check', 'update:status', 'update:install', 'update:apply', 'update:open-page',
   'panel:hide', 'panel:show-tab', 'pill:expand', 'pill:collapse', 'pill:peek',
 ]);
 
@@ -18,6 +19,7 @@ const SEND_CHANNELS = new Set([
   'clip:found', 'clip:cleared', 'mask:progress', 'mask:done',
   'index:updated', 'settings:changed', 'panel:show-tab', 'history:changed',
   'pill:state', 'panel:state',
+  'update:found', 'update:progress', 'update:staged', 'update:error',
 ]);
 
 contextBridge.exposeInMainWorld('island', {

@@ -1,6 +1,7 @@
 node_modules/
 temp/
 .workbuddy/
+update-staging/
 
 # 测试数据（真实案卷/名册/截图，不公开）
 test/realtest/

@@ -425,6 +425,41 @@ input[type="text"]::placeholder, textarea::placeholder { color: var(--ink-3); }
 .switch.on { background: var(--green); border-color: var(--green); }
 .switch.on::after { transform: translateX(14px); background: #06220f; }
 
+/* ---------------- 设置：检测项（折叠 + 紧凑网格） ---------------- */
+
+.detect-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px -8px -2px;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  user-select: none;
+}
+.detect-head:hover { background: var(--surface-2); }
+.detect-head h2 { margin: 0; }
+.detect-head .spacer { flex: 1; }
+.detect-summary {
+  font-size: 11px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.detect-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 14px;
+  row-gap: 2px;
+  margin-top: 2px;
+}
+.detect-grid .switch-row { padding: 4px 0; }
+.detect-grid .switch-row .sw-label { font-size: 11.5px; }
+.detect-grid .policy-note { margin-top: 10px; }
+
 /* ---------------- 设置：自定义自动收起时长 ---------------- */
 
 .collapse-delay {

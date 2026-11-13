@@ -25,11 +25,17 @@ const els = {
   restoreWarn: $('#restoreWarn'), copyRestoreBtn: $('#copyRestoreBtn'),
   clearRestoreBtn: $('#clearRestoreBtn'),
   toggleList: $('#toggleList'), behaviorList: $('#behaviorList'),
+  detectHead: $('#detectHead'), detectBody: $('#detectBody'),
+  detectSummary: $('#detectSummary'), detectToggleBtn: $('#detectToggleBtn'),
   settingRoot: $('#settingRoot'), settingRootBtn: $('#settingRootBtn'),
   indexDesc: $('#indexDesc'), vaultDesc: $('#vaultDesc'),
   vaultFolderBtn: $('#vaultFolderBtn'), vaultFolderPath: $('#vaultFolderPath'),
   collapseDelayRow: $('#collapseDelayRow'), collapseDelayInput: $('#collapseDelayInput'),
   collapseDelayHint: $('#collapseDelayHint'), collapseDelayPresets: $('#collapseDelayPresets'),
+  aboutVersion: $('#aboutVersion'), updateCheckBtn: $('#updateCheckBtn'),
+  updateBox: $('#updateBox'),
+  updateStatusText: $('#updateStatusText'), updateInstallBtn: $('#updateInstallBtn'),
+  updatePageBtn: $('#updatePageBtn'),
   toasts: $('#toasts'),
 };
 
@@ -589,12 +595,15 @@ function renderSettings(st) {
   const s = st.settings;
   renderImportSeg(s);
   renderConflictSeg(s);
-  // 检测项
+  // 检测项（紧凑网格，折叠在 .detect-head，摘要实时更新）
   els.toggleList.innerHTML = '';
   for (const [key, label] of DETECT_ITEMS) {
-    els.toggleList.appendChild(makeSwitch(label, '', s.toggles[key], (v) =>
-      window.island.invoke('settings:set', { toggles: { [key]: v } })));
+    els.toggleList.appendChild(makeSwitch(label, '', s.toggles[key], (v) => {
+      window.island.invoke('settings:set', { toggles: { [key]: v } });
+      updateDetectSummary();
+    }));
   }
+  updateDetectSummary();
   // 行为
   els.behaviorList.innerHTML = '';
   for (const [key, label, desc] of BEHAVIORS) {
@@ -711,6 +720,137 @@ for (const b of els.collapseDelayPresets.children) {
   });
 }
 
+/* ---------------- 检测项折叠 ---------------- */
+
+// 展开状态持久化（默认收起：检测项不常改，不占页面空间）
+const DETECT_EXPANDED_KEY = 'lingyu.detectExpanded';
+
+function setDetectExpanded(expanded) {
+  els.detectBody.hidden = !expanded;
+  els.detectHead.setAttribute('aria-expanded', String(expanded));
+  els.detectToggleBtn.textContent = expanded ? '收起' : '展开';
+  try { localStorage.setItem(DETECT_EXPANDED_KEY, expanded ? '1' : '0'); } catch { /* ignore */ }
+}
+
+function updateDetectSummary() {
+  const total = els.toggleList.querySelectorAll('.switch').length;
+  const on = els.toggleList.querySelectorAll('.switch.on').length;
+  els.detectSummary.textContent = `已启用 ${on}/${total}`;
+}
+
+els.detectHead.addEventListener('click', () =>
+  setDetectExpanded(els.detectBody.hidden));
+els.detectHead.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetectExpanded(els.detectBody.hidden); }
+});
+// 初始化折叠状态（localStorage 缺省 → 收起）
+setDetectExpanded((() => {
+  try { return localStorage.getItem(DETECT_EXPANDED_KEY) === '1'; } catch { return false; }
+})());
+
+/* ---------------- 版本更新 ---------------- */
+
+// 与主进程 updater 状态机同步的本地镜像：idle / available / downloading / staged
+let updateState = { state: 'idle', latest: null, depsChanged: false, hasUpdate: false };
+let updateCurrentVersion = '';
+
+function renderUpdateUI() {
+  const st = updateState;
+  els.updateBox.hidden = !(st.hasUpdate || st.state === 'staged');
+  if (els.updateBox.hidden) return;
+  // 安装版（asar 只读）不支持就地更新：隐藏安装按钮，引导去下载页
+  els.updateInstallBtn.hidden = !!st.packaged;
+  if (st.packaged) {
+    els.updateStatusText.textContent = `发现新版本 v${st.latest}（当前 v${updateCurrentVersion}），请前往下载页获取安装包`;
+    return;
+  }
+  if (st.state === 'downloading') {
+    els.updateStatusText.textContent = '正在下载新版本…';
+    els.updateInstallBtn.disabled = true;
+  } else if (st.state === 'extract') {
+    els.updateStatusText.textContent = '正在解压校验…';
+    els.updateInstallBtn.disabled = true;
+  } else if (st.state === 'staged') {
+    els.updateStatusText.textContent = `新版本 v${st.latest} 已就绪，重启应用完成安装`
+      + (st.depsChanged ? '。注意：依赖有变化，重启后需在项目目录手动执行 npm install。' : '');
+    els.updateInstallBtn.disabled = false;
+    els.updateInstallBtn.textContent = '重启完成安装';
+  } else {
+    els.updateStatusText.textContent = `发现新版本 v${st.latest}（当前 v${updateCurrentVersion}）`;
+    els.updateInstallBtn.disabled = false;
+    els.updateInstallBtn.textContent = '立即更新';
+  }
+}
+
+els.updateCheckBtn.addEventListener('click', async () => {
+  els.updateCheckBtn.disabled = true;
+  els.updateCheckBtn.textContent = '检查中…';
+  try {
+    const r = await window.island.invoke('update:check');
+    if (r.hasUpdate) {
+      updateState = { state: 'idle', latest: r.latest, depsChanged: false, hasUpdate: true, packaged: !!r.packaged };
+      renderUpdateUI();
+    } else {
+      toast(`已是最新版本 v${r.current}`, 'ok');
+      updateState = { state: 'idle', latest: null, depsChanged: false, hasUpdate: false };
+      renderUpdateUI();
+    }
+  } catch (err) {
+    toast('检查更新失败：' + (err && err.message || err), 'err');
+  } finally {
+    els.updateCheckBtn.disabled = false;
+    els.updateCheckBtn.textContent = '检查更新';
+  }
+});
+
+els.updateInstallBtn.addEventListener('click', async () => {
+  if (updateState.state === 'staged') {
+    const ok = await uiConfirm('重启应用以完成安装？未完成的脱敏任务会继续保留，映射库已自动保存。', '重启');
+    if (!ok) return;
+    try {
+      await window.island.invoke('update:apply'); // 成功后主进程直接重启，不会走到下一行
+    } catch (err) {
+      toast('安装失败：' + (err && err.message || err), 'err');
+    }
+    return;
+  }
+  updateState.state = 'downloading';
+  renderUpdateUI();
+  const r = await window.island.invoke('update:install');
+  if (!r.ok) {
+    updateState.state = 'idle';
+    renderUpdateUI();
+    toast('更新失败：' + (r.reason || '未知原因'), 'err');
+  }
+});
+
+els.updatePageBtn.addEventListener('click', () => window.island.invoke('update:open-page'));
+
+window.island.on('update:found', (info) => {
+  // 启动时自动检查命中 → 提示 + 展开关于区块状态
+  updateState = { state: 'idle', latest: info.latest, depsChanged: false, hasUpdate: true, packaged: !!info.packaged };
+  renderUpdateUI();
+  toast(`发现新版本 v${info.latest}，可在「设置 → 关于」中更新`, 'ok');
+});
+
+window.island.on('update:progress', (p) => {
+  updateState.state = p.phase === 'extract' ? 'extract' : 'downloading';
+  els.updateStatusText.textContent = p.phase === 'extract'
+    ? '正在解压校验…'
+    : `正在下载新版本… ${p.pct != null ? p.pct + '%' : ''}`;
+});
+
+window.island.on('update:staged', (info) => {
+  updateState = { state: 'staged', latest: info.latest, depsChanged: !!info.depsChanged, hasUpdate: true };
+  renderUpdateUI();
+});
+
+window.island.on('update:error', (info) => {
+  updateState.state = 'idle';
+  renderUpdateUI();
+  toast('更新失败：' + (info && info.message || '未知原因'), 'err');
+});
+
 /* ---------------- 事件同步 ---------------- */
 
 window.island.on('history:changed', () => loadHistory());
@@ -735,4 +875,18 @@ window.island.on('index:updated', (stats) => {
   const st = await window.island.invoke('settings:get');
   renderSettings(st);
   buildChips();
+  // 关于区块：当前版本号 + 恢复更新状态（面板重开时 staged/available 不丢）
+  try {
+    updateCurrentVersion = await window.island.invoke('app:version');
+    els.aboutVersion.textContent = `灵屿 · 隐私灵动岛 v${updateCurrentVersion}`;
+    const us = await window.island.invoke('update:status');
+    updateState = {
+      state: us.state === 'staged' ? 'staged' : 'idle',
+      latest: us.latest,
+      depsChanged: !!us.depsChanged,
+      hasUpdate: !!us.hasUpdate,
+      packaged: !!us.packaged,
+    };
+    renderUpdateUI();
+  } catch { /* 启动 IPC 竞态时静默，settings:changed 广播会重绘 */ }
 })();

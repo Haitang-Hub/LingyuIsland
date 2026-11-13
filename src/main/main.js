@@ -12,6 +12,7 @@ const { Island } = require('./island');
 const { Indexer } = require('./indexer');
 const { ClipboardWatcher } = require('./clipboard');
 const { register } = require('./ipc');
+const { createUpdater } = require('./updater');
 const { createTray } = require('./tray');
 
 // E2E 跑测试时使用独立 userData：不与正在运行的应用实例争单实例锁/磁盘缓存
@@ -45,7 +46,7 @@ if (process.platform === 'darwin') {
 // 关闭硬件加速问题排查开关（默认开启加速；透明窗在部分驱动下需软渲染，按需调整）
 // app.disableHardwareAcceleration();
 
-let store, island, indexer, clipboardWatcher, tray;
+let store, island, indexer, clipboardWatcher, tray, updater;
 
 app.whenReady().then(() => {
   store = new Store();
@@ -66,9 +67,23 @@ app.whenReady().then(() => {
     () => island.broadcast('clip:cleared')
   );
 
-  register({ store, island, indexer, clipboardWatcher });
+  updater = createUpdater({
+    appDir: path.resolve(__dirname, '..', '..'),
+    currentVersion: app.getVersion(),
+    onBroadcast: (ch, payload) => island.broadcast(ch, payload),
+    isPackaged: app.isPackaged,
+  });
+
+  register({ store, island, indexer, clipboardWatcher, updater });
 
   tray = createTray(island, store);
+
+  // 启动后延迟自动检查更新（E2E 绝不发真实网络请求）
+  if (!process.env.ISLAND_E2E) {
+    setTimeout(() => {
+      updater.checkNow().catch(() => { /* 静默：更新检查失败不打扰用户 */ });
+    }, 5000);
+  }
 
   // 第二次启动实例 → 聚焦面板
   app.on('second-instance', () => island.showPanel());
@@ -80,7 +95,7 @@ app.whenReady().then(() => {
 
   // E2E 自动化测试入口
   if (process.env.ISLAND_E2E) {
-    require('../../test/e2e').run({ store, island, indexer });
+    require('../../test/e2e').run({ store, island, indexer, updater });
   }
 });
 
