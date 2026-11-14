@@ -382,8 +382,12 @@ window.island.on('mask:progress', ({ i, total }) => {
 window.island.on('mask:done', (done) => {
   if (done.error === 'no-root') {
     setState('idle');
-    labelIdle.textContent = '请先在设置中配置根目录';
-    setTimeout(refreshIdleLabel, 3000);
+    // 未配置根目录是拖入失败的主因：必须让用户明确看见，而不是 3 秒一闪而过
+    labelIdle.textContent = '未配置根目录，正在为你打开设置…';
+    pill.classList.add('warn');
+    setTimeout(() => { pill.classList.remove('warn'); refreshIdleLabel(); }, 8000);
+    // 直接弹出面板的设置页（面板内同步有 toast 提示），省得用户去找入口
+    window.island.invoke('panel:show-tab', 'settings');
     return;
   }
   if (done.masked > 0) maskedCount += done.masked;
@@ -561,5 +565,12 @@ window.addEventListener('drop', async (e) => {
     .filter(Boolean);
   if (paths.length === 0) return;
   setBusy(`正在识别并处理 ${paths.length} 个文件…`);
-  await window.island.invoke('mask:files', paths);
+  try {
+    await window.island.invoke('mask:files', paths);
+  } catch (err) {
+    // invoke 层面的异常（如 IPC 竞态）也不能静默，否则胶囊永远卡在忙碌态
+    setState('idle');
+    labelIdle.textContent = '处理失败：' + String(err && err.message || err).slice(0, 30);
+    setTimeout(refreshIdleLabel, 5000);
+  }
 });

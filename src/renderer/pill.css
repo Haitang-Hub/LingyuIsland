@@ -313,6 +313,7 @@ body { position: relative; display: flex; align-items: center; justify-content: 
 /* 忙碌 */
 .pill.busy .label-idle { color: #ffb340; }
 .pill.ok .label-idle { color: var(--green); }
+.pill.warn .label-idle { color: #ff6b6b; }
 
 /* ---------------- 收起态：屏幕顶边的细线 ----------------
    主进程切到收起态时窗口已贴住屏幕顶边并开启点击穿透（悬停自动展开），
