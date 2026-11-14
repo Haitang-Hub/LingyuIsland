@@ -572,6 +572,29 @@ function makeSwitch(label, desc, on, onChange) {
   return row;
 }
 
+/** 检测项紧凑勾选框：勾选框在前，label 在后（与 makeSwitch 的开关样式区分） */
+function makeCheck(label, on, onChange) {
+  const row = document.createElement('div');
+  row.className = 'check-row';
+  const box = document.createElement('button');
+  box.className = 'checkbox' + (on ? ' on' : '');
+  box.setAttribute('role', 'checkbox');
+  box.setAttribute('aria-checked', String(on));
+  box.setAttribute('aria-label', label);
+  box.addEventListener('click', () => {
+    const next = !box.classList.contains('on');
+    box.classList.toggle('on', next);
+    box.setAttribute('aria-checked', String(next));
+    onChange(next);
+  });
+  const lab = document.createElement('span');
+  lab.className = 'check-label';
+  lab.textContent = label;
+  row.appendChild(box);
+  row.appendChild(lab);
+  return row;
+}
+
 function renderImportSeg(s) {
   for (const b of els.importSeg.children) {
     const active = b.dataset.v === (s.importBehavior || 'keep');
@@ -595,10 +618,10 @@ function renderSettings(st) {
   const s = st.settings;
   renderImportSeg(s);
   renderConflictSeg(s);
-  // 检测项（紧凑网格，折叠在 .detect-head，摘要实时更新）
+  // 检测项（紧凑网格，勾选框在前，折叠在 .detect-head，摘要实时更新）
   els.toggleList.innerHTML = '';
   for (const [key, label] of DETECT_ITEMS) {
-    els.toggleList.appendChild(makeSwitch(label, '', s.toggles[key], (v) => {
+    els.toggleList.appendChild(makeCheck(label, s.toggles[key], (v) => {
       window.island.invoke('settings:set', { toggles: { [key]: v } });
       updateDetectSummary();
     }));
@@ -733,8 +756,8 @@ function setDetectExpanded(expanded) {
 }
 
 function updateDetectSummary() {
-  const total = els.toggleList.querySelectorAll('.switch').length;
-  const on = els.toggleList.querySelectorAll('.switch.on').length;
+  const total = els.toggleList.querySelectorAll('.checkbox').length;
+  const on = els.toggleList.querySelectorAll('.checkbox.on').length;
   els.detectSummary.textContent = `已启用 ${on}/${total}`;
 }
 

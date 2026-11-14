@@ -399,7 +399,7 @@ async function run({ store, island, indexer, updater }) {
     })()`);
     console.log('DBG startup replay:', JSON.stringify(dbg));
     await sleep(400);
-    const switchCount = await wc.executeJavaScript(`document.querySelectorAll('.switch').length`);
+    const switchCount = await wc.executeJavaScript(`document.querySelectorAll('.switch,.checkbox').length`);
     check('设置项渲染', () => assert.ok(switchCount >= 11, 'switches=' + switchCount + ' dbg=' + JSON.stringify(dbg)));
 
     // 检测项折叠：摘要计数 + 展开/收起（localStorage 可能跨次残留 → 先强制归零到收起态再验证）
@@ -413,7 +413,7 @@ async function run({ store, island, indexer, updater }) {
       out.btnCollapsed = document.getElementById('detectToggleBtn').textContent;
       head.click(); // 展开
       out.expandedVisible = !body.hidden;
-      out.gridSwitches = document.querySelectorAll('#toggleList .switch').length;
+      out.gridSwitches = document.querySelectorAll('#toggleList .checkbox').length;
       out.btnExpanded = document.getElementById('detectToggleBtn').textContent;
       out.ariaExpanded = head.getAttribute('aria-expanded');
       head.click(); // 恢复收起，保持设置页紧凑
