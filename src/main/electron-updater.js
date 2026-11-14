@@ -57,6 +57,16 @@ function createAutoUpdater({ currentVersion, onBroadcast, feedUrl } = {}) {
     };
   });
 
+  /** 把 electron-updater 的网络错误翻译成用户能看懂的中文 */
+  function friendlyError(err) {
+    const raw = String(err && err.message || err);
+    if (/ERR_CONNECTION_RESET|ERR_CONNECTION_TIMED_OUT|ERR_CONNECTION_REFUSED|ERR_NAME_NOT_RESOLVED|ERR_INTERNET_DISCONNECTED|ENOTFOUND|ECONNRESET|ETIMEDOUT|timeout/i.test(raw)) {
+      return '无法连接更新服务器（GitHub）。请检查网络或代理后重试，也可点「打开下载页」手动下载安装包。';
+    }
+    if (/404/.test(raw)) return '更新服务器上暂时没有找到版本信息，请稍后重试。';
+    return '检查更新失败：' + raw.slice(0, 80);
+  }
+
   /** 检查更新：返回 { current, latest, hasUpdate, packaged, releasePage } */
   async function checkNow() {
     if (state === 'downloading') return lastCheck || { current: currentVersion, hasUpdate: false, packaged: true };
@@ -80,9 +90,9 @@ function createAutoUpdater({ currentVersion, onBroadcast, feedUrl } = {}) {
       return lastCheck;
     } catch (err) {
       setState('idle');
-      const message = String(err && err.message || err);
-      broadcast('update:error', { message });
-      return { current: currentVersion, latest: null, hasUpdate: false, packaged: true, error: message, releasePage: RELEASES_PAGE };
+      const message = friendlyError(err);
+      // 不广播 update:error：启动时的自动检查应保持静默；手动检查经返回值 error 字段提示
+      return { current: currentVersion, latest: null, hasUpdate: false, error: message, packaged: true, releasePage: RELEASES_PAGE };
     }
   }
 
@@ -104,7 +114,7 @@ function createAutoUpdater({ currentVersion, onBroadcast, feedUrl } = {}) {
       return { ok: true, staged: true, depsChanged: false, packaged: true };
     } catch (err) {
       setState('idle');
-      const message = String(err && err.message || err);
+      const message = friendlyError(err);
       broadcast('update:error', { message });
       return { ok: false, reason: message, packaged: true };
     }

@@ -808,7 +808,10 @@ els.updateCheckBtn.addEventListener('click', async () => {
   els.updateCheckBtn.textContent = '检查中…';
   try {
     const r = await window.island.invoke('update:check');
-    if (r.hasUpdate) {
+    if (r.error) {
+      // 检查失败 ≠ 没有新版本：明确报错，不误导用户「已是最新」
+      toast('检查更新失败：' + r.error, 'err');
+    } else if (r.hasUpdate) {
       updateState = { state: 'idle', latest: r.latest, depsChanged: false, hasUpdate: true, packaged: !!r.packaged };
       renderUpdateUI();
     } else {
