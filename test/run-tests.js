@@ -5,7 +5,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const AdmZip = require('adm-zip');
-const { detect, isValidIdCard, luhnValid } = require('../src/core/detector');
+const { detect, isValidIdCard, isValidUscc, luhnValid } = require('../src/core/detector');
 const { Vault, maskText, restoreText, buildMasked, hasCodes } = require('../src/core/masker');
 const { maskFile, restoreFile, decodeBuffer, encodeText, maskedPathOf } = require('../src/core/fileproc');
 const { compareVersions } = require('../src/core/version');
@@ -100,6 +100,75 @@ test('检测：称呼后缀姓名（王芳女士→王芳）', () => {
 test('检测：无语境姓名不误报（张伟）', () => {
   const { items } = detect(SAMPLE);
   assert.ok(!items.some((i) => i.type === 'name' && i.value.includes('张伟')));
+});
+
+/* 可选检测项：默认关闭，显式开启才生效 */
+
+test('检测：手机号分隔格式（138-1234-5678 / 138 1234 5678）', () => {
+  for (const text of ['联系电话138-1234-5678请查收', '电话138 1234 5678备用', '手机13998765432']) {
+    const items = detect(text).items.filter((i) => i.type === 'phone');
+    assert.strictEqual(items.length, 1, text + ' → ' + JSON.stringify(items));
+  }
+});
+
+test('可选检测：固定电话/400 热线（默认关，开启后生效）', () => {
+  const text = '联系电话0755-1234567，传真 020-87654321，客服400 123 4567。';
+  assert.strictEqual(detect(text).items.filter((i) => i.type === 'landline').length, 0, '默认应关闭');
+  const items = detect(text, { toggles: { landline: true } }).items.filter((i) => i.type === 'landline');
+  assert.strictEqual(items.length, 3, JSON.stringify(items));
+});
+
+test('可选检测：微信号/QQ号（关键词引导）', () => {
+  const text = '微信号：Lawyer_001，QQ：123456789。';
+  assert.strictEqual(detect(text).items.filter((i) => i.type === 'im').length, 0, '默认应关闭');
+  const items = detect(text, { toggles: { im: true } }).items.filter((i) => i.type === 'im');
+  assert.deepStrictEqual(items.map((i) => i.value), ['Lawyer_001', '123456789'], JSON.stringify(items));
+});
+
+test('可选检测：港澳台证件（回乡证/台胞证）', () => {
+  const text = '回乡证H12345678，台胞证：12345678。';
+  assert.strictEqual(detect(text).items.filter((i) => i.type === 'hkmt').length, 0, '默认应关闭');
+  const items = detect(text, { toggles: { hkmt: true } }).items.filter((i) => i.type === 'hkmt');
+  assert.deepStrictEqual(items.map((i) => i.value), ['H12345678', '12345678'], JSON.stringify(items));
+});
+
+test('可选检测：统一社会信用代码（校验码验算）', () => {
+  // 按 GB 32100-2015 构造校验位合法的代码
+  const CS = '0123456789ABCDEFGHJKLMNPQRTUWXY';
+  const W = [1, 3, 9, 27, 19, 26, 16, 17, 20, 29, 25, 13, 8, 24, 10, 30, 28];
+  const base17 = '91330106MA27W1QX1';
+  let sum = 0;
+  for (let i = 0; i < 17; i++) sum += CS.indexOf(base17[i]) * W[i];
+  const valid = base17 + CS[(31 - (sum % 31)) % 31];
+  assert.strictEqual(isValidUscc(valid), true);
+  assert.strictEqual(isValidUscc(valid.slice(0, 17) + (valid[17] === 'A' ? 'B' : 'A')), false, '校验码错误应拒绝');
+
+  const text = `统一社会信用代码：${valid}`;
+  assert.strictEqual(detect(text).items.filter((i) => i.type === 'uscc').length, 0, '默认应关闭');
+  const items = detect(text, { toggles: { uscc: true } }).items.filter((i) => i.type === 'uscc');
+  assert.deepStrictEqual(items.map((i) => i.value), [valid], JSON.stringify(items));
+});
+
+test('可选检测：新类型的屏蔽值构造与还原', () => {
+  const v = new Vault();
+  const text = '电话0755-1234567，微信号：Lawyer_001，回乡证H12345678';
+  const { masked, items } = maskText(text, v, { toggles: { landline: true, im: true, hkmt: true } });
+  assert.strictEqual(items.filter((i) => i.type === 'landline').length, 1);
+  const r = restoreText(masked, v);
+  assert.strictEqual(r.text, text, '屏蔽后应可完整还原');
+});
+
+test('案号：号之一后缀', () => {
+  const { items } = detect('（2020）粤0882民初1234号之一');
+  const c = items.filter((i) => i.type === 'caseNo');
+  assert.strictEqual(c.length, 1, JSON.stringify(items));
+  assert.ok(c[0].value.endsWith('号之一'), c[0].value);
+});
+
+test('检测：银行卡关键词补充（银行账号/账号）', () => {
+  const text = '银行账号6222020200112233456789';
+  const { items } = detect(text);
+  assert.ok(items.some((i) => i.type === 'bank' && i.value.startsWith('622202')), JSON.stringify(items));
 });
 
 /* 法律文书语境：角色标签命中、地名/机构名与普通词不误伤 */

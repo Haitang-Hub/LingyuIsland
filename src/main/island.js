@@ -155,7 +155,7 @@ class Island {
   }
 
   hidePanel() {
-    if (!this.panel || !this.panel.isVisible() || this.panel.isDestroyed()) return;
+    if (!this.panel || !this.panel.isVisible()) return;
     this._stopFade();
     // 关闭保持立即隐藏（不淡出）：与「点击面板外即收起」的即时语义一致，
     // 也避免淡出窗口期间 isVisible() 仍为 true 造成交互判断歧义

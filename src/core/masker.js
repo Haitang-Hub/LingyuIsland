@@ -21,6 +21,7 @@ const TYPE_LABEL = {
   phone: '手机号', idCard: '身份证', bank: '银行卡', email: '邮箱',
   name: '姓名', address: '住址', passport: '护照', plate: '车牌',
   caseNo: '案号', license: '执业证号', org: '机构名称',
+  landline: '固定电话', im: '社交账号', hkmt: '港澳台证件', uscc: '统一社会信用代码',
 };
 
 /* ------------------------------------------------------------------ */
@@ -127,6 +128,16 @@ function buildMasked(type, value, code) {
     }
     case 'license': // 1440……7921〔..〕
       return `${value.slice(0, 4)}……${value.slice(-4)}〔${code}〕`;
+    case 'landline': { // 075****5678〔..〕：按数字位对齐手机号风格
+      const digits = value.replace(/\D/g, '');
+      return `${digits.slice(0, 3)}****${digits.slice(-4)}〔${code}〕`;
+    }
+    case 'im': // we***89〔..〕：社交账号保留首尾各 2 字符
+      return `${value.slice(0, 2)}***${value.slice(-2)}〔${code}〕`;
+    case 'hkmt': // H******8〔..〕：同护照风格
+      return `${value[0]}******${value.slice(-1)}〔${code}〕`;
+    case 'uscc': // 91……WXYZ〔..〕：统一社会信用代码留首 2 尾 4
+      return `${value.slice(0, 2)}……${value.slice(-4)}〔${code}〕`;
     case 'org': { // 广东……律师事务所〔..〕
       const suffix = ORG_SUFFIXES.find((s) => value.endsWith(s)) || '';
       const brand = suffix ? value.slice(0, -suffix.length) : value;
@@ -185,6 +196,10 @@ function restoreText(text, vault) {
     caseNo: '[（(]\\d{4}[）)]……号',
     license: '[A-Za-z0-9]{4}……[A-Za-z0-9]{4}',
     org: `[\\u4e00-\\u9fa5]{2}……(?:${ORG_SUFFIX_ALT})`,
+    landline: '\\d{3}\\*{4}\\d{4}',
+    im: '.{2}\\*{3}.{2}',
+    hkmt: '[A-Za-z]\\*{6}[0-9A-Za-z]',
+    uscc: '[0-9A-HJ-NPQRTUWXY]{2}……[0-9A-HJ-NPQRTUWXY]{4}',
   };
 
   let out = text;

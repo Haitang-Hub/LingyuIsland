@@ -195,8 +195,8 @@ const OCCUPATIONS = [
 /* ------------------------------------------------------------------ */
 
 const RE = {
-  // 手机号（13-19 号段；边界断言避免命中更长数字串/身份证片段）
-  phone: /(?<![\dXx])(?:\+?86[-\s·]?)?1[3-9]\d{9}(?![\d])/g,
+  // 手机号（13-19 号段；允许 138-1234-5678 / 138 1234 5678 分隔格式；边界断言避免命中更长数字串/身份证片段）
+  phone: /(?<![\dXx])(?:\+?86[-\s·]?)?1[3-9]\d[-\s]?\d{4}[-\s]?\d{4}(?!\d)/g,
   // 身份证 18 位（结构校验 + 校验码验算在代码中完成）
   idCard: /(?<!\d)[1-9]\d{5}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx](?!\d)/g,
   // 银行卡（常见 BIN 前缀 + Luhn 验算在代码中完成）
@@ -207,7 +207,20 @@ const RE = {
   // 车牌（普通 + 新能源）
   plate: /(?<![\u4e00-\u9fa5A-Za-z0-9])[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵青藏川宁琼使领][A-HJ-NP-Z][A-HJ-NP-Z0-9]{4,5}[A-HJ-NP-Z0-9挂学警港澳](?![\u4e00-\u9fa5A-Za-z0-9])/g,
   // 案号：（2020）粤0882民特47号 / （2019）最高法民终1234号（允许文书里的空格）
-  caseNo: /[（(]\s*(?:19|20)\d{2}\s*[）)]\s*[\u4e00-\u9fa5]{1,8}\s*\d{0,6}\s*[\u4e00-\u9fa5]{1,6}\s*\d{1,6}\s*号/g,
+  caseNo: /[（(]\s*(?:19|20)\d{2}\s*[）)]\s*[\u4e00-\u9fa5]{1,8}\s*\d{0,6}\s*[\u4e00-\u9fa5]{1,6}\s*\d{1,6}\s*号(?:之[一二三四五六七八九十]+)?/g,
+  // 固定电话/传真（0 区号 + 7/8 位；允许分隔符），总长 10-12 位
+  landline: /(?<!\d)0\d{2,3}[-—\s]?\d{7,8}(?!\d)/g,
+  // 400/800 企业热线
+  hotline: /(?<!\d)(?:400|800)[-—\s]?\d{3}[-—\s]?\d{4}(?!\d)/g,
+  // 社交账号（关键词引导，仿身份证宽松模式）
+  imWechat: /(?:微信号|微信账号|WX号|wx号|vx号|VX号|威信号|WeChat号)\s*[:：]?\s*([A-Za-z][-_A-Za-z0-9]{5,19})/g,
+  imQQ: /(?:QQ号|QQ账号|QQ)\s*[:：]?\s*([1-9]\d{4,10})(?!\d)/g,
+  // 港澳居民来往内地通行证（回乡证）：H/M + 8 位数字
+  hkmtPermit: /(?<![A-Za-z0-9])[HM]\d{8}(?![0-9A-Za-z])/g,
+  // 台湾居民来往大陆通行证（台胞证）：关键词引导
+  hkmtTaiwan: /台胞证\s*[:：]?\s*([1-9]\d{7})(?!\d)/g,
+  // 统一社会信用代码（18 位，结构 + 校验码验算在代码中完成）
+  uscc: /(?<![0-9A-Z])[159Y][1239]\d{6}[0-9A-HJ-NPQRTUWXY]{10}(?![0-9A-Z])/g,
 };
 
 // 执业证号（律师/会计师/公证员…）：关键词 + 15~20 位编号，可带字母前缀
@@ -215,10 +228,26 @@ const RE_LICENSE = /(?:律师执业证号|执业证号|执业证书号|执业证
 
 // 带关键词前缀的宽松匹配（有语境，可放宽校验；覆盖「公民身份号码」「居民身份号码」等法律文书表述）
 const RE_IDCARD_LOOSE = /(?:公民身份号码|居民身份号码|身份号码|身份证号码|身份证号|身份证|证件号码|证件号)\s*[:：]?\s*([1-9]\d{5}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx])/g;
-const RE_BANK_KEYWORD = /(?:银行卡号|卡号|储蓄卡|借记卡|信用卡)\s*[:：]?\s*(\d{13,19})/g;
+const RE_BANK_KEYWORD = /(?:银行卡号|银行账号|卡号|账号|储蓄卡|借记卡|信用卡)\s*[:：]?\s*(\d{13,19})/g;
 
 const ID_WEIGHTS = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2];
 const ID_CHECK = ['1', '0', 'X', '9', '8', '7', '6', '5', '4', '3', '2'];
+
+// 统一社会信用代码校验（GB 32100-2015）
+const USCC_CHARSET = '0123456789ABCDEFGHJKLMNPQRTUWXY';
+const USCC_WEIGHTS = [1, 3, 9, 27, 19, 26, 16, 17, 20, 29, 25, 13, 8, 24, 10, 30, 28];
+
+/** 统一社会信用代码校验码验算 */
+function isValidUscc(s) {
+  if (!/^[159Y][1239]\d{6}[0-9A-HJ-NPQRTUWXY]{10}$/.test(s)) return false;
+  let sum = 0;
+  for (let i = 0; i < 17; i++) {
+    const ci = USCC_CHARSET.indexOf(s[i]);
+    if (ci < 0) return false;
+    sum += ci * USCC_WEIGHTS[i];
+  }
+  return USCC_CHARSET[(31 - (sum % 31)) % 31] === s[17];
+}
 
 function isValidIdCard(s) {
   if (!s || s.length !== 18) return false;
@@ -513,6 +542,11 @@ function detectStrong(text, opts) {
   if (opts.email !== false) scan(RE.email, 'email');
   if (opts.passport !== false) scan(RE.passport, 'passport');
   if (opts.plate !== false) scan(RE.plate, 'plate');
+  // 以下为默认关闭的可选检测项（settings toggles 显式开启才生效）
+  if (opts.landline === true) { scan(RE.landline, 'landline'); scan(RE.hotline, 'landline'); }
+  if (opts.im === true) { scanGrouped(RE.imWechat, 'im'); scanGrouped(RE.imQQ, 'im'); }
+  if (opts.hkmt === true) { scan(RE.hkmtPermit, 'hkmt'); scanGrouped(RE.hkmtTaiwan, 'hkmt'); }
+  if (opts.uscc === true) scan(RE.uscc, 'uscc', isValidUscc);
   return out;
 }
 
@@ -544,6 +578,7 @@ const isContained = (item, ranges) =>
 const PRIORITY = {
   caseNo: 0, idCard: 1, license: 2, bank: 3, phone: 4,
   passport: 5, email: 6, plate: 7, address: 8, org: 9, name: 10,
+  landline: 4, im: 6, hkmt: 5, uscc: 2,
 };
 
 function dedupe(items) {
@@ -577,6 +612,8 @@ function detect(text, options = {}) {
     phone: true, idCard: true, bank: true, email: true,
     passport: true, name: true, address: true, plate: true,
     caseNo: true, license: true, org: true,
+    // 可选检测项：默认关闭（用户在设置中显式开启）
+    landline: false, im: false, hkmt: false, uscc: false,
     ...(options.toggles || {}),
   };
 
@@ -598,5 +635,5 @@ function detect(text, options = {}) {
 }
 
 module.exports = {
-  detect, isValidIdCard, luhnValid, SURNAMES_1, SURNAMES_2, NAME_BLACKLIST, ORG_SUFFIXES,
+  detect, isValidIdCard, isValidUscc, luhnValid, SURNAMES_1, SURNAMES_2, NAME_BLACKLIST, ORG_SUFFIXES,
 };

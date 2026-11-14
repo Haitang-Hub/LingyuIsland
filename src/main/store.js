@@ -40,6 +40,8 @@ const DEFAULT_SETTINGS = {
     phone: true, idCard: true, bank: true, email: true,
     name: true, address: true, passport: true, plate: true,
     caseNo: true, license: true, org: true,
+    // 可选检测项：默认关闭，用户在设置中勾选开启
+    landline: false, im: false, hkmt: false, uscc: false,
   },
   clipboardWatch: true,           // 剪贴板自动识别可恢复内容
   autoCollapse: true,             // 灵动岛无操作自动收起为顶部线段

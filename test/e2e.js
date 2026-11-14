@@ -422,10 +422,10 @@ async function run({ store, island, indexer, updater }) {
     })()`);
     check('检测项折叠与摘要', () => {
       assert.strictEqual(detectState.collapsedInit, true, '初始应处于收起态');
-      assert.ok(/已启用 \d+\/11/.test(detectState.summary), detectState.summary);
+      assert.ok(/已启用 \d+\/15/.test(detectState.summary), detectState.summary);
       assert.strictEqual(detectState.btnCollapsed, '展开');
       assert.strictEqual(detectState.expandedVisible, true, '点击头部后应展开');
-      assert.strictEqual(detectState.gridSwitches, 11, '展开后应有 11 个检测项开关');
+      assert.strictEqual(detectState.gridSwitches, 15, '展开后应有 15 个检测项开关');
       assert.strictEqual(detectState.btnExpanded, '收起');
       assert.strictEqual(detectState.ariaExpanded, 'true');
       assert.strictEqual(detectState.collapsedAfter, true, '再次点击应恢复收起');
