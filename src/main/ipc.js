@@ -1,6 +1,6 @@
 'use strict';
 /**
- * IPC 处理器：脱敏 / 恢复 / 查找 / 设置 / 系统操作
+ * IPC 处理器：屏蔽 / 恢复 / 查找 / 设置 / 系统操作
  */
 
 const { dialog, shell, clipboard, BrowserWindow, ipcMain, app: electronApp } = require('electron');
@@ -72,7 +72,7 @@ function register(ctx) {
     island.dialogOpen = true;
     try {
       const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
-        title: '选择要脱敏的文件',
+        title: '选择要屏蔽的文件',
         properties: ['openFile', 'multiSelections'],
       });
       if (r.canceled) return [];
@@ -80,7 +80,7 @@ function register(ctx) {
     } finally { island.dialogOpen = false; }
   });
 
-  /* ---------------- 脱敏 / 恢复 ---------------- */
+  /* ---------------- 屏蔽 / 恢复 ---------------- */
 
   ipc_handle('mask:files', (e, inputPaths) => {
     const paths = Array.isArray(inputPaths) ? inputPaths : [];
@@ -113,7 +113,7 @@ function register(ctx) {
   /* ---------------- 剪贴板恢复 ---------------- */
 
   ipc_handle('clip:restore', () => {
-    // 只针对「检测到脱敏信息时的那一次复制内容」生效，不读取点击瞬间剪贴板里的其他内容
+    // 只针对「检测到屏蔽信息时的那一次复制内容」生效，不读取点击瞬间剪贴板里的其他内容
     const pending = clipboardWatcher.getPendingText();
     if (!pending) return { ok: false, resolved: 0, stale: true };
     let current = '';

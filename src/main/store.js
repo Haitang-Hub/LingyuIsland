@@ -33,7 +33,7 @@ function normalizeFallback(fallback) {
 }
 
 const DEFAULT_SETTINGS = {
-  rootDir: '',                    // 用户配置的文件根目录（工作区：导入副本与脱敏产物都在这里）
+  rootDir: '',                    // 用户配置的文件根目录（工作区：导入副本与屏蔽产物都在这里）
   importBehavior: 'keep',         // 导入方式：keep=保留原位置文件 | discard=处理后移入系统回收站
   conflictPolicy: 'keep',         // 根目录同名文件：keep=加序号保留两份 | overwrite=覆盖同名文件
   toggles: {
@@ -59,9 +59,40 @@ class Store {
   init() {
     this.dir = app.getPath('userData');
     fs.mkdirSync(this.dir, { recursive: true });
+    this._migrateFromOldAppName();
     this._loadSettings();
     this._loadVault();
     this._loadHistory();
+  }
+
+  /**
+   * 旧版应用名数据目录迁移：「灵屿 · 隐私灵动岛」→「灵屿岛」（productName 变更会改变 userData 路径）。
+   * 仅当新目录里没有任何数据文件而旧目录存在时才整份拷入，避免覆盖新数据。
+   */
+  _migrateFromOldAppName() {
+    const LEGACY_DIRS = ['灵屿 · 隐私灵动岛', '灵屿-隐私灵动岛'];
+    const dataFiles = ['settings.json', 'vault.bin', 'vault.bin.sig', 'vault.json', 'history.json'];
+    try {
+      const hasData = dataFiles.some((f) => fs.existsSync(path.join(this.dir, f)));
+      if (hasData) return;
+      const base = path.dirname(this.dir);
+      for (const legacy of LEGACY_DIRS) {
+        const legacyDir = path.join(base, legacy);
+        if (!fs.existsSync(legacyDir)) continue;
+        let copied = 0;
+        for (const f of dataFiles) {
+          const src = path.join(legacyDir, f);
+          if (fs.existsSync(src)) {
+            fs.copyFileSync(src, path.join(this.dir, f));
+            copied++;
+          }
+        }
+        if (copied > 0) console.log(`[store] 已从旧目录迁移 ${copied} 个数据文件: ${legacy}`);
+        break;
+      }
+    } catch (e) {
+      console.warn('[store] 旧数据目录迁移失败（忽略，按全新安装处理）:', e && e.message || e);
+    }
   }
 
   get paths() {

@@ -1,9 +1,9 @@
 'use strict';
 /**
- * 文件脱敏管道
+ * 文件屏蔽管道
  *  - 文本类：txt/md/csv/json/代码等，自动识别 UTF-8 / GBK，保留原编码写回
  *  - Office 类：docx/xlsx/pptx（zip 内 XML 仅替换文本节点，原文跨排版 run 时跳过，绝不破坏结构）
- *  - 原文件永不被覆盖：脱敏结果写为 「xxx_脱敏.ext」，还原结果写为 「xxx_还原.ext」
+ *  - 原文件永不被覆盖：屏蔽结果写为 「xxx_屏蔽.ext」，还原结果写为 「xxx_还原.ext」
  */
 
 const fs = require('fs');
@@ -17,7 +17,7 @@ const MAX_SIZE = 20 * 1024 * 1024; // 20MB
 
 /**
  * 系统垃圾文件（Office「~$」所有者锁文件、LibreOffice「.~lock」锁文件、缩略图/桌面配置等）
- * —— 不索引、不导入、不脱敏
+ * —— 不索引、不导入、不屏蔽
  */
 function isJunkFile(name) {
   return (
@@ -85,10 +85,10 @@ function encodeText(text, encoding, bom) {
 
 /* ---------------- 命名 ---------------- */
 
-// 结果后缀：_脱敏 / _还原，可带序号（_02、_03…），仅剥离位于结尾的
-const RESULT_SUFFIX_RE = /_(脱敏|还原)(?:_\d{1,3})*$/;
+// 结果后缀：_屏蔽（新）/ _脱敏（v1.1 及更早的旧产物，向后兼容）/ _还原，可带序号（_02、_03…），仅剥离位于结尾的
+const RESULT_SUFFIX_RE = /_(屏蔽|脱敏|还原)(?:_\d{1,3})*$/;
 
-/** 去掉结尾的 _脱敏 / _还原（含可能存在的序号），得到原始基名 */
+/** 去掉结尾的 _屏蔽 / _脱敏 / _还原（含可能存在的序号），得到原始基名 */
 function stripResultSuffix(base) {
   let out = String(base || '');
   let prev;
@@ -100,18 +100,18 @@ function stripResultSuffix(base) {
 }
 
 /**
- * 脱敏结果路径：xxx_脱敏.ext
- * 还原产物再次脱敏时按原名归类 —— 「06_民事起诉状_还原.docx」→「06_民事起诉状_脱敏.docx」，
- * 而不是「06_民事起诉状_还原_脱敏.docx」
+ * 屏蔽结果路径：xxx_屏蔽.ext
+ * 还原产物再次屏蔽时按原名归类 —— 「06_民事起诉状_还原.docx」→「06_民事起诉状_屏蔽.docx」，
+ * 而不是「06_民事起诉状_还原_屏蔽.docx」
  */
 function maskedPathOf(p) {
   const dir = path.dirname(p);
   const ext = path.extname(p);
   const base = stripResultSuffix(path.basename(p, ext));
-  return path.join(dir, `${base}_脱敏${ext}`);
+  return path.join(dir, `${base}_屏蔽${ext}`);
 }
 
-/** 还原结果路径：xxx_还原.ext（脱敏产物 → 还原产物，名字回到原名） */
+/** 还原结果路径：xxx_还原.ext（屏蔽产物 → 还原产物，名字回到原名） */
 function restoredPathOf(p) {
   const dir = path.dirname(p);
   const ext = path.extname(p);
@@ -217,7 +217,7 @@ function readFileText(filePath) {
 }
 
 /**
- * 按内容判断处理方式：含〔编码〕的是脱敏产物 → 还原；其余视为明文 → 脱敏。
+ * 按内容判断处理方式：含〔编码〕的是屏蔽产物 → 还原；其余视为明文 → 屏蔽。
  * 无法读取内容时返回 'mask'，交由 maskFile 给出「格式不支持」等明确提示。
  */
 function detectFileIntent(filePath) {
@@ -228,8 +228,8 @@ function detectFileIntent(filePath) {
 /* ---------------- 单文件处理 ---------------- */
 
 /**
- * 脱敏一个文件
- * @param {string} [outPath] 指定结果路径（不传则写为同目录的「xxx_脱敏.ext」）
+ * 屏蔽一个文件
+ * @param {string} [outPath] 指定结果路径（不传则写为同目录的「xxx_屏蔽.ext」）
  * @returns {{ok:boolean, path:string, maskedPath?:string, count?:number,
  *            counts?:Record, skipped?:string, reason?:string}}
  */
@@ -243,7 +243,7 @@ function maskFile(filePath, vault, toggles, outPath, knownNames) {
     const buf = fs.readFileSync(filePath);
     const dec = decodeBuffer(buf);
     if (!dec) return { ok: false, path: filePath, skipped: 'binary' };
-    if (countCodes(dec.text) > 0 && path.basename(filePath).includes('_脱敏')) {
+    if (countCodes(dec.text) > 0 && /_(屏蔽|脱敏)/.test(path.basename(filePath))) {
       return { ok: false, path: filePath, skipped: 'already-masked' };
     }
     const known = mergeKnown(collectKnownNames([dec.text], toggles), knownNames);
@@ -257,7 +257,7 @@ function maskFile(filePath, vault, toggles, outPath, knownNames) {
 }
 
 /**
- * 还原一个脱敏文件（也支持任意含〔编码〕的文本文件）
+ * 还原一个屏蔽文件（也支持任意含〔编码〕的文本文件）
  * @param {string} [outPath] 指定结果路径（不传则写为同目录的「xxx_还原.ext」）
  * @returns {{ok:boolean, path:string, restoredPath?:string, resolved?:number, missing?:string[]}}
  */

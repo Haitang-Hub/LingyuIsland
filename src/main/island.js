@@ -28,6 +28,7 @@ class Island {
 
   create() {
     const { workArea } = screen.getPrimaryDisplay();
+    const appIcon = path.join(__dirname, '..', '..', 'assets', 'icon.png');
 
     this.pill = new BrowserWindow({
       width: PILL_W, height: PILL_H,
@@ -36,6 +37,7 @@ class Island {
       frame: false, transparent: true, resizable: false,
       alwaysOnTop: true, skipTaskbar: true, focusable: false,
       hasShadow: false, show: false,
+      icon: appIcon,
       backgroundColor: '#00000000',
       webPreferences: {
         preload: path.join(__dirname, '..', 'preload.js'),
@@ -52,6 +54,7 @@ class Island {
       frame: false, transparent: true, resizable: false,
       alwaysOnTop: true, skipTaskbar: true,
       hasShadow: false, show: false,
+      icon: appIcon,
       backgroundColor: '#00000000',
       webPreferences: {
         preload: path.join(__dirname, '..', 'preload.js'),
@@ -99,13 +102,17 @@ class Island {
   layout() {
     const { workArea } = screen.getPrimaryDisplay();
     if (this.pill && !this.pill.isDestroyed()) {
-      this.pill.setPosition(Math.round(workArea.x + (workArea.width - PILL_W) / 2), this._pillY());
+      const px = Math.round(workArea.x + (workArea.width - PILL_W) / 2);
+      const py = this._pillY();
+      const b = this.pill.getBounds();
+      // 位置没变就不要动窗口：透明窗口 setPosition 会触发一次重绘，肉眼可见地「闪」
+      if (b.x !== px || b.y !== py) this.pill.setPosition(px, py);
     }
     if (this.panel && !this.panel.isDestroyed()) {
-      this.panel.setPosition(
-        Math.round(workArea.x + (workArea.width - PANEL_W) / 2),
-        Math.min(workArea.y + 6 + PILL_H + 4, workArea.y + workArea.height - PANEL_H)
-      );
+      const px = Math.round(workArea.x + (workArea.width - PANEL_W) / 2);
+      const py = Math.min(workArea.y + 6 + PILL_H + 4, workArea.y + workArea.height - PANEL_H);
+      const b = this.panel.getBounds();
+      if (b.x !== px || b.y !== py) this.panel.setPosition(px, py);
     }
   }
 
@@ -114,9 +121,31 @@ class Island {
     this.layout();
     if (tab) this.panel.webContents.send('panel:show-tab', tab);
     // 面板始终为「点击外部即收起」模式：必须激活窗口，blur 才会触发
+    const wasVisible = this.panel.isVisible();
+    if (!wasVisible) {
+      // 先以 0 透明度拉起，避开透明窗口显示瞬间的首帧闪动，再做淡入过渡
+      try { this.panel.setOpacity(0); } catch { /* ignore */ }
+    }
     this.panel.show();
     this.panel.focus();
+    if (!wasVisible) this._fadeIn();
     this._notifyPanel(true); // 面板打开期间胶囊暂停空闲收起计时
+  }
+
+  _fadeIn() {
+    this._stopFade();
+    const w = this.panel;
+    let o = 0;
+    this._fadeTimer = setInterval(() => {
+      if (w.isDestroyed()) return this._stopFade();
+      o = Math.min(1, o + 0.25);
+      try { w.setOpacity(o); } catch { /* ignore */ }
+      if (o >= 1) this._stopFade();
+    }, 35); // 约 140ms 淡入
+  }
+
+  _stopFade() {
+    if (this._fadeTimer) { clearInterval(this._fadeTimer); this._fadeTimer = null; }
   }
 
   /** 胶囊在面板之外，点击它也应视为「点击外部」而收起 */
@@ -126,10 +155,13 @@ class Island {
   }
 
   hidePanel() {
-    if (this.panel && this.panel.isVisible()) {
-      this.panel.hide();
-      this._notifyPanel(false); // 面板关闭后胶囊恢复空闲计时
-    }
+    if (!this.panel || !this.panel.isVisible() || this.panel.isDestroyed()) return;
+    this._stopFade();
+    // 关闭保持立即隐藏（不淡出）：与「点击面板外即收起」的即时语义一致，
+    // 也避免淡出窗口期间 isVisible() 仍为 true 造成交互判断歧义
+    try { this.panel.setOpacity(1); } catch { /* ignore */ }
+    this.panel.hide();
+    this._notifyPanel(false); // 面板关闭后胶囊恢复空闲计时
   }
 
   togglePanel(tab) {

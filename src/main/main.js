@@ -1,6 +1,6 @@
 'use strict';
 /**
- * 灵屿 · 隐私灵动岛 —— 应用入口
+ * 灵屿岛 —— 应用入口
  */
 
 const { app, Menu } = require('electron');
@@ -25,7 +25,7 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
 
-app.setAppUserModelId('com.lingyu.privacy-island');
+app.setAppUserModelId('com.yu.dynamic-island');
 
 // macOS：作为托盘工具，不占用 Dock 图标
 if (process.platform === 'darwin' && app.dock) {

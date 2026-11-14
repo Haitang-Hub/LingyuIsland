@@ -1,8 +1,8 @@
 'use strict';
 /**
  * 智能处理流程（不生成工作副本）
- *  1. 直接读取拖入/选择的文件内容，按内容判断脱敏或还原
- *  2. 只在根目录写出结果文件：「文件名_脱敏.ext」或「文件名_还原.ext」
+ *  1. 直接读取拖入/选择的文件内容，按内容判断屏蔽或还原
+ *  2. 只在根目录写出结果文件：「文件名_屏蔽.ext」或「文件名_还原.ext」
  *     —— 不再复制一份明文工作副本到根目录，根目录里只保留处理结果
  *  3. 「同名文件」设置作用于结果文件：保留两份（自动加序号）或覆盖同名
  *  4. 拖入的原位置文件永不改动；设置「移入回收站」时，处理完成后把根目录外的
@@ -95,8 +95,8 @@ async function importAndMask(inputPaths, ctx, sender) {
       const intent = detectFileIntent(src);
       const { out, base, action } = resolveOutputPath(rootNorm, src, intent, conflictPolicy);
 
-      // 结果路径恰好等于源文件（如根目录里名为 xxx_脱敏 却无编码的文件）：
-      // 既不覆盖源文件，也不重复脱敏
+      // 结果路径恰好等于源文件（如根目录里名为 xxx_屏蔽 却无编码的文件）：
+      // 既不覆盖源文件，也不重复屏蔽
       if (path.resolve(out) === path.resolve(src) || path.resolve(base) === path.resolve(src)) {
         r = { ok: false, path: src, action: intent, skipped: 'already-masked' };
       } else {

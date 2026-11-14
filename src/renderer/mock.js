@@ -45,19 +45,19 @@ if (!window.island) {
   };
 
   const history = [
-    { id: 'h3', ts: now - 8 * MIN, origPath: 'D:\\工作文档\\人事\\员工花名册.xlsx', maskedPath: 'D:\\工作文档\\人事\\员工花名册_脱敏.xlsx', count: 24, counts: { name: 8, phone: 8, idCard: 8 }, summary: '姓名×8、手机号×8、身份证×8' },
-    { id: 'h2', ts: now - 55 * MIN, origPath: 'D:\\工作文档\\销售\\客户通讯录.csv', maskedPath: 'D:\\工作文档\\销售\\客户通讯录_脱敏.csv', count: 15, counts: { name: 5, phone: 6, email: 4 }, summary: '姓名×5、手机号×6、邮箱×4' },
-    { id: 'h1', ts: now - 26 * 60 * MIN, origPath: 'D:\\工作文档\\会议纪要0412.txt', maskedPath: 'D:\\工作文档\\会议纪要0412_脱敏.txt', count: 3, counts: { phone: 2, name: 1 }, summary: '手机号×2、姓名×1' },
+    { id: 'h3', ts: now - 8 * MIN, origPath: 'D:\\工作文档\\人事\\员工花名册.xlsx', maskedPath: 'D:\\工作文档\\人事\\员工花名册_屏蔽.xlsx', count: 24, counts: { name: 8, phone: 8, idCard: 8 }, summary: '姓名×8、手机号×8、身份证×8' },
+    { id: 'h2', ts: now - 55 * MIN, origPath: 'D:\\工作文档\\销售\\客户通讯录.csv', maskedPath: 'D:\\工作文档\\销售\\客户通讯录_屏蔽.csv', count: 15, counts: { name: 5, phone: 6, email: 4 }, summary: '姓名×5、手机号×6、邮箱×4' },
+    { id: 'h1', ts: now - 26 * 60 * MIN, origPath: 'D:\\工作文档\\会议纪要0412.txt', maskedPath: 'D:\\工作文档\\会议纪要0412_屏蔽.txt', count: 3, counts: { phone: 2, name: 1 }, summary: '手机号×2、姓名×1' },
   ];
 
   // 相对路径统一用 “/”，与真实索引一致（打开文件时由 joinPath 转成平台分隔符）
   const indexFiles = [
     { n: '员工花名册.xlsx', p: '人事/员工花名册.xlsx', e: 'xlsx', s: 48213, m: now - 8 * MIN },
-    { n: '员工花名册_脱敏.xlsx', p: '人事/员工花名册_脱敏.xlsx', e: 'xlsx', s: 47102, m: now - 7 * MIN },
+    { n: '员工花名册_屏蔽.xlsx', p: '人事/员工花名册_屏蔽.xlsx', e: 'xlsx', s: 47102, m: now - 7 * MIN },
     { n: '客户通讯录.csv', p: '销售/客户通讯录.csv', e: 'csv', s: 15320, m: now - 55 * MIN },
-    { n: '客户通讯录_脱敏.csv', p: '销售/客户通讯录_脱敏.csv', e: 'csv', s: 14897, m: now - 54 * MIN },
+    { n: '客户通讯录_屏蔽.csv', p: '销售/客户通讯录_屏蔽.csv', e: 'csv', s: 14897, m: now - 54 * MIN },
     { n: '会议纪要0412.txt', p: '会议纪要0412.txt', e: 'txt', s: 8241, m: now - 26 * 60 * MIN },
-    { n: '会议纪要0412_脱敏.txt', p: '会议纪要0412_脱敏.txt', e: 'txt', s: 8102, m: now - 25 * 60 * MIN },
+    { n: '会议纪要0412_屏蔽.txt', p: '会议纪要0412_屏蔽.txt', e: 'txt', s: 8102, m: now - 25 * 60 * MIN },
     { n: '劳动合同模板.docx', p: '法务/劳动合同模板.docx', e: 'docx', s: 92410, m: now - 3 * 24 * 60 * MIN },
     { n: '供应商清单.json', p: '采购/供应商清单.json', e: 'json', s: 12034, m: now - 5 * 24 * 60 * MIN },
     { n: '项目预算表.xlsx', p: '财务/项目预算表.xlsx', e: 'xlsx', s: 33121, m: now - 6 * 24 * 60 * MIN },

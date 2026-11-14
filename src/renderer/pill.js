@@ -1,5 +1,5 @@
 'use strict';
-/* 灵屿胶囊逻辑：状态切换、拖放脱敏、剪贴板一键恢复 */
+/* 灵屿岛胶囊逻辑：状态切换、拖放屏蔽、剪贴板一键恢复 */
 
 const pill = document.getElementById('pill');
 const dot = document.getElementById('dot');
@@ -196,7 +196,7 @@ const IDLE_LINES = () => {
   }
   if (maskedCount > 0) lines.push(`${maskedCount} 份文件已被悄悄守护`);
   // 保留一句功能提示，避免新用户不知道可以拖文件进来
-  lines.push('拖入文件，即可一键脱敏');
+  lines.push('拖入文件，即可一键屏蔽');
   return lines;
 };
 
@@ -359,8 +359,8 @@ window.island.on('clip:found', (info) => {
   clipClose.hidden = false;
   clipClose.disabled = false;
   clipText.textContent = '还原文本';
-  clipChip.title = `还原当前复制文本中的 ${info.count} 处脱敏信息`;
-  labelIdle.textContent = '识别到含脱敏信息';
+  clipChip.title = `还原当前复制文本中的 ${info.count} 处屏蔽信息`;
+  labelIdle.textContent = '识别到含屏蔽信息';
   labelHover.textContent = '点击展开操作面板';
   glanceAtText(); // 惊讶地看向新消息
 });
@@ -373,11 +373,11 @@ window.island.on('clip:cleared', () => {
   refreshIdleLabel();
 });
 
-/* ---------------- 脱敏进度 ---------------- */
+/* ---------------- 屏蔽进度 ---------------- */
 
 window.island.on('mask:progress', ({ i, total }) => {
   setState('busy');
-  labelIdle.textContent = `正在脱敏 ${i}/${total}…`;
+  labelIdle.textContent = `正在屏蔽 ${i}/${total}…`;
 });
 window.island.on('mask:done', (done) => {
   if (done.error === 'no-root') {
@@ -390,7 +390,7 @@ window.island.on('mask:done', (done) => {
   setState('idle');
   if (done.total > 0) {
     const parts = [];
-    if (done.masked > 0) parts.push(`脱敏 ${done.masked} 份`);
+    if (done.masked > 0) parts.push(`屏蔽 ${done.masked} 份`);
     if (done.restored > 0) parts.push(`还原 ${done.restored} 份`);
     if (done.overwritten > 0) parts.push(`覆盖同名 ${done.overwritten} 份`);
     if (parts.length) celebrate(); // 有实际成果 → 弹跳 + 高光

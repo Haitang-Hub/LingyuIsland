@@ -109,18 +109,18 @@ async function run({ store, island, indexer, updater }) {
   fs.writeFileSync(path.join(rootDir, '销售', 'cleanup.py'), '', 'utf8');
   fs.writeFileSync(path.join(rootDir, '销售', 'logo.png'), '', 'utf8');
 
-  // 1) 文件脱敏 + 写历史
+  // 1) 文件屏蔽 + 写历史
   const masked1 = maskFile(path.join(rootDir, '人事', '员工花名册.txt'), store.vault, store.settings.toggles);
   const masked2 = maskFile(path.join(rootDir, '销售', '客户通讯录.txt'), store.vault, store.settings.toggles);
   store.persistVault();
 
-  check('文件脱敏成功', () => {
+  check('文件屏蔽成功', () => {
     assert.strictEqual(masked1.ok, true);
     assert.ok(masked1.count >= 5, '花名册应检出≥5处: ' + masked1.count);
     assert.strictEqual(masked2.ok, true);
     assert.ok(masked2.count >= 4, '通讯录应检出≥4处: ' + masked2.count);
   });
-  check('性别年龄未脱敏', () => {
+  check('性别年龄未屏蔽', () => {
     const t = fs.readFileSync(masked1.maskedPath, 'utf8');
     assert.ok(t.includes('性别：男    年龄：35岁'));
   });
@@ -167,17 +167,17 @@ async function run({ store, island, indexer, updater }) {
   check('导入：不生成原文件工作副本', () => {
     assert.strictEqual(done1.error, undefined, '应无错误: ' + JSON.stringify(done1).slice(0, 120));
     assert.ok(!fs.existsSync(path.join(rootDir, '外部文件.txt')), '根目录不应出现原文件副本');
-    assert.ok(fs.existsSync(path.join(rootDir, '外部文件_脱敏.txt')), '脱敏结果应在根目录');
+    assert.ok(fs.existsSync(path.join(rootDir, '外部文件_屏蔽.txt')), '屏蔽结果应在根目录');
     assert.ok(fs.existsSync(outsideSrc), 'keep 模式原位置文件应保留');
     assert.strictEqual(done1.importedCount, 0);
-    const masked = fs.readFileSync(path.join(rootDir, '外部文件_脱敏.txt'), 'utf8');
-    assert.ok(masked.includes('138****5678'), '脱敏结果应已屏蔽手机号');
+    const masked = fs.readFileSync(path.join(rootDir, '外部文件_屏蔽.txt'), 'utf8');
+    assert.ok(masked.includes('138****5678'), '屏蔽结果应已屏蔽手机号');
     assert.ok(restoreText(masked, store.vault).text.includes('13812345678'));
   });
 
   const done2 = await importAndMask([outsideSrc], { store, island }, null);
   check('结果同名：默认保留两份', () => {
-    assert.ok(fs.existsSync(path.join(rootDir, '外部文件_脱敏_02.txt')), '第二次处理应加序号保留');
+    assert.ok(fs.existsSync(path.join(rootDir, '外部文件_屏蔽_02.txt')), '第二次处理应加序号保留');
     assert.strictEqual(done2.overwritten, 0);
   });
 
@@ -189,20 +189,20 @@ async function run({ store, island, indexer, updater }) {
   });
   store.settings.importBehavior = 'keep';
 
-  // 2.5.2) 智能识别：把脱敏产物重新导入 → 应自动还原，而不是再次脱敏
-  const maskedAgain = path.join(rootDir, '外部文件_脱敏.txt');
+  // 2.5.2) 智能识别：把屏蔽产物重新导入 → 应自动还原，而不是再次屏蔽
+  const maskedAgain = path.join(rootDir, '外部文件_屏蔽.txt');
   const restoredExpect = path.join(rootDir, '外部文件_还原.txt');
   fs.rmSync(restoredExpect, { force: true });
   const done4 = await importAndMask([maskedAgain], { store, island }, null);
-  check('按内容识别：脱敏文件自动还原', () => {
-    assert.strictEqual(done4.masked, 0, '脱敏产物不应被再次脱敏');
+  check('按内容识别：屏蔽文件自动还原', () => {
+    assert.strictEqual(done4.masked, 0, '屏蔽产物不应被再次屏蔽');
     assert.strictEqual(done4.restored, 1, '应自动还原 1 份');
     assert.ok(done4.restoredTotal >= 1);
     assert.ok(fs.existsSync(restoredExpect), '应生成 _还原 副本');
     const text = fs.readFileSync(restoredExpect, 'utf8');
     assert.ok(text.includes('13812345678'), '还原后应出现原文');
     assert.ok(!text.includes('138****5678'), '还原后不应残留屏蔽值');
-    assert.ok(fs.existsSync(maskedAgain), '原脱敏文件不应被改动');
+    assert.ok(fs.existsSync(maskedAgain), '原屏蔽文件不应被改动');
   });
 
   // 2.6) 搜索类别过滤（索引层）
@@ -231,8 +231,8 @@ async function run({ store, island, indexer, updater }) {
   // 2.7) 结果文件同名策略：保留两份 / 覆盖同名
   const conflictOutside = path.join(srcDir, '同名测试.txt');
   fs.writeFileSync(conflictOutside, '新内容 手机13998765432', 'utf8');
-  fs.rmSync(path.join(rootDir, '同名测试_脱敏.txt'), { force: true });
-  fs.rmSync(path.join(rootDir, '同名测试_脱敏_02.txt'), { force: true });
+  fs.rmSync(path.join(rootDir, '同名测试_屏蔽.txt'), { force: true });
+  fs.rmSync(path.join(rootDir, '同名测试_屏蔽_02.txt'), { force: true });
 
   store.settings.conflictPolicy = 'keep';
   const c1 = await importAndMask([conflictOutside], { store, island }, null);
@@ -240,8 +240,8 @@ async function run({ store, island, indexer, updater }) {
   check('结果文件同名：保留两份', () => {
     assert.strictEqual(c1.overwritten, 0);
     assert.strictEqual(c2.overwritten, 0);
-    assert.ok(fs.existsSync(path.join(rootDir, '同名测试_脱敏.txt')));
-    assert.ok(fs.existsSync(path.join(rootDir, '同名测试_脱敏_02.txt')), '第二次应加序号保留');
+    assert.ok(fs.existsSync(path.join(rootDir, '同名测试_屏蔽.txt')));
+    assert.ok(fs.existsSync(path.join(rootDir, '同名测试_屏蔽_02.txt')), '第二次应加序号保留');
     assert.ok(!fs.existsSync(path.join(rootDir, '同名测试.txt')), '不应生成原文件副本');
   });
 
@@ -249,7 +249,7 @@ async function run({ store, island, indexer, updater }) {
   const c3 = await importAndMask([conflictOutside], { store, island }, null);
   check('结果文件同名：覆盖同名', () => {
     assert.strictEqual(c3.overwritten, 1);
-    assert.strictEqual(c3.results[0].outputPath, path.join(rootDir, '同名测试_脱敏.txt'));
+    assert.strictEqual(c3.results[0].outputPath, path.join(rootDir, '同名测试_屏蔽.txt'));
   });
   store.settings.conflictPolicy = 'keep';
 
@@ -291,10 +291,10 @@ async function run({ store, island, indexer, updater }) {
         dzTitle: document.querySelector('.dz-title').textContent,
       };
     })()`);
-    check('已移除手动脱敏/还原按钮', () => {
+    check('已移除手动屏蔽/还原按钮', () => {
       assert.strictEqual(manualBtns.histRestore, 0);
       assert.strictEqual(manualBtns.searchMask, 0);
-      assert.ok(manualBtns.dzTitle.includes('自动脱敏或还原'), manualBtns.dzTitle);
+      assert.ok(manualBtns.dzTitle.includes('自动屏蔽或还原'), manualBtns.dzTitle);
     });
     await shot(island.panel, path.join(shots, 'panel-search.png'));
 
@@ -524,9 +524,9 @@ async function run({ store, island, indexer, updater }) {
         title: chip.title,
       };
     })()`);
-    check('胶囊：识别到含脱敏信息并显示还原按钮', () => {
+    check('胶囊：识别到含屏蔽信息并显示还原按钮', () => {
       assert.strictEqual(pillState.text, '还原文本');
-      assert.strictEqual(pillState.idle, '识别到含脱敏信息');
+      assert.strictEqual(pillState.idle, '识别到含屏蔽信息');
       assert.strictEqual(pillState.hover, '点击展开操作面板');
       assert.strictEqual(pillState.hidden, false);
       assert.strictEqual(pillState.tag, 'BUTTON');
@@ -674,7 +674,7 @@ async function run({ store, island, indexer, updater }) {
       check('更新：检查到新版本', () => {
         assert.strictEqual(chk.hasUpdate, true);
         assert.strictEqual(chk.latest, '9.9.9');
-        assert.strictEqual(chk.current, '1.0.0');
+        assert.strictEqual(chk.current, app.getVersion(), '当前版本应与应用实际版本一致');
         assert.ok(chk.tarball.includes('/fake.tgz'));
       });
 
@@ -698,7 +698,7 @@ async function run({ store, island, indexer, updater }) {
         if (!v.includes('v')) {
           // 启动 IIFE 可能与 IPC 注册竞态中断（历史遗留）→ 重放版本回显逻辑
           updateCurrentVersion = await window.island.invoke('app:version');
-          document.getElementById('aboutVersion').textContent = '灵屿 · 隐私灵动岛 v' + updateCurrentVersion;
+          document.getElementById('aboutVersion').textContent = '灵屿岛 v' + updateCurrentVersion;
           v = document.getElementById('aboutVersion').textContent;
         }
         return {
@@ -710,7 +710,7 @@ async function run({ store, island, indexer, updater }) {
         };
       })()`);
       check('更新：关于区块 UI 状态', () => {
-        assert.ok(about.v.includes('1.0.0'), about.v);
+        assert.ok(about.v.includes('v' + app.getVersion()), about.v);
         assert.strictEqual(about.boxHidden, false, 'staged 后应展示更新区块');
         assert.ok(about.status.includes('9.9.9') && about.status.includes('重启'), about.status);
         assert.strictEqual(about.btn, '重启完成安装');

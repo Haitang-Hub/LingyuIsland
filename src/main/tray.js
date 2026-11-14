@@ -18,7 +18,7 @@ function createTray(island, store) {
     icon = nativeImage.createEmpty();
   }
   const tray = new Tray(icon);
-  tray.setToolTip('灵屿 · 隐私灵动岛');
+  tray.setToolTip('灵屿岛');
 
   const buildMenu = () => Menu.buildFromTemplate([
     { label: '灵动岛面板', click: () => island.togglePanel() },

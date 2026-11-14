@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
 <link rel="stylesheet" href="panel.css" />
-<title>灵屿 · 隐私灵动岛</title>
+<title>灵屿岛</title>
 </head>
 <body>
   <div class="panel" data-ui>
@@ -16,8 +16,8 @@
           <rect x="11" y="10.6" width="6" height="2.8" rx="1.4" fill="#fff" opacity="0.75"/>
         </svg>
       </span>
-      <h1>灵屿 · 隐私灵动岛</h1>
-      <span class="vault-chip" id="vaultChip" title="脱敏映射库状态">—</span>
+      <h1>灵屿岛</h1>
+      <span class="vault-chip" id="vaultChip" title="屏蔽映射库状态">—</span>
       <span class="spacer"></span>
       <button class="icon-btn" id="closeBtn" title="收起 (Esc)" aria-label="收起面板">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
@@ -35,13 +35,13 @@
 
     <!-- 概览 -->
     <section class="view is-active" id="view-home">
-      <div class="dropzone" id="dropzone" tabindex="0" aria-label="拖入文件脱敏，或点击选择文件">
+      <div class="dropzone" id="dropzone" tabindex="0" aria-label="拖入文件屏蔽，或点击选择文件">
         <svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true">
           <rect x="6" y="10" width="28" height="18" rx="5" fill="none" stroke="currentColor" stroke-width="1.8"/>
           <path d="M20 16v10m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
         </svg>
-        <p class="dz-title">拖入文件，自动脱敏或还原</p>
-        <p class="dz-sub">按内容识别：明文 → 「文件名_脱敏」副本，含脱敏编码的文件 → 「文件名_还原」副本；根目录只保留结果，不生成原文件副本，原位置的文件也不会被改动</p>
+        <p class="dz-title">拖入文件，自动屏蔽或还原</p>
+        <p class="dz-sub">按内容识别：明文 → 「文件名_屏蔽」副本，含屏蔽编码的文件 → 「文件名_还原」副本；根目录只保留结果，不生成原文件副本，原位置的文件也不会被改动</p>
         <button class="btn btn-ghost" id="pickBtn">选择文件…</button>
       </div>
 
@@ -56,14 +56,14 @@
       </div>
 
       <div class="list-head">
-        <h2>最近脱敏</h2>
+        <h2>最近屏蔽</h2>
         <span class="list-total" id="histTotal"></span>
         <span class="spacer"></span>
         <button class="btn-mini ghost-btn" id="histClearBtn" hidden>清空</button>
       </div>
       <ul class="hist-list" id="histList"></ul>
       <div class="empty" id="histEmpty" hidden>
-        <p>还没有脱敏记录</p>
+        <p>还没有屏蔽记录</p>
         <p class="empty-sub">把文件拖到屏幕顶部的灵动岛胶囊上，或拖到这里</p>
       </div>
     </section>
@@ -93,7 +93,7 @@
       <p class="restore-note">粘贴带〔编码〕的文本，实时还原真实内容。编码未改动即可还原——从文件里复制出来的也一样。</p>
       <div class="restore-field">
         <div class="field-label">粘贴的原文</div>
-        <textarea id="restoreInput" rows="5" placeholder="例如：138****5678〔a3f2b1〕" aria-label="粘贴脱敏文本"></textarea>
+        <textarea id="restoreInput" rows="5" placeholder="例如：138****5678〔a3f2b1〕" aria-label="粘贴屏蔽文本"></textarea>
       </div>
       <div class="restore-field" id="restoreResultField" hidden>
         <div class="field-label">还原结果</div>
@@ -124,7 +124,7 @@
           <button class="seg is-active" data-v="keep" role="radio" aria-checked="true">保留原文件</button>
           <button class="seg" data-v="discard" role="radio" aria-checked="false">移入回收站</button>
         </div>
-        <p class="setting-desc">直接读取拖入或选择的文件，只在根目录生成「_脱敏」或「_还原」结果，不会复制原文件；原位置的文件不会被改动。选择「移入回收站」时，处理完成后会把根目录外的原位置文件移入系统回收站，可随时找回。</p>
+        <p class="setting-desc">直接读取拖入或选择的文件，只在根目录生成「_屏蔽」或「_还原」结果，不会复制原文件；原位置的文件不会被改动。选择「移入回收站」时，处理完成后会把根目录外的原位置文件移入系统回收站，可随时找回。</p>
       </div>
 
       <div class="sec">
@@ -133,7 +133,7 @@
           <button class="seg is-active" data-v="keep" role="radio" aria-checked="true">保留两份</button>
           <button class="seg" data-v="overwrite" role="radio" aria-checked="false">覆盖同名</button>
         </div>
-        <p class="setting-desc">结果文件与根目录中已有结果<b>同名</b>时：「保留两份」会自动加序号（如「_脱敏_02」），旧结果不动；「覆盖同名」会直接更新那份结果文件。还原产物再次脱敏会归回原名（「A_还原」→「A_脱敏」），不会堆成「A_还原_脱敏」。原位置的文件不受影响。</p>
+        <p class="setting-desc">结果文件与根目录中已有结果<b>同名</b>时：「保留两份」会自动加序号（如「_屏蔽_02」），旧结果不动；「覆盖同名」会直接更新那份结果文件。还原产物再次屏蔽会归回原名（「A_还原」→「A_屏蔽」），不会堆成「A_还原_屏蔽」。原位置的文件不受影响。</p>
       </div>
 
       <div class="sec" id="detectSec">
@@ -145,7 +145,7 @@
         </div>
         <div id="detectBody" hidden>
           <div id="toggleList" class="detect-grid"></div>
-          <p class="policy-note">性别、年龄、出生日期等依法用于判断的信息不作为敏感信息，不会脱敏。人民法院、人民检察院等国家机关名称保留，只脱敏律所、公司等民商事主体。</p>
+          <p class="policy-note">性别、年龄、出生日期等依法用于判断的信息不作为敏感信息，不会屏蔽。人民法院、人民检察院等国家机关名称保留，只屏蔽律所、公司等民商事主体。</p>
         </div>
       </div>
 
@@ -184,14 +184,14 @@
             <path d="M8 6v3.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
             <circle cx="8" cy="11.4" r="0.9" fill="currentColor"/>
           </svg>
-          <p>映射库（vault 文件）保存着〔编码〕↔ 原文的对应关系，是还原脱敏文件的<b>唯一钥匙</b>。修改、删除或损坏此文件夹中的文件后，已生成的脱敏文件将<b>永远无法还原</b>。请勿手动编辑、移动或重命名其中任何文件。</p>
+          <p>映射库（vault 文件）保存着〔编码〕↔ 原文的对应关系，是还原屏蔽文件的<b>唯一钥匙</b>。修改、删除或损坏此文件夹中的文件后，已生成的屏蔽文件将<b>永远无法还原</b>。请勿手动编辑、移动或重命名其中任何文件。</p>
         </div>
       </div>
 
       <div class="sec" id="aboutSec">
         <h2>关于</h2>
         <div class="setting-row">
-          <span class="setting-path" id="aboutVersion">灵屿 · 隐私灵动岛</span>
+          <span class="setting-path" id="aboutVersion">灵屿岛</span>
           <button class="btn btn-mini" id="updateCheckBtn">检查更新</button>
         </div>
         <div id="updateBox" hidden>

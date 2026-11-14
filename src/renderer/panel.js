@@ -1,5 +1,5 @@
 'use strict';
-/* 灵屿主面板逻辑：概览 / 快速查找 / 文本恢复 / 设置 */
+/* 灵屿岛主面板逻辑：概览 / 快速查找 / 文本恢复 / 设置 */
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -192,7 +192,7 @@ function renderHistory(items) {
       </div>
       <span class="row-side">${fmtTime(h.ts)}</span>
       <div class="row-actions">
-        <button class="icon-btn" data-act="open" title="打开脱敏文件">
+        <button class="icon-btn" data-act="open" title="打开屏蔽文件">
           <svg viewBox="0 0 16 16" width="14" height="14"><path d="M6.5 3.5H3A1.5 1.5 0 0 0 1.5 5v8A1.5 1.5 0 0 0 3 14.5h8A1.5 1.5 0 0 0 12.5 13V9.5M9.5 1.5h5v5M14 2L7.5 8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
         </button>
         <button class="icon-btn" data-act="reveal" title="在文件夹中显示">
@@ -212,7 +212,7 @@ async function loadHistory() {
 }
 
 els.histClearBtn.addEventListener('click', async () => {
-  if (!await uiConfirm('确定清空全部脱敏记录？已生成的脱敏文件与映射库不受影响。', '清空')) return;
+  if (!await uiConfirm('确定清空全部屏蔽记录？已生成的屏蔽文件与映射库不受影响。', '清空')) return;
   await window.island.invoke('history:clear');
   toast('已清空记录', 'ok');
 });
@@ -242,7 +242,7 @@ els.pickBtn.addEventListener('click', (e) => {
 els.dropzone.addEventListener('click', () => els.pickBtn.click());
 els.rootBtn.addEventListener('click', () => window.island.invoke('dialog:pick-root'));
 
-/** 智能处理的完成提示：脱敏与还原分别汇总，问题单独提示 */
+/** 智能处理的完成提示：屏蔽与还原分别汇总，问题单独提示 */
 function showMaskResult(done) {
   if (!done) return;
   if (done.error === 'no-root') {
@@ -253,14 +253,14 @@ function showMaskResult(done) {
   if (done.total === 0) return;
 
   const okParts = [];
-  if (done.masked > 0) okParts.push(`脱敏完成 ${done.masked} 份 · ${done.totalPII} 处敏感信息`);
+  if (done.masked > 0) okParts.push(`屏蔽完成 ${done.masked} 份 · ${done.totalPII} 处敏感信息`);
   if (done.restored > 0) okParts.push(`还原完成 ${done.restored} 份 · ${done.restoredTotal} 处`);
   if (done.overwritten > 0) okParts.push(`已覆盖 ${done.overwritten} 个同名文件`);
   if (done.trashed > 0) okParts.push(`${done.trashed} 份原文件已移入回收站`);
 
   const problems = [];
   if (done.restoreMissing > 0) problems.push(`${done.restoreMissing} 个编码无法识别，可能已被修改`);
-  if (done.alreadyMasked > 0) problems.push(`${done.alreadyMasked} 份已是脱敏文件且未找到可还原编码`);
+  if (done.alreadyMasked > 0) problems.push(`${done.alreadyMasked} 份已是屏蔽文件且未找到可还原编码`);
   if (done.noPii > 0) problems.push(`未检出敏感信息（${done.noPii} 份）`);
   if (done.skipped > 0) problems.push(`${done.skipped} 份文件无法处理（格式不支持或过大）`);
 
@@ -548,7 +548,7 @@ const DETECT_ITEMS = [
 const BEHAVIORS = [
   ['clipboardWatch', '剪贴板自动识别', '复制了含编码的内容时，胶囊提示一键恢复'],
   ['autoCollapse', '灵动岛自动收起', '无操作时收起为顶部线段，悬停展开；关闭后一直显示'],
-  ['launchOnBoot', '开机自启', '登录 Windows 后自动运行灵屿'],
+  ['launchOnBoot', '开机自启', '登录 Windows 后自动运行灵屿岛'],
 ];
 
 function makeSwitch(label, desc, on, onChange) {
@@ -669,7 +669,7 @@ els.settingRootBtn.addEventListener('click', () => window.island.invoke('dialog:
 for (const b of els.importSeg.children) {
   b.addEventListener('click', async () => {
     if (b.dataset.v === 'discard' && b.dataset.v !== (settingsCache && settingsCache.importBehavior)) {
-      const ok = await uiConfirm('启用后，拖入/选择的文件在复制到根目录并脱敏完成时，会把原位置的文件移入系统回收站（可随时找回）。确定启用？', '启用');
+      const ok = await uiConfirm('启用后，拖入/选择的文件在复制到根目录并屏蔽完成时，会把原位置的文件移入系统回收站（可随时找回）。确定启用？', '启用');
       if (!ok) return;
     }
     window.island.invoke('settings:set', { importBehavior: b.dataset.v });
@@ -805,7 +805,7 @@ els.updateCheckBtn.addEventListener('click', async () => {
 
 els.updateInstallBtn.addEventListener('click', async () => {
   if (updateState.state === 'staged') {
-    const ok = await uiConfirm('重启应用以完成安装？未完成的脱敏任务会继续保留，映射库已自动保存。', '重启');
+    const ok = await uiConfirm('重启应用以完成安装？未完成的屏蔽任务会继续保留，映射库已自动保存。', '重启');
     if (!ok) return;
     try {
       await window.island.invoke('update:apply'); // 成功后主进程直接重启，不会走到下一行
@@ -878,7 +878,7 @@ window.island.on('index:updated', (stats) => {
   // 关于区块：当前版本号 + 恢复更新状态（面板重开时 staged/available 不丢）
   try {
     updateCurrentVersion = await window.island.invoke('app:version');
-    els.aboutVersion.textContent = `灵屿 · 隐私灵动岛 v${updateCurrentVersion}`;
+    els.aboutVersion.textContent = `灵屿岛 v${updateCurrentVersion}`;
     const us = await window.island.invoke('update:status');
     updateState = {
       state: us.state === 'staged' ? 'staged' : 'idle',

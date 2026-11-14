@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const dir = path.join(process.env.APPDATA, '灵屿 · 隐私灵动岛');
+const dir = path.join(process.env.APPDATA, '灵屿岛');
 const p = path.join(dir, 'settings.json');
 let s = {};
 try { s = JSON.parse(fs.readFileSync(p, 'utf8')); } catch { /* 首次 */ }

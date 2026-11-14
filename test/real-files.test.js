@@ -2,9 +2,9 @@
 /**
  * 真实法律文书全量测试（F:\Law\output\Chuanjianling 样本，已复制到 test/realtest）
  *  - 原文件 SHA-256 前后必须一致（永不改动原件）
- *  - 脱敏文件不得残留原始身份证号/手机号
+ *  - 屏蔽文件不得残留原始身份证号/手机号
  *  - 还原文件必须与原文件逐字节一致（docx 比较 zip 内各条目）
- *  - 性别/年龄/出生日期（依法不脱敏）必须原样保留
+ *  - 性别/年龄/出生日期（依法不屏蔽）必须原样保留
  *
  * 运行：node test/real-files.test.js   （隐私保护：输出仅含统计，不打印原文敏感值）
  */
@@ -57,7 +57,7 @@ const SRC = process.env.LINGYU_SAMPLES || 'F:\\Law\\output\\Chuanjianling';
 try {
   if (fs.existsSync(SRC)) {
     for (const f of fs.readdirSync(DIR)) {
-      if (f.includes('_脱敏') || f.includes('_还原')) fs.rmSync(path.join(DIR, f), { force: true });
+      if (f.includes('_屏蔽') || f.includes('_还原')) fs.rmSync(path.join(DIR, f), { force: true });
     }
     for (const f of fs.readdirSync(SRC)) {
       if (/\.(docx|md)$/i.test(f)) fs.copyFileSync(path.join(SRC, f), path.join(DIR, f));
@@ -68,10 +68,10 @@ try {
   console.log('样本同步失败，使用 test/realtest 现有文件:', e.message);
 }
 
-// 输入排除上轮测试产物（_脱敏/_还原）
+// 输入排除上轮测试产物（_屏蔽/_还原）
 const files = fs.readdirSync(DIR)
   .filter((f) => /\.(docx|md)$/i.test(f))
-  .filter((f) => !f.includes('_脱敏') && !f.includes('_还原'))
+  .filter((f) => !f.includes('_屏蔽') && !f.includes('_还原'))
   .sort();
 let origHashes = {};      // 原文件哈希（测试前）
 let totalPII = 0;
@@ -80,7 +80,7 @@ let piiSamples = {};      // type -> Set(原始值)，用于泄露检查
 const filesWithPII = [];
 const filesNoPII = [];
 
-/* ---------- 第一轮：脱敏 + 完整性 ---------- */
+/* ---------- 第一轮：屏蔽 + 完整性 ---------- */
 
 for (const f of files) {
   const p = path.join(DIR, f);
@@ -98,8 +98,8 @@ for (const f of files) {
   });
 
   if (/\.docx$/i.test(f)) {
-    // 脱敏 docx 不得残留原文中的身份证号/手机号
-    check(`脱敏无泄露: ${f}`, () => {
+    // 屏蔽 docx 不得残留原文中的身份证号/手机号
+    check(`屏蔽无泄露: ${f}`, () => {
       const origParts = docxTexts(p);
       const maskedParts = docxTexts(m.maskedPath);
       const origText = Object.values(origParts).map(xmlToText).join('\n');
@@ -125,7 +125,7 @@ for (const f of files) {
     });
   } else {
     // 文本文件：字节级往返
-    check(`脱敏无泄露: ${f}`, () => {
+    check(`屏蔽无泄露: ${f}`, () => {
       const orig = fs.readFileSync(p, 'utf8');
       const masked = fs.readFileSync(m.maskedPath, 'utf8');
       const phones = orig.match(/(?<!\d)1[3-9]\d{9}(?!\d)/g) || [];
@@ -142,11 +142,11 @@ for (const f of files) {
   }
 }
 
-/* ---------- 第二轮：依法不脱敏字段保留 ---------- */
+/* ---------- 第二轮：依法不屏蔽字段保留 ---------- */
 
 for (const f of filesWithPII.filter((x) => /\.docx$/i.test(x))) {
   const p = path.join(DIR, f);
-  const maskedPath = path.join(DIR, path.basename(p, '.docx') + '_脱敏.docx');
+  const maskedPath = path.join(DIR, path.basename(p, '.docx') + '_屏蔽.docx');
   if (!fs.existsSync(maskedPath)) continue;
   check(`性别/年龄/出生日期保留: ${f}`, () => {
     const origText = Object.values(docxTexts(p)).map(xmlToText).join('\n');
@@ -154,16 +154,16 @@ for (const f of filesWithPII.filter((x) => /\.docx$/i.test(x))) {
     // 独立出生日期（带“年月日”字样，与身份证内嵌日期不冲突）
     const dates = origText.match(/\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日/g) || [];
     for (const d of dates) {
-      assert.ok(maskedText.includes(d), `出生日期被误脱敏: ${d}`);
+      assert.ok(maskedText.includes(d), `出生日期被误屏蔽: ${d}`);
     }
     // 性别字样数量不减
     const gOrig = (origText.match(/[男女](性|别[::][男女])/g) || []).length;
     const gMask = (maskedText.match(/[男女](性|别[::][男女])/g) || []).length;
-    assert.ok(gMask >= gOrig, `性别字样被误脱敏 (${gOrig}→${gMask})`);
+    assert.ok(gMask >= gOrig, `性别字样被误屏蔽 (${gOrig}→${gMask})`);
     // 岁数数量不减
     const aOrig = (origText.match(/\d{1,3}\s*岁/g) || []).length;
     const aMask = (maskedText.match(/\d{1,3}\s*岁/g) || []).length;
-    assert.ok(aMask >= aOrig, `年龄被误脱敏 (${aOrig}→${aMask})`);
+    assert.ok(aMask >= aOrig, `年龄被误屏蔽 (${aOrig}→${aMask})`);
   });
 }
 
@@ -177,11 +177,11 @@ check('同一身份证号跨文件编码一致', () => {
   assert.strictEqual(code, again);
 });
 
-check('从脱敏文书复制的片段可还原', () => {
-  // 遍历所有脱敏 docx，找到含手机号或身份证遮罩的样本
+check('从屏蔽文书复制的片段可还原', () => {
+  // 遍历所有屏蔽 docx，找到含手机号或身份证遮罩的样本
   let phoneMasked = null, idMasked = null;
   for (const x of filesWithPII.filter((x) => /\.docx$/i.test(x))) {
-    const maskedPath = path.join(DIR, path.basename(x, '.docx') + '_脱敏.docx');
+    const maskedPath = path.join(DIR, path.basename(x, '.docx') + '_屏蔽.docx');
     if (!fs.existsSync(maskedPath)) continue;
     const maskedText = Object.values(docxTexts(maskedPath)).map(xmlToText).join('\n');
     phoneMasked ||= maskedText.match(/\d{3}\*{4}\d{4}〔[0-9a-f]{6,12}〕/);

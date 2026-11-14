@@ -73,7 +73,7 @@ const NAME_BLACKLIST = new Set([
   '招工', '招标', '招生', '招呼', '招聘', '措施',
 ]);
 
-// 称呼词：紧随姓名（高置信）或直接跟在姓氏后（本身已是脱敏表述）
+// 称呼词：紧随姓名（高置信）或直接跟在姓氏后（本身已是屏蔽表述）
 const TITLES = ['先生', '女士', '小姐', '同学', '老师', '医生', '大夫', '经理', '律师', '教授', '主任', '护士', '总裁', '老板', '师傅', '董事', '局长', '科长', '处长', '队长', '院长', '校长', '园长', '部长', '会计', '出纳'];
 const TITLES_SET = new Set(TITLES);
 
@@ -277,7 +277,7 @@ function detectAddress(text) {
 /* ---------------- 机构名（民商事主体） ---------------- */
 
 /**
- * 需要脱敏的主体后缀：律所、事务所、公司、集团、合作社
+ * 需要屏蔽的主体后缀：律所、事务所、公司、集团、合作社
  * 注意：人民法院 / 人民检察院 / 公安局 / 人民政府 等国家机关**不在**此列 ——
  * 文书来源机关是文书效力的一部分，脱掉反而不可用
  */
@@ -455,7 +455,7 @@ function detectNames(text, strongItems, knownNames) {
 
   for (let i = 0; i < text.length - 1; i++) {
     if (!SURNAMES_1.has(text[i]) && !SURNAMES_EXTRA.has(text[i])) continue;
-    // 「王女士」这类表述本身就是脱敏写法，不再处理
+    // 「王女士」这类表述本身就是屏蔽写法，不再处理
     if (TITLES_SET.has(text.substr(i + 1, 2))) continue;
     // 优先 3 字，证据不足时回落 2 字（「周砚，广东…」不能被切成「周砚广」）
     for (const len of [3, 2]) {
@@ -587,7 +587,7 @@ function detect(text, options = {}) {
   if (toggles.org) items.push(...detectOrgs(text));
   if (toggles.name) items.push(...detectNames(text, strong, options.knownNames));
 
-  // 排除依法不脱敏的内容（仅当检测项“完全落在”排除区间内时丢弃）
+  // 排除依法不屏蔽的内容（仅当检测项“完全落在”排除区间内时丢弃）
   const excl = exclusionRanges(text);
   const filtered = items.filter((it) => !isContained(it, excl));
 

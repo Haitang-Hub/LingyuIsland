@@ -140,7 +140,7 @@ test('检测：同文档姓名传播（后文只出现名字也命中）', () =>
   assert.ok(later.items.some((i) => i.type === 'name' && i.value === '陈阿满'));
 });
 
-test('排除：性别/年龄/出生日期不被脱敏', () => {
+test('排除：性别/年龄/出生日期不被屏蔽', () => {
   const { masked } = maskText(SAMPLE, new Vault());
   assert.ok(masked.includes('性别：男'), '性别应保留');
   assert.ok(masked.includes('年龄：35岁'), '年龄应保留');
@@ -152,7 +152,7 @@ test('地址检测', () => {
   assert.ok(items.some((i) => i.type === 'address' && i.value.includes('文三路138号')));
 });
 
-/* ---------------- 脱敏与恢复 ---------------- */
+/* ---------------- 屏蔽与恢复 ---------------- */
 
 test('屏蔽值可判断内容类型且内嵌编码', () => {
   const v = new Vault();
@@ -168,7 +168,7 @@ test('同一值 → 同一编码（跨文件稳定）', () => {
   assert.strictEqual(c1, c2);
 });
 
-test('脱敏→还原 完整往返', () => {
+test('屏蔽→还原 完整往返', () => {
   const v = new Vault();
   const { masked } = maskText(SAMPLE, v);
   assert.ok(hasCodes(masked));
@@ -208,7 +208,7 @@ test('maskText 不破坏 JSON 结构', () => {
 const TMP = path.join(__dirname, 'tmp');
 fs.mkdirSync(TMP, { recursive: true });
 
-test('GBK 文本文件 脱敏→还原（编码保持）', () => {
+test('GBK 文本文件 屏蔽→还原（编码保持）', () => {
   const gbk = iconvEncode(SAMPLE, 'gbk');
   const p = path.join(TMP, 'gbk-sample.txt');
   fs.writeFileSync(p, gbk);
@@ -230,7 +230,7 @@ function iconvEncode(text, enc) {
   return iconv.encode(text, enc);
 }
 
-test('UTF-8 文本文件 脱敏→还原', () => {
+test('UTF-8 文本文件 屏蔽→还原', () => {
   const p = path.join(TMP, 'utf8-sample.txt');
   fs.writeFileSync(p, SAMPLE, 'utf8');
   const v = new Vault();
@@ -241,7 +241,7 @@ test('UTF-8 文本文件 脱敏→还原', () => {
   assert.strictEqual(fs.readFileSync(r.restoredPath, 'utf8'), SAMPLE);
 });
 
-test('docx 脱敏→还原', () => {
+test('docx 屏蔽→还原', () => {
   const docxPath = path.join(TMP, 'sample.docx');
   const zip = new AdmZip();
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -255,7 +255,7 @@ test('docx 脱敏→还原', () => {
 
   const v = new Vault();
   const m = maskFile(docxPath, v);
-  assert.strictEqual(m.ok, true, 'docx 脱敏应成功');
+  assert.strictEqual(m.ok, true, 'docx 屏蔽应成功');
   assert.ok(m.count > 0, 'docx 应检出敏感信息');
 
   const maskedZip = new AdmZip(m.maskedPath);
@@ -335,7 +335,7 @@ test('timeGroupOf：时间分组', () => {
 const { isJunkFile, collectPaths } = require('../src/core/fileproc');
 
 test('isJunkFile：Office 锁文件与系统文件', () => {
-  assert.strictEqual(isJunkFile('~$委托代理合同_脱敏.docx'), true);
+  assert.strictEqual(isJunkFile('~$委托代理合同_屏蔽.docx'), true);
   assert.strictEqual(isJunkFile('~$a.xlsx'), true);
   assert.strictEqual(isJunkFile('.~lock.客户通讯录.csv#'), true);
   assert.strictEqual(isJunkFile('Thumbs.db'), true);
@@ -555,7 +555,7 @@ test('剪贴板监听：关闭识别时清除提示', () => {
   assert.strictEqual(events.length, 2, '普通文本不应触发提示');
 });
 
-/* ---------------- 按内容识别脱敏/还原（fileproc.js） ---------------- */
+/* ---------------- 按内容识别屏蔽/还原（fileproc.js） ---------------- */
 
 const { readFileText, detectFileIntent } = require('../src/core/fileproc');
 const iconv = require('iconv-lite');
@@ -563,7 +563,7 @@ const iconv = require('iconv-lite');
 const INTENT_DIR = path.join(TMP, 'intent');
 fs.mkdirSync(INTENT_DIR, { recursive: true });
 
-test('内容识别：明文→脱敏，含〔编码〕→还原', () => {
+test('内容识别：明文→屏蔽，含〔编码〕→还原', () => {
   const plain = path.join(INTENT_DIR, 'plain.txt');
   const masked = path.join(INTENT_DIR, 'masked.txt');
   fs.writeFileSync(plain, '姓名：张伟 手机：13812345678', 'utf8');
@@ -591,7 +591,7 @@ test('内容识别：Office 文档内的编码也能识别', () => {
   assert.strictEqual(detectFileIntent(p), 'restore');
 });
 
-test('内容识别：无法读取的格式回退为脱敏', () => {
+test('内容识别：无法读取的格式回退为屏蔽', () => {
   const p = path.join(INTENT_DIR, 'raw.bin');
   fs.writeFileSync(p, Buffer.from([0, 1, 2, 3, 255, 254, 0]));
   assert.strictEqual(readFileText(p), null);
@@ -745,47 +745,47 @@ function freshDir(name) {
   return dir;
 }
 
-test('结果路径：按内容生成 _脱敏 / _还原，且不需要源文件在根目录', () => {
+test('结果路径：按内容生成 _屏蔽 / _还原，且不需要源文件在根目录', () => {
   const root = freshDir('result-root-a');
   const a = resolveOutputPath(root, path.join(TMP, '任意位置', '起诉状.docx'), 'mask', 'keep');
-  assert.strictEqual(a.out, path.join(root, '起诉状_脱敏.docx'));
-  const b = resolveOutputPath(root, path.join(TMP, '任意位置', '起诉状_脱敏.docx'), 'restore', 'keep');
-  assert.strictEqual(b.out, path.join(root, '起诉状_还原.docx'), '_脱敏 后缀应被去掉');
+  assert.strictEqual(a.out, path.join(root, '起诉状_屏蔽.docx'));
+  const b = resolveOutputPath(root, path.join(TMP, '任意位置', '起诉状_屏蔽.docx'), 'restore', 'keep');
+  assert.strictEqual(b.out, path.join(root, '起诉状_还原.docx'), '_屏蔽 后缀应被去掉');
 });
 
-test('结果路径：还原产物再脱敏回到原名（_还原 → _脱敏）', () => {
+test('结果路径：还原产物再屏蔽回到原名（_还原 → _屏蔽）', () => {
   const root = freshDir('result-root-c');
-  // 还原文件再脱敏：不应出现「起诉状_还原_脱敏.docx」
+  // 还原文件再屏蔽：不应出现「起诉状_还原_屏蔽.docx」
   const a = resolveOutputPath(root, path.join(TMP, '任意位置', '起诉状_还原.docx'), 'mask', 'keep');
-  assert.strictEqual(a.out, path.join(root, '起诉状_脱敏.docx'));
+  assert.strictEqual(a.out, path.join(root, '起诉状_屏蔽.docx'));
   // 已有同名结果时按策略：保留两份 → _02，覆盖 → 原名
-  fs.writeFileSync(path.join(root, '起诉状_脱敏.docx'), 'x');
+  fs.writeFileSync(path.join(root, '起诉状_屏蔽.docx'), 'x');
   const keep = resolveOutputPath(root, path.join(TMP, '任意位置', '起诉状_还原.docx'), 'mask', 'keep');
-  assert.strictEqual(keep.out, path.join(root, '起诉状_脱敏_02.docx'));
+  assert.strictEqual(keep.out, path.join(root, '起诉状_屏蔽_02.docx'));
   const over = resolveOutputPath(root, path.join(TMP, '任意位置', '起诉状_还原.docx'), 'mask', 'overwrite');
-  assert.strictEqual(over.out, path.join(root, '起诉状_脱敏.docx'));
+  assert.strictEqual(over.out, path.join(root, '起诉状_屏蔽.docx'));
   // 带序号的还原产物同样归位
   assert.strictEqual(maskedPathOf(path.join(root, '起诉状_还原_02.docx')),
-    path.join(root, '起诉状_脱敏.docx'));
+    path.join(root, '起诉状_屏蔽.docx'));
 });
 
 test('结果路径：同名策略作用于结果文件', () => {
   const root = freshDir('result-root-b');
-  fs.writeFileSync(path.join(root, '起诉状_脱敏.docx'), 'x');
+  fs.writeFileSync(path.join(root, '起诉状_屏蔽.docx'), 'x');
   const keep = resolveOutputPath(root, path.join(TMP, '任意位置', '起诉状.docx'), 'mask', 'keep');
-  assert.strictEqual(keep.out, path.join(root, '起诉状_脱敏_02.docx'));
+  assert.strictEqual(keep.out, path.join(root, '起诉状_屏蔽_02.docx'));
   assert.strictEqual(keep.action, 'keep');
   const over = resolveOutputPath(root, path.join(TMP, '任意位置', '起诉状.docx'), 'mask', 'overwrite');
-  assert.strictEqual(over.out, path.join(root, '起诉状_脱敏.docx'));
+  assert.strictEqual(over.out, path.join(root, '起诉状_屏蔽.docx'));
   assert.strictEqual(over.action, 'overwrite');
 });
 
-test('脱敏/还原可写到指定路径，不传时行为不变', () => {
+test('屏蔽/还原可写到指定路径，不传时行为不变', () => {
   const dir = freshDir('outpath');
   const nested = path.join(dir, '结果目录');
   fs.mkdirSync(nested, { recursive: true });
   const src = path.join(dir, '源.txt');
-  const out = path.join(nested, '脱敏结果.txt');
+  const out = path.join(nested, '屏蔽结果.txt');
   fs.writeFileSync(src, '手机13812345678', 'utf8');
   const v = new Vault();
 
@@ -793,7 +793,7 @@ test('脱敏/还原可写到指定路径，不传时行为不变', () => {
   assert.strictEqual(r.ok, true);
   assert.strictEqual(r.maskedPath, out);
   assert.ok(fs.readFileSync(out, 'utf8').includes('138****5678'));
-  assert.ok(!fs.existsSync(path.join(dir, '源_脱敏.txt')), '指定路径后不应再写默认副本');
+  assert.ok(!fs.existsSync(path.join(dir, '源_屏蔽.txt')), '指定路径后不应再写默认副本');
 
   const restoredOut = path.join(nested, '还原结果.txt');
   const rr = restoreFile(out, v, restoredOut);
@@ -802,7 +802,7 @@ test('脱敏/还原可写到指定路径，不传时行为不变', () => {
   assert.ok(fs.readFileSync(restoredOut, 'utf8').includes('13812345678'));
 
   const r2 = maskFile(src, v);
-  assert.strictEqual(r2.maskedPath, path.join(dir, '源_脱敏.txt'), '不传 outPath 应保持原行为');
+  assert.strictEqual(r2.maskedPath, path.join(dir, '源_屏蔽.txt'), '不传 outPath 应保持原行为');
 });
 
 /* ---------------- 版本更新 ---------------- */
