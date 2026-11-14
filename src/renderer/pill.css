@@ -315,6 +315,10 @@ body { position: relative; display: flex; align-items: center; justify-content: 
 .pill.ok .label-idle { color: var(--green); }
 .pill.warn .label-idle { color: #ff6b6b; }
 
+/* 反馈期（忙碌/完成/警示）：悬停文案不得覆盖反馈文字 */
+.pill.busy .label-hover, .pill.ok .label-hover, .pill.warn .label-hover { opacity: 0; }
+.pill.busy .label-idle, .pill.ok .label-idle, .pill.warn .label-idle { opacity: 1; }
+
 /* ---------------- 收起态：屏幕顶边的细线 ----------------
    主进程切到收起态时窗口已贴住屏幕顶边并开启点击穿透（悬停自动展开），
    这里只负责胶囊↔线段的流畅过渡动画。 */

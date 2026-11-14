@@ -14,7 +14,7 @@ let maskedCount = 0;
 
 function setState(next) {
   mode = next;
-  pill.classList.remove('clip', 'busy', 'ok');
+  pill.classList.remove('clip', 'busy', 'ok', 'warn');
   if (next === 'clip') pill.classList.add('clip');
   if (next === 'busy') pill.classList.add('busy');
   resetIdleTimer(); // 状态变化视为一次活动，空闲计时重新开始
@@ -215,6 +215,12 @@ function pickIdleLine() {
 function refreshIdleLabel() {
   if (mode === 'busy') return;
   if (!clipChip.hidden) return;
+  // 反馈文案持有期内：只回显持有内容，绝不让闲聊文案/悬停文案顶掉
+  if (holdActive()) {
+    if (feedbackHold.cls) pill.classList.add(feedbackHold.cls);
+    labelIdle.textContent = feedbackHold.text;
+    return;
+  }
   const applyLine = () => {
     labelIdle.textContent = pickIdleLine();
     fxOnce('swap', 420); // 轻轻浮入，避免生硬跳变
@@ -236,7 +242,7 @@ function scheduleIdleRotate() {
   setTimeout(() => {
     if (mode === 'idle' && clipChip.hidden
         && !document.body.classList.contains('collapsed')
-        && Date.now() >= feedbackUntil
+        && !holdActive()
         && !pill.matches(':hover')) {
       refreshIdleLabel();
     }
@@ -292,21 +298,28 @@ function setBusy(text) {
 }
 
 // 还原结果展示期间忽略主进程的 cleared 广播，避免反馈文案被立刻覆盖
-let feedbackUntil = 0;
-function showFeedback(text, ok = false) {
-  feedbackUntil = Date.now() + 2600;
+let feedbackHold = null; // { text, cls, until, timer } —— 反馈文案持有期：悬停/轮换/广播都不抢
+
+function holdActive() { return !!(feedbackHold && Date.now() < feedbackHold.until); }
+
+function showHold(text, cls, ms) {
+  if (feedbackHold) clearTimeout(feedbackHold.timer);
+  feedbackHold = { text, cls, until: Date.now() + ms, timer: 0 };
+  pill.classList.remove('ok', 'warn');
+  if (cls) pill.classList.add(cls);
   labelIdle.textContent = text;
-  if (ok) {
-    pill.classList.add('ok');
-    celebrate();
-  } else {
-    faceShake(); // 没成功 → 轻轻摇头
-  }
   resetIdleTimer();
-  setTimeout(() => {
-    pill.classList.remove('ok');
+  feedbackHold.timer = setTimeout(() => {
+    feedbackHold = null;
+    pill.classList.remove('ok', 'warn');
     refreshIdleLabel();
-  }, 2600);
+  }, ms);
+}
+
+function showFeedback(text, ok = false) {
+  if (ok) celebrate();
+  else faceShake(); // 没成功 → 轻轻摇头
+  showHold(text, ok ? 'ok' : '', 6000);
 }
 
 async function restoreClipText() {
@@ -351,7 +364,7 @@ window.island.on('clip:found', (info) => {
     refreshIdleLabel();
     return;
   }
-  feedbackUntil = 0;
+  feedbackHold = null; // 新的剪贴板提示优先于未过期的反馈文案
   setState('clip');
   dot.classList.add('clip');
   clipChip.hidden = false;
@@ -368,7 +381,7 @@ window.island.on('clip:found', (info) => {
 // 剪贴板换成别的内容 / 监听被关闭 → 旧提示立即失效
 window.island.on('clip:cleared', () => {
   leaveClip();
-  if (Date.now() < feedbackUntil) return;
+  if (holdActive()) return;
   setState('idle');
   refreshIdleLabel();
 });
@@ -383,9 +396,7 @@ window.island.on('mask:done', (done) => {
   if (done.error === 'no-root') {
     setState('idle');
     // 未配置根目录是拖入失败的主因：必须让用户明确看见，而不是 3 秒一闪而过
-    labelIdle.textContent = '未配置根目录，正在为你打开设置…';
-    pill.classList.add('warn');
-    setTimeout(() => { pill.classList.remove('warn'); refreshIdleLabel(); }, 8000);
+    showHold('未配置根目录，正在为你打开设置…', 'warn', 8000);
     // 直接弹出面板的设置页（面板内同步有 toast 提示），省得用户去找入口
     window.island.invoke('panel:show-tab', 'settings');
     return;
@@ -398,13 +409,13 @@ window.island.on('mask:done', (done) => {
     if (done.restored > 0) parts.push(`还原 ${done.restored} 份`);
     if (done.overwritten > 0) parts.push(`覆盖同名 ${done.overwritten} 份`);
     if (parts.length) celebrate(); // 有实际成果 → 弹跳 + 高光
-    labelIdle.textContent = parts.length
+    const line = parts.length
       ? `已完成：${parts.join(' · ')}，副本已生成`
       : (done.restoreMissing > 0 ? '编码无法识别，未还原'
         : done.alreadyMasked > 0 ? '未找到可还原编码'
         : done.noPii > 0 ? '未检出敏感信息' : '处理完成');
-    pill.classList.add('ok');
-    setTimeout(() => { pill.classList.remove('ok'); refreshIdleLabel(); }, 3000);
+    // 完成/结果提示持有 6 秒：期间悬停、闲聊轮换都不会顶掉它
+    showHold(line, 'ok', 6000);
   } else {
     refreshIdleLabel();
   }
@@ -570,7 +581,6 @@ window.addEventListener('drop', async (e) => {
   } catch (err) {
     // invoke 层面的异常（如 IPC 竞态）也不能静默，否则胶囊永远卡在忙碌态
     setState('idle');
-    labelIdle.textContent = '处理失败：' + String(err && err.message || err).slice(0, 30);
-    setTimeout(refreshIdleLabel, 5000);
+    showHold('处理失败：' + String(err && err.message || err).slice(0, 30), '', 6000);
   }
 });
