@@ -784,12 +784,7 @@ function renderUpdateUI() {
   const st = updateState;
   els.updateBox.hidden = !(st.hasUpdate || st.state === 'staged');
   if (els.updateBox.hidden) return;
-  // 安装版（asar 只读）不支持就地更新：隐藏安装按钮，引导去下载页
-  els.updateInstallBtn.hidden = !!st.packaged;
-  if (st.packaged) {
-    els.updateStatusText.textContent = `发现新版本 v${st.latest}（当前 v${updateCurrentVersion}），请前往下载页获取安装包`;
-    return;
-  }
+  // 两种后端（源码覆盖 / electron-updater）都支持一键更新，安装按钮恒可用
   if (st.state === 'downloading') {
     els.updateStatusText.textContent = '正在下载新版本…';
     els.updateInstallBtn.disabled = true;

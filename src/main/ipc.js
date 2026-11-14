@@ -152,17 +152,18 @@ function register(ctx) {
   // 当前更新状态快照（不发网络请求，面板重开时恢复 UI）
   ipc_handle('update:status', () => updater.getStatus());
   // 下载并暂存新版本（update:progress / update:staged / update:error 广播进度）
-  ipc_handle('update:install', () => updater.installStaged());
-  // 应用暂存更新：拷贝覆盖 → 重启（before-quit 会先持久化映射库）
+  // 源码后端 = installStaged（npm 包覆盖）；安装版 = install（electron-updater 下载 Setup）
+  ipc_handle('update:install', () => (updater.install ? updater.install() : updater.installStaged()));
+  // 应用更新：源码后端 = 拷贝覆盖 → relaunch；安装版后端 = quitAndInstall（内部自行退出）
   ipc_handle('update:apply', () => {
-    const r = updater.applyStaged();
-    if (r.ok) {
+    const r = updater.apply ? updater.apply() : updater.applyStaged();
+    if (r.ok && r.relaunch && !updater.install) {
       electronApp.relaunch();
       electronApp.exit(0);
     }
     return r;
   });
-  // 打开 npm 包页（用户选择手动下载时）
+  // 打开下载页（手动兜底）：源码模式指 npm 包页，安装版指 GitHub Releases
   ipc_handle('update:open-page', () => { shell.openExternal(updater.getStatus().releasePage); return true; });
   ipc_handle('app:version', () => app_ref().getVersion());
   ipc_handle('app:quit', () => app_ref().quit());

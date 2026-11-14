@@ -13,6 +13,7 @@ const { Indexer } = require('./indexer');
 const { ClipboardWatcher } = require('./clipboard');
 const { register } = require('./ipc');
 const { createUpdater } = require('./updater');
+const { createAutoUpdater } = require('./electron-updater');
 const { createTray } = require('./tray');
 
 // E2E 跑测试时使用独立 userData：不与正在运行的应用实例争单实例锁/磁盘缓存
@@ -67,12 +68,19 @@ app.whenReady().then(() => {
     () => island.broadcast('clip:cleared')
   );
 
-  updater = createUpdater({
-    appDir: path.resolve(__dirname, '..', '..'),
-    currentVersion: app.getVersion(),
-    onBroadcast: (ch, payload) => island.broadcast(ch, payload),
-    isPackaged: app.isPackaged,
-  });
+  // 双后端更新器：安装版（asar 只读）走 electron-updater（GitHub Releases，
+  // 下载 Setup 静默安装 + 重启）；源码直跑保留 npm 包覆盖机制。接口完全一致。
+  updater = app.isPackaged
+    ? createAutoUpdater({
+        currentVersion: app.getVersion(),
+        onBroadcast: (ch, payload) => island.broadcast(ch, payload),
+      })
+    : createUpdater({
+        appDir: path.resolve(__dirname, '..', '..'),
+        currentVersion: app.getVersion(),
+        onBroadcast: (ch, payload) => island.broadcast(ch, payload),
+        isPackaged: app.isPackaged,
+      });
 
   register({ store, island, indexer, clipboardWatcher, updater });
 
