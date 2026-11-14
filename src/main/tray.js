@@ -52,7 +52,11 @@ function createTray(island, store) {
   // 收起/展开后重建菜单，刷新「隐藏/显示灵动岛」文案
   island.onPillStateChange = rebuild;
 
-  tray.on('click', () => island.togglePanel());
+  tray.on('click', () => {
+    // 点托盘 = 唤醒灵动岛（收起为线段/被隐藏时先展开）+ 打开面板
+    island.expandPill();
+    island.togglePanel();
+  });
   return tray;
 }
 
