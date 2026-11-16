@@ -32,11 +32,11 @@ const els = {
   alphaSlider: $('#alphaSlider'), alphaVal: $('#alphaVal'),
   radiusSlider: $('#radiusSlider'), radiusVal: $('#radiusVal'),
   bgSeg: $('#bgSeg'), bgPickBtn: $('#bgPickBtn'), bgClearBtn: $('#bgClearBtn'),
-  bgFileNote: $('#bgFileNote'), bgDesc: $('#bgDesc'),
+  bgFileNote: $('#bgFileNote'), bgDesc: $('#bgDesc'), bgThumb: $('#bgThumb'),
   glassSeg: $('#glassSeg'), glassDesc: $('#glassDesc'),
   panelWSlider: $('#panelWSlider'), panelWVal: $('#panelWVal'),
   panelHSlider: $('#panelHSlider'), panelHVal: $('#panelHVal'),
-  panelPresets: $('#panelPresets'), motionList: $('#motionList'),
+  panelPresets: $('#panelPresets'), motionSwitch: $('#motionSwitch'),
   detectHead: $('#detectHead'), detectBody: $('#detectBody'),
   detectSummary: $('#detectSummary'), detectToggleBtn: $('#detectToggleBtn'),
   settingRoot: $('#settingRoot'), settingRootBtn: $('#settingRootBtn'),
@@ -104,6 +104,8 @@ function toast(text, type = '', ms = 3200) {
   el.className = 'toast' + (type ? ' ' + type : '');
   el.textContent = text;
   els.toasts.appendChild(el);
+  // 最多同时显示 3 条：批量处理时提示会连发，堆太多会挡住列表
+  while (els.toasts.children.length > 3) els.toasts.firstElementChild.remove();
   setTimeout(() => el.remove(), ms);
 }
 
@@ -167,6 +169,22 @@ function switchTab(name) {
 for (const t of els.tabs) t.addEventListener('click', () => switchTab(t.dataset.tab));
 els.closeBtn.addEventListener('click', () => window.island.invoke('panel:hide'));
 
+/* 面板开合：主进程负责窗口整体淡入淡出，这里补一层缩放与位移（浮岛浮起 / 收回的观感）。
+   这段不受「界面动效」开关控制——开合手感属于基础体验，关掉动效也保持顺滑。 */
+function playPanelPhase(phase) {
+  const el = els.panelRoot;
+  if (!el) return;
+  el.classList.remove('is-opening', 'is-closing');
+  void el.offsetWidth; // 强制回流：连续开合时同名动画能重新播放
+  el.classList.add(phase === 'enter' ? 'is-opening' : 'is-closing');
+  clearTimeout(playPanelPhase.timer);
+  playPanelPhase.timer = setTimeout(() => {
+    el.classList.remove('is-opening', 'is-closing');
+  }, 340);
+}
+window.island.on('panel:enter', () => playPanelPhase('enter'));
+window.island.on('panel:exit', () => playPanelPhase('exit'));
+
 window.island.on('panel:show-tab', (tab) => {
   switchTab(tab || 'home');
   if (tab === 'restore') {
@@ -204,10 +222,10 @@ function renderHistory(items) {
       </div>
       <span class="row-side">${fmtTime(h.ts)}</span>
       <div class="row-actions">
-        <button class="icon-btn" data-act="open" title="打开屏蔽文件">
+        <button class="icon-btn" data-act="open" aria-label="打开屏蔽文件">
           <svg viewBox="0 0 16 16" width="14" height="14"><path d="M6.5 3.5H3A1.5 1.5 0 0 0 1.5 5v8A1.5 1.5 0 0 0 3 14.5h8A1.5 1.5 0 0 0 12.5 13V9.5M9.5 1.5h5v5M14 2L7.5 8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
         </button>
-        <button class="icon-btn" data-act="reveal" title="在文件夹中显示">
+        <button class="icon-btn" data-act="reveal" aria-label="在文件夹中显示">
           <svg viewBox="0 0 16 16" width="14" height="14"><path d="M1.5 4a1.5 1.5 0 0 1 1.5-1.5h3l1.5 2h6A1.5 1.5 0 0 1 15 6v6a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 2 12V4z" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
         </button>
       </div>`;
@@ -381,10 +399,10 @@ function renderSearch(data) {
       </div>
       <span class="row-side">${fmtSize(it.s)}<br>${fmtTime(it.m)}</span>
       <div class="row-actions">
-        <button class="icon-btn" data-act="open" title="打开">
+        <button class="icon-btn" data-act="open" aria-label="打开文件">
           <svg viewBox="0 0 16 16" width="14" height="14"><path d="M6.5 3.5H3A1.5 1.5 0 0 0 1.5 5v8A1.5 1.5 0 0 0 3 14.5h8A1.5 1.5 0 0 0 12.5 13V9.5M9.5 1.5h5v5M14 2L7.5 8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
         </button>
-        <button class="icon-btn" data-act="reveal" title="定位到文件夹">
+        <button class="icon-btn" data-act="reveal" aria-label="定位到文件夹">
           <svg viewBox="0 0 16 16" width="14" height="14"><path d="M1.5 4a1.5 1.5 0 0 1 1.5-1.5h3l1.5 2h6A1.5 1.5 0 0 1 15 6v6a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 2 12V4z" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
         </button>
       </div>`;
@@ -701,17 +719,61 @@ async function saveCollapseDelay(value) {
 const T = window.IslandThemes || { THEMES: [], ACCENT_PRESETS: [], normalizeTheme: (v) => v || 'midnight' };
 let bgVideoEl = null;
 
+/* ---------------- 色彩工具：强调色对比度 ---------------- */
+
+function hexRgb(hex) {
+  const m = /^#([0-9a-f]{6})$/i.exec(String(hex || ''));
+  if (!m) return null;
+  const v = parseInt(m[1], 16);
+  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+}
+
+/** WCAG 相对亮度（0~1），用于决定强调色上的文字取黑还是白 */
+function relLuminance(hex) {
+  const rgb = hexRgb(hex);
+  if (!rgb) return 0;
+  const [r, g, b] = rgb.map((c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** 强调色底上的文字色：亮底配深墨、暗底配白，任何自定义色都不会糊成一片 */
+function inkOn(hex) {
+  return relLuminance(hex) > 0.32 ? '#0b0f14' : '#ffffff';
+}
+
+function themeAccent(id) {
+  const t = (T.THEMES || []).find((x) => x.id === id);
+  return (t && t.swatch && t.swatch[2]) || '#0a84ff';
+}
+
+/** 滑杆已填充比例（CSS 用 --p 画“已走过”的轨道） */
+function syncRangeFill(input) {
+  if (!input) return;
+  const min = Number(input.min) || 0;
+  const max = Number(input.max);
+  const v = Number(input.value);
+  const p = Number.isFinite(max) && max > min ? ((v - min) / (max - min)) * 100 : 0;
+  input.style.setProperty('--p', Math.min(100, Math.max(0, p)).toFixed(2) + '%');
+}
+
 /** 应用外观到当前窗口（面板与胶囊共用同一套变量名） */
 function applyAppearance(a) {
   const root = document.documentElement;
-  root.dataset.theme = T.normalizeTheme(a.theme);
+  const themeId = T.normalizeTheme(a.theme);
+  root.dataset.theme = themeId;
   root.classList.toggle('motion-off', a.motion === false);
   root.style.setProperty('--island-alpha', String(Math.min(1, Math.max(0.55, Number(a.alpha) || 0.97))));
-  const r = Math.round(Math.min(22, Math.max(10, Number(a.radius) || 18)));
+  const r = Math.round(Math.min(25, Math.max(10, Number(a.radius) || 18)));
   root.style.setProperty('--panel-radius', r + 'px');
   root.style.setProperty('--pill-radius', Math.min(22, r + 4) + 'px');
+  // 强调色：自定义色要同步「文字色」——亮色强调配深墨字，避免白字糊在浅蓝/浅绿上
+  root.style.setProperty('--accent-on', inkOn(a.accent || themeAccent(themeId)));
   if (a.accent) root.style.setProperty('--accent', a.accent);
   else root.style.removeProperty('--accent');
+  // 背景遮罩浓度：独立于透明度，专门保证背景图前的内容可读
   // 磨砂质感：界面内模拟（窗体级系统材质会涂满窗口矩形、破坏圆角）
   root.classList.toggle('glass-weak', a.glass === 'auto');
   root.classList.toggle('glass-on', a.glass === 'on');
@@ -728,6 +790,7 @@ function applyBackground(a) {
     // 同一文件重复渲染时保留现有节点，避免视频每广播一次就重头播放
     const cur = wrap.firstElementChild;
     if (cur && cur.dataset.bgFile === file && cur.tagName.toLowerCase() === (type === 'video' ? 'video' : 'img')) {
+      els.panelRoot.dataset.bg = type;
       els.panelRoot.classList.add('has-bg');
       return;
     }
@@ -758,11 +821,13 @@ function applyBackground(a) {
       img.src = url;
       wrap.appendChild(img);
     }
+    els.panelRoot.dataset.bg = type;
     els.panelRoot.classList.add('has-bg');
   } else {
     wrap.innerHTML = '';
     bgVideoEl = null;
     els.panelRoot.classList.remove('has-bg');
+    delete els.panelRoot.dataset.bg;
   }
 }
 
@@ -780,18 +845,23 @@ function buildThemeGrid() {
     b.className = 'theme-card';
     b.dataset.theme = t.id;
     b.setAttribute('role', 'radio');
-    const sw = document.createElement('span');
-    sw.className = 'theme-swatches';
-    for (const c of t.swatch) {
-      const i = document.createElement('i');
-      i.style.setProperty('background', c);
-      sw.appendChild(i);
-    }
+    b.setAttribute('aria-label', t.name);
+    // 迷你预览：底色 / 卡片 / 强调色三层，一眼看出主题气质
+    const pv = document.createElement('span');
+    pv.className = 'theme-preview';
+    pv.setAttribute('aria-hidden', 'true');
+    pv.style.setProperty('--tp0', t.swatch[0]);
+    pv.style.setProperty('--tp1', t.swatch[1]);
+    pv.style.setProperty('--tp2', t.swatch[2]);
     const name = document.createElement('span');
     name.className = 'theme-name';
     name.textContent = t.name;
-    b.appendChild(sw);
+    const check = document.createElement('span');
+    check.className = 'theme-check';
+    check.setAttribute('aria-hidden', 'true');
+    b.appendChild(pv);
     b.appendChild(name);
+    b.appendChild(check);
     b.addEventListener('click', () =>
       window.island.invoke('settings:set', { appearance: { theme: t.id } }));
     els.themeGrid.appendChild(b);
@@ -806,10 +876,14 @@ function buildAccentRow() {
     b.className = 'accent-dot' + (v === '' ? ' follow' : '');
     b.dataset.accent = v;
     b.setAttribute('role', 'radio');
-    b.title = v === '' ? '跟随主题' : v;
     b.setAttribute('aria-label', v === '' ? '跟随主题' : '强调色 ' + v);
-    if (v) b.style.setProperty('background', v);
-    else b.textContent = 'A';
+    if (v) {
+      b.style.setProperty('background', v);
+      b.style.setProperty('--on-accent', inkOn(v));
+    } else {
+      b.textContent = 'A';
+      b.style.setProperty('--on-accent', '#ffffff');
+    }
     b.addEventListener('click', () =>
       window.island.invoke('settings:set', { appearance: { accent: v } }));
     els.accentRow.appendChild(b);
@@ -836,8 +910,15 @@ function renderAppearance(st) {
   const alphaPct = Math.round(Math.min(1, Math.max(0.55, Number(a.alpha) || 0.97)) * 100);
   if (document.activeElement !== els.alphaSlider) els.alphaSlider.value = String(alphaPct);
   els.alphaVal.textContent = alphaPct + '%';
+  syncRangeFill(els.alphaSlider);
   if (document.activeElement !== els.radiusSlider) els.radiusSlider.value = String(a.radius);
   els.radiusVal.textContent = a.radius + 'px';
+  syncRangeFill(els.radiusSlider);
+
+  const hasBg = !!(a.bg && a.bg.file && a.bg.type !== 'none');
+
+  els.motionSwitch.classList.toggle('on', a.motion !== false);
+  els.motionSwitch.setAttribute('aria-checked', String(a.motion !== false));
 
   for (const group of [els.bgSeg, els.glassSeg]) {
     const key = group === els.bgSeg ? (a.bg && a.bg.type) : a.glass;
@@ -855,19 +936,32 @@ function renderAppearance(st) {
   els.panelWVal.textContent = pw + ' px';
   if (document.activeElement !== els.panelHSlider) els.panelHSlider.value = String(ph);
   els.panelHVal.textContent = ph + ' px';
+  syncRangeFill(els.panelWSlider);
+  syncRangeFill(els.panelHSlider);
   markPanelPreset(pw, ph);
   els.bgPickBtn.disabled = !a.bg || a.bg.type === 'none';
   els.bgClearBtn.disabled = !a.bg || !a.bg.file;
+  // 旧存档没有原始文件名：只报「已应用」，不把内部 hash 文件名露给用户
   els.bgFileNote.textContent = a.bg && a.bg.file
-    ? (a.bg.name ? a.bg.name + '（已应用）' : a.bg.file)
+    ? (a.bg.name ? a.bg.name + '（已应用）' : '背景已应用')
     : '';
+  // 缩略图：让用户一眼看到「用的就是这张图」，而不是只看到一个文件名
+  if (a.bg && a.bg.file) {
+    els.bgThumb.hidden = false;
+    els.bgThumb.dataset.type = a.bg.type;
+    els.bgThumb.style.backgroundImage = 'url("islandbg://bg/' + encodeURIComponent(a.bg.file) + '")';
+  } else {
+    els.bgThumb.hidden = true;
+    els.bgThumb.dataset.type = '';
+    els.bgThumb.style.backgroundImage = '';
+  }
   els.bgDesc.textContent = a.bg && a.bg.type === 'video' && a.bg.file
     ? '视频背景运行中：面板隐藏时自动暂停。若画面卡顿，建议更换更小的文件或使用图片背景。'
     : '图片 ≤10MB，视频 ≤20MB（mp4/webm，静音循环播放）。背景文件仅存本机，面板隐藏时视频自动暂停。';
 
   els.glassDesc.textContent = a.glass === 'off'
-    ? '当前为实色底。开启磨砂可以让面板透出一点桌面底色，与「不透明度」滑杆叠加生效。'
-    : '磨砂已开启：只作用于面板本体（圆角外保持透明），浓度随下方「不透明度」联动。';
+    ? '当前为实色外框。开启磨砂只会让外框与背景更通透，内容片保持实色，文字不会跟着变淡。'
+    : '磨砂已开启：外框更通透、背景图更柔和；内容片衬底不变，文字始终清晰。';
 }
 
 /* 滑杆：input 实时预览，change 落盘（CSS 变量自动联动背景暗化层，无需重建背景） */
@@ -887,6 +981,55 @@ els.radiusSlider.addEventListener('input', () => {
 });
 els.radiusSlider.addEventListener('change', () =>
   window.island.invoke('settings:set', { appearance: { radius: Number(els.radiusSlider.value) } }));
+
+/* ---------- 鼠标交互：面板跟随光晕 + 按钮水滴涟漪 ----------
+   两者都只在「界面动效」开启时生成，关掉后 DOM 里不会出现动画元素。 */
+els.panelRoot.addEventListener('mousemove', (e) => {
+  if (document.documentElement.classList.contains('motion-off')) return;
+  const r = els.panelRoot.getBoundingClientRect();
+  // 直接写 CSS 变量，不经过 rAF：后台窗口的 rAF 可能被节流，跟随光晕会整段失效
+  els.panelRoot.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+  els.panelRoot.style.setProperty('--my', (e.clientY - r.top) + 'px');
+  els.panelRoot.classList.add('has-pointer');
+});
+els.panelRoot.addEventListener('mouseleave', () => {
+  els.panelRoot.classList.remove('has-pointer');
+});
+
+function dropRipple(btn, x, y) {
+  const r = btn.getBoundingClientRect();
+  // 正圆水波：从按下点向外均匀荡开，单色无外环（与灵动岛的圆形反馈同调）
+  const size = Math.max(r.width, r.height) * 1.35;
+  const d = document.createElement('span');
+  d.className = 'ripple';
+  d.style.width = d.style.height = size + 'px';
+  d.style.left = (x - r.left - size / 2) + 'px';
+  d.style.top = (y - r.top - size / 2) + 'px';
+  btn.appendChild(d);
+  setTimeout(() => d.remove(), 520);
+}
+
+document.addEventListener('pointerdown', (e) => {
+  if (document.documentElement.classList.contains('motion-off')) return;
+  const btn = e.target.closest && e.target.closest('.btn, .seg, .tab, .icon-btn, .preset, .chip-btn');
+  if (!btn || btn.disabled) return;
+  dropRipple(btn, e.clientX, e.clientY);
+});
+
+/* 界面动效开关（点按 / 空格 / 回车都可用） */
+function toggleMotion() {
+  const on = !els.motionSwitch.classList.contains('on');
+  window.island.invoke('settings:set', { appearance: { motion: on } });
+}
+els.motionSwitch.addEventListener('click', toggleMotion);
+els.motionSwitch.addEventListener('keydown', (e) => {
+  if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggleMotion(); }
+});
+
+/* 任意 range 拖动时同步填充比例（--p），滑杆才有“已走过”的色带 */
+document.addEventListener('input', (e) => {
+  if (e.target && e.target.type === 'range') syncRangeFill(e.target);
+});
 
 for (const b of els.bgSeg.children) {
   b.addEventListener('click', async () => {
@@ -947,6 +1090,8 @@ function showPanelSizeLabels() {
   const s = panelSizeFromSliders();
   els.panelWVal.textContent = s.w + ' px';
   els.panelHVal.textContent = s.h + ' px';
+  syncRangeFill(els.panelWSlider);
+  syncRangeFill(els.panelHSlider);
   markPanelPreset(s.w, s.h);
 }
 function commitPanelSize() {

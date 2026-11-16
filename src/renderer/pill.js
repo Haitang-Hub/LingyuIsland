@@ -281,7 +281,7 @@ function applyPillAppearance(a) {
   if (!a) return;
   const root = document.documentElement;
   root.dataset.theme = THEMES_API.normalizeTheme(a.theme);
-  root.classList.toggle('motion-off', a.motion === false);
+  // 面板的动效开关不作用于胶囊：表情与呼吸属于岛自己的状态反馈
   root.style.setProperty('--island-alpha', String(Math.min(1, Math.max(0.55, Number(a.alpha) || 1))));
   const r = Math.round(Math.min(22, Math.max(10, Number(a.radius) || 18)));
   root.style.setProperty('--pill-radius', Math.min(22, r + 4) + 'px');
@@ -291,6 +291,18 @@ function applyPillAppearance(a) {
   root.classList.toggle('glass-weak', a.glass === 'auto');
   root.classList.toggle('glass-on', a.glass === 'on');
 }
+
+/* ---------------- 设置变更：主题 / 强调色 / 透明度 / 自动收起实时同步 ---------------- */
+window.island.on('settings:changed', async () => {
+  try {
+    const st = await window.island.invoke('settings:get');
+    autoCollapse = !!st.settings.autoCollapse;
+    collapseDelaySec = Number(st.settings.autoCollapseDelay) || 20;
+    applyPillAppearance(st.settings.appearance);
+    refreshIdleLabel();
+    resetIdleTimer();
+  } catch { /* 启动竞态时下一次广播会补上 */ }
+});
 
 /* ---------------- 初始化 ---------------- */
 

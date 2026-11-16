@@ -10,18 +10,19 @@
   <div class="panel" data-ui>
     <!-- 自定义背景层（islandbg:// 协议；无背景时不显示） -->
     <div class="panel-bg" id="panelBg" aria-hidden="true"></div>
+    <div class="panel-glow" aria-hidden="true"></div>
     <header class="titlebar">
       <span class="mark" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="22" height="22">
-          <rect x="2" y="8" width="20" height="8" rx="4" fill="#0a84ff" opacity="0.9"/>
+          <rect x="2" y="8" width="20" height="8" rx="4" fill="var(--accent)" opacity="0.9"/>
           <circle cx="7.5" cy="12" r="1.8" fill="#fff"/>
           <rect x="11" y="10.6" width="6" height="2.8" rx="1.4" fill="#fff" opacity="0.75"/>
         </svg>
       </span>
       <h1>灵屿岛</h1>
-      <span class="vault-chip" id="vaultChip" title="屏蔽映射库状态">—</span>
+      <span class="vault-chip" id="vaultChip" aria-label="屏蔽映射库状态">—</span>
       <span class="spacer"></span>
-      <button class="icon-btn" id="closeBtn" title="收起 (Esc)" aria-label="收起面板">
+      <button class="icon-btn" id="closeBtn" aria-label="收起面板（Esc）">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
           <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
@@ -38,12 +39,12 @@
 
     <!-- 概览 -->
     <section class="view is-active" id="view-home">
-      <div class="dropzone" id="dropzone" tabindex="0" aria-label="点击选择文件，自动屏蔽或还原">
+      <div class="dropzone" id="dropzone" tabindex="0" aria-label="点击选择文件 自动屏蔽或还原">
         <svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true">
-          <rect x="6" y="10" width="28" height="18" rx="5" fill="none" stroke="currentColor" stroke-width="1.8"/>
-          <path d="M20 16v10m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          <path d="M5 13a2 2 0 0 1 2-2h8l2.5 3H33a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V13z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+          <path d="M20 17v8m0 0l-3-3m3 3l3-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        <p class="dz-title">选择文件，自动屏蔽或还原</p>
+        <p class="dz-title">选择文件 自动屏蔽或还原</p>
         <p class="dz-sub">点击下方按钮选取文件（要把文件拖到屏幕顶部的胶囊上也可以）；按内容识别：明文 → 「文件名_屏蔽」副本，含屏蔽编码的文件 → 「文件名_还原」副本，根目录只保留结果，原位置的文件不会被改动</p>
         <button class="btn btn-ghost" id="pickBtn">选择文件…</button>
       </div>
@@ -79,7 +80,7 @@
           <path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
         <input id="searchInput" type="text" placeholder="查找根目录下的文件…" aria-label="查找文件" />
-        <button class="btn btn-mini" id="rescanBtn" title="重新扫描根目录">重建索引</button>
+        <button class="btn btn-mini" id="rescanBtn">重建索引</button>
       </div>
       <div class="chips" id="catChips" role="tablist" aria-label="文件类别筛选"></div>
       <p class="search-meta" id="searchMeta">输入文件名即可快速定位</p>
@@ -112,78 +113,109 @@
 
     <!-- 外观 -->
     <section class="view" id="view-appearance">
+      <div class="appear-note">
+        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+          <path d="M8 1.7c2.6 3 4.2 5.2 4.2 7.1A4.2 4.2 0 0 1 8 13a4.2 4.2 0 0 1-4.2-4.2c0-1.9 1.6-4.1 4.2-7.1z"
+                fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+          <path d="M6.3 8.8c.2 1.1 1 1.7 2 1.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+        </svg>
+        <p><b>文字始终清晰。</b>内容落在半透明衬底上，背景先进过模糊再透出，怎么调都只改变观感，不影响识别与阅读。</p>
+      </div>
+
       <div class="sec">
-        <h2>主题</h2>
+        <div class="sec-head">
+          <h2>主题</h2>
+          <span class="sec-hint">深色 4 · 浅色 4</span>
+        </div>
         <div class="theme-grid" id="themeGrid" role="radiogroup" aria-label="界面主题"></div>
       </div>
 
       <div class="sec">
-        <h2>强调色</h2>
+        <div class="sec-head">
+          <h2>强调色</h2>
+          <span class="sec-hint">按钮 · 高亮 · 状态点</span>
+        </div>
         <div class="accent-row" id="accentRow" role="radiogroup" aria-label="强调色"></div>
-        <p class="setting-desc">强调色用于按钮、高亮与状态点；选择「跟随主题」时由当前主题决定。</p>
+        <p class="setting-desc">「跟随主题」由当前主题决定；手动选择后，按钮上的文字会自动取黑或白，任何颜色都保持清晰。</p>
       </div>
 
       <div class="sec">
-        <h2>透明度与圆角</h2>
-        <div class="slider-row">
-          <label for="alphaSlider">不透明度</label>
-          <input type="range" id="alphaSlider" min="55" max="100" step="1" value="97" aria-label="面板不透明度" />
-          <span class="slider-val" id="alphaVal">97%</span>
+        <div class="sec-head">
+          <h2>面板</h2>
+          <span class="sec-hint">不透明度 · 圆角 · 磨砂</span>
         </div>
-        <div class="slider-row">
-          <label for="radiusSlider">面板圆角</label>
-          <input type="range" id="radiusSlider" min="10" max="22" step="1" value="18" aria-label="面板圆角" />
-          <span class="slider-val" id="radiusVal">18px</span>
+        <div class="ctl-row">
+          <label class="ctl-label" for="alphaSlider">不透明度</label>
+          <input type="range" id="alphaSlider" min="55" max="100" step="1" value="97" aria-label="背景、面板、按钮与灵动岛的不透明度" />
+          <span class="ctl-val" id="alphaVal">97%</span>
         </div>
+        <div class="ctl-row">
+          <label class="ctl-label" for="radiusSlider">面板圆角</label>
+          <input type="range" id="radiusSlider" min="10" max="25" step="1" value="18" aria-label="面板圆角" />
+          <span class="ctl-val" id="radiusVal">18px</span>
+        </div>
+        <div class="seg-group appearance-seg" id="glassSeg" role="radiogroup" aria-label="磨砂质感">
+          <button class="seg is-active" data-v="off" role="radio" aria-checked="true">实色</button>
+          <button class="seg" data-v="auto" role="radio" aria-checked="false">轻磨砂</button>
+          <button class="seg" data-v="on" role="radio" aria-checked="false">强磨砂</button>
+        </div>
+        <p class="setting-desc" id="glassDesc">磨砂让外框与背景更通透；内容片另有衬底，文字不会跟着变淡。</p>
       </div>
 
       <div class="sec">
-        <h2>背景</h2>
+        <div class="sec-head">
+          <h2>背景</h2>
+          <span class="sec-hint">图片或视频</span>
+        </div>
         <div class="seg-group appearance-seg" id="bgSeg" role="radiogroup" aria-label="背景类型">
           <button class="seg is-active" data-v="none" role="radio" aria-checked="true">无</button>
           <button class="seg" data-v="image" role="radio" aria-checked="false">图片</button>
           <button class="seg" data-v="video" role="radio" aria-checked="false">视频</button>
         </div>
         <div class="bg-actions">
+          <span class="bg-thumb" id="bgThumb" hidden aria-hidden="true"></span>
           <button class="btn btn-mini" id="bgPickBtn" disabled>选择文件…</button>
           <button class="btn btn-mini" id="bgClearBtn" disabled>清除背景</button>
           <span class="bg-file-note" id="bgFileNote"></span>
         </div>
-        <p class="setting-desc" id="bgDesc">图片 ≤10MB，视频 ≤20MB（mp4/webm，静音循环播放）。背景文件仅存本机映射库目录旁，面板隐藏时视频自动暂停。</p>
+        <p class="setting-desc" id="bgDesc">图片 ≤10MB，视频 ≤20MB（mp4/webm，静音循环播放）。背景文件仅存本机，面板隐藏时视频自动暂停。</p>
       </div>
 
       <div class="sec">
-        <h2>磨砂质感</h2>
-        <div class="seg-group appearance-seg" id="glassSeg" role="radiogroup" aria-label="磨砂质感">
-          <button class="seg is-active" data-v="off" role="radio" aria-checked="true">关</button>
-          <button class="seg" data-v="auto" role="radio" aria-checked="false">轻磨砂</button>
-          <button class="seg" data-v="on" role="radio" aria-checked="false">强磨砂</button>
+        <div class="sec-head">
+          <h2>窗口尺寸</h2>
+          <span class="sec-hint">宽高独立</span>
         </div>
-        <p class="setting-desc" id="glassDesc">把面板底色变得通透一层，形成磨砂质感，与「不透明度」滑杆叠加生效。</p>
-      </div>
-
-      <div class="sec">
-        <h2>窗口尺寸</h2>
-        <div class="slider-row">
-          <label for="panelWSlider">宽度</label>
-          <input type="range" id="panelWSlider" min="460" max="1040" step="10" value="560" />
-          <span class="slider-val" id="panelWVal">560 px</span>
+        <div class="ctl-row">
+          <label class="ctl-label" for="panelWSlider">面板宽度</label>
+          <input type="range" id="panelWSlider" min="360" max="1040" step="10" value="560" />
+          <span class="ctl-val" id="panelWVal">560 px</span>
         </div>
-        <div class="slider-row">
-          <label for="panelHSlider">高度</label>
-          <input type="range" id="panelHSlider" min="520" max="1000" step="10" value="700" />
-          <span class="slider-val" id="panelHVal">700 px</span>
+        <div class="ctl-row">
+          <label class="ctl-label" for="panelHSlider">面板高度</label>
+          <input type="range" id="panelHSlider" min="360" max="1000" step="10" value="700" />
+          <span class="ctl-val" id="panelHVal">700 px</span>
         </div>
         <div class="preset-row" id="panelPresets">
           <button class="preset" data-w="470" data-h="820">细长 470×820</button>
           <button class="preset" data-w="560" data-h="700">标准 560×700</button>
           <button class="preset" data-w="820" data-h="620">宽扁 820×620</button>
         </div>
-        <p class="setting-desc">宽高分开调节：拉窄拉高是「细长」（长列表更省地方），拉宽压低是「宽扁」（表格与并排文本更好读）。实际尺寸始终由布局钳制在屏幕可见范围内。</p>
+        <p class="setting-desc">拉窄拉高是「细长」（长列表更省地方），拉宽压低是「宽扁」（表格与并排文本更好读）。实际尺寸始终钳制在屏幕可见范围内。</p>
       </div>
 
       <div class="sec">
-        <div id="motionList"></div>
+        <div class="sec-head">
+          <h2>动效</h2>
+          <span class="sec-hint">水滴 · 回弹 · 光晕</span>
+        </div>
+        <div class="switch-row">
+          <div>
+            <div class="sw-label">界面动效</div>
+            <div class="sw-desc">开启：按钮水滴、按下回弹、光标光晕。关闭：无动画。</div>
+          </div>
+          <div class="switch" id="motionSwitch" role="switch" aria-checked="true" tabindex="0" aria-label="界面动效"></div>
+        </div>
       </div>
     </section>
 

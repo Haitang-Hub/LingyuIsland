@@ -10,14 +10,16 @@
   else root.IslandThemes = factory();
 })(typeof self !== 'undefined' ? self : globalThis, function () {
 
+  // 8 款主题：ID 保持稳定，旧存档不会失效；霜雪（冷白）收尾。
   const THEMES = [
-    { id: 'midnight', name: '星夜蓝', group: 'dark', swatch: ['#0e1014', '#1b1f27', '#0a84ff'] },
-    { id: 'graphite', name: '石墨',   group: 'dark', swatch: ['#101214', '#1d2126', '#7d95b5'] },
-    { id: 'forest',   name: '松林',   group: 'dark', swatch: ['#0c120e', '#15201a', '#34c77b'] },
-    { id: 'sunset',   name: '落日',   group: 'dark', swatch: ['#14100b', '#221a12', '#ff8c42'] },
-    { id: 'lavender', name: '薰衣草', group: 'dark', swatch: ['#0f0d16', '#1c1826', '#a78bfa'] },
-    { id: 'cloud',    name: '云白',   group: 'light', swatch: ['#f2f5f9', '#ffffff', '#2563eb'] },
-    { id: 'sakura',   name: '樱粉',   group: 'light', swatch: ['#fdf2f5', '#ffffff', '#d94f7d'] },
+    { id: 'obsidian', name: '黑金', group: 'dark', swatch: ['#080808', '#1c1810', '#d4af37'] },
+    { id: 'graphite', name: '墨砚', group: 'dark', swatch: ['#141618', '#202328', '#8fa8c0'] },
+    { id: 'midnight', name: '曜夜', group: 'dark', swatch: ['#101a38', '#1c2a4c', '#6f9dff'] },
+    { id: 'teal',     name: '青黛', group: 'dark', swatch: ['#16323f', '#204859', '#5fb8c9'] },
+    { id: 'lavender', name: '雾紫', group: 'light', swatch: ['#b9aed6', '#e6dff5', '#6f52b8'] },
+    { id: 'mauve',    name: '晨雾', group: 'light', swatch: ['#f0e6d6', '#faf4e9', '#b8823a'] },
+    { id: 'sakura',   name: '樱落', group: 'light', swatch: ['#fbeaf0', '#ffffff', '#c94670'] },
+    { id: 'cloud',    name: '霜雪', group: 'light', swatch: ['#eaf1f8', '#ffffff', '#3970c9'] },
   ];
 
   const DEFAULT_THEME = 'midnight';
@@ -38,7 +40,18 @@
   }
 
   /** 强调色预设（外观页色点）；首项为空 = 跟随主题 */
-  const ACCENT_PRESETS = ['', '#0a84ff', '#34c77b', '#ff8c42', '#a78bfa', '#38bdf8', '#f472b6'];
+  // 强调色预设：8 款通透悦目的低饱和色，避开各主题强调色；首项为空 = 跟随主题
+  const ACCENT_PRESETS = [
+    '',          // 跟随主题
+    '#6e9bc4',   // 晴空蓝
+    '#62a8a2',   // 湖水青
+    '#7fa86b',   // 嫩叶绿
+    '#c4a34e',   // 暖金黄
+    '#d08355',   // 赤陶橙
+    '#c4708e',   // 莓果粉
+    '#9a86c2',   // 薰衣草紫
+    '#a29083',   // 暖岩灰
+  ];
 
   return { THEMES, THEME_IDS, DEFAULT_THEME, ACCENT_RE, ACCENT_PRESETS, normalizeTheme, normalizeAccent };
 });

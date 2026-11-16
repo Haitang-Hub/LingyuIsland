@@ -13,6 +13,13 @@ const { BrowserWindow, screen } = require('electron');
 const path = require('path');
 const { computeIslandLayout, normalizePanelSize, BASE } = require('../core/layout');
 
+/** 窗口是否已销毁：单元测试用轻量替身，不一定实现 isDestroyed */
+function isGone(win) {
+  if (!win) return true;
+  if (typeof win.isDestroyed !== 'function') return false;
+  try { return win.isDestroyed(); } catch { return true; }
+}
+
 // 设计基准尺寸（实际窗口尺寸由 computeIslandLayout 按当前工作区动态计算）
 const PILL_W = BASE.pillW, PILL_H = BASE.pillH;
 const PANEL_W = BASE.panelW, PANEL_H = BASE.panelH;
@@ -113,6 +120,9 @@ class Island {
   }
 
   /** 面板尺寸变化 → 立即重新布局（宽高独立：可细长 / 宽扁） */
+  /** 收起过渡进行中（窗口仍可见但正在淡出） */
+  _closing = false;
+
   setPanelSize(size) {
     this.panelSize = normalizePanelSize(size, this.panelSize);
     this.layout();
@@ -158,6 +168,9 @@ class Island {
     if (!this.panel) return;
     this.layout();
     if (tab) this.panel.webContents.send('panel:show-tab', tab);
+    // 正处在收起过渡里再点开：直接反向，别让窗口停在半透明状态
+    const reopening = this._closing;
+    this._cancelClose();
     // 面板始终为「点击外部即收起」模式：必须激活窗口，blur 才会触发
     const wasVisible = this.panel.isVisible();
     if (!wasVisible) {
@@ -166,8 +179,17 @@ class Island {
     }
     this.panel.show();
     this.panel.focus();
+    // 收起途中被打断时不再从头淡入（_cancelClose 已把透明度拉回 1），否则会暗闪一下
+    if (!reopening) this._sendPanelPhase('enter');
     if (!wasVisible) this._fadeIn();
     this._notifyPanel(true); // 面板打开期间胶囊暂停空闲收起计时
+  }
+
+  /** 通知渲染层播放开合动画（面板内的缩放/位移由 CSS 负责，窗口透明度由主进程负责） */
+  _sendPanelPhase(phase) {
+    const w = this.panel;
+    if (isGone(w)) return;
+    try { w.webContents.send('panel:' + phase); } catch { /* ignore */ }
   }
 
   _fadeIn() {
@@ -175,34 +197,67 @@ class Island {
     const w = this.panel;
     let o = 0;
     this._fadeTimer = setInterval(() => {
-      if (w.isDestroyed()) return this._stopFade();
-      o = Math.min(1, o + 0.25);
+      if (isGone(w)) return this._stopFade();
+      // 指数逼近 1：起步快、收尾柔，比等差步进更像真实的“浮现”
+      o = Math.min(1, o + (1 - o) * 0.34 + 0.04);
       try { w.setOpacity(o); } catch { /* ignore */ }
-      if (o >= 1) this._stopFade();
-    }, 35); // 约 140ms 淡入
+      if (o >= 0.995) this._stopFade();
+    }, 16); // 约 150ms 淡入
   }
 
   _stopFade() {
     if (this._fadeTimer) { clearInterval(this._fadeTimer); this._fadeTimer = null; }
   }
 
+  /** 取消进行中的收起过渡（窗口仍在，只是透明度在降） */
+  _cancelClose() {
+    if (!this._closing) return;
+    this._stopFade();
+    this._closing = false;
+    try { this.panel.setOpacity(1); } catch { /* ignore */ }
+  }
+
   /** 胶囊在面板之外，点击它也应视为「点击外部」而收起 */
   onPillClick(tab) {
+    if (this._closing) { this.showPanel(tab); return; } // 收起中再点 = 重新打开
     if (this.panel && this.panel.isVisible()) this.hidePanel();
     else this.showPanel(tab);
   }
 
+  /**
+   * 收起：先播 140ms 淡出（窗口透明度 + 渲染层缩小），再真正 hide。
+   * 过渡期间 isVisible() 仍为真，用 _closing 标记避免重复收起 / 误判点击。
+   */
   hidePanel() {
-    if (!this.panel || !this.panel.isVisible()) return;
+    const w = this.panel;
+    if (isGone(w) || !w.isVisible() || this._closing) return;
     this._stopFade();
-    // 关闭保持立即隐藏（不淡出）：与「点击面板外即收起」的即时语义一致，
-    // 也避免淡出窗口期间 isVisible() 仍为 true 造成交互判断歧义
-    try { this.panel.setOpacity(1); } catch { /* ignore */ }
-    this.panel.hide();
-    this._notifyPanel(false); // 面板关闭后胶囊恢复空闲计时
+    // 降级：没有 setOpacity 的环境（单元测试替身 / 极端平台）直接隐藏
+    if (typeof w.setOpacity !== 'function') {
+      w.hide();
+      this._notifyPanel(false);
+      return;
+    }
+    this._closing = true;
+    this._sendPanelPhase('exit');
+    this._notifyPanel(false); // 立即让胶囊恢复空闲计时，不等动画结束
+    let o = 1;
+    this._fadeTimer = setInterval(() => {
+      if (isGone(w)) { this._stopFade(); this._closing = false; return; }
+      o -= 0.13;
+      if (o <= 0.02) {
+        this._stopFade();
+        try { w.setOpacity(1); } catch { /* 下次打开时重新从 0 淡入 */ }
+        w.hide();
+        this._closing = false;
+        return;
+      }
+      try { w.setOpacity(o); } catch { /* ignore */ }
+    }, 16); // 约 120ms 淡出
   }
 
   togglePanel(tab) {
+    if (this._closing) { this.showPanel(tab); return; }
     if (this.panel && this.panel.isVisible()) this.hidePanel();
     else this.showPanel(tab);
   }

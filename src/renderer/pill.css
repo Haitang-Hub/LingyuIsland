@@ -3,24 +3,26 @@
    --island-alpha 由渲染层按外观设置实时写入。 */
 
 :root {
-  --pill-rgb: 11, 13, 17;
-  --island-alpha: 1;   /* 渲染层按外观设置写入（0.55~1） */
-  --pill-bg: rgba(var(--pill-rgb), var(--island-alpha));
-  --pill-bg-hover: #10131a;
+  --pill-rgb: 16, 26, 56;
+  --island-alpha: 1;   /* 渲染层按外观设置写入（0.55~1）：统一不透明度旋钮 */
+  /* 灵动岛跟随旋钮但幅度明显小于面板：0.70~1，胶囊上的文字与表情始终压得住背景 */
+  --pill-alpha: calc(0.70 + (var(--island-alpha) - 0.55) * 0.6667);
+  --pill-bg: rgba(var(--pill-rgb), var(--pill-alpha));
+  --pill-bg-hover: #1c2a4c;
   --pill-border: rgba(255, 255, 255, 0.10);
   --ink: #e9ebef;
   --ink-2: #98a0ac;
-  --accent: #0a84ff;
+  --accent: #6f9dff;
   --green: #30d158;
   --busy: #ff9f0a;
   --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
   --accent-border: color-mix(in srgb, var(--accent) 35%, transparent);
   --accent-strong: color-mix(in srgb, var(--accent) 65%, transparent);
-  --accent-text: #79b8ff;
-  --accent-text-strong: #a9d1ff;
-  --face: #edf0f5;                       /* 胶囊表情（眼睛）颜色 */
+  --accent-text: #94b7ff;
+  --accent-text-strong: #bcd5ff;
+  --face: #6f9dff;                       /* 表情眼睛跟随主题强调色，换主题时灵动岛一眼可见 */
   --face-border: rgba(255, 255, 255, 0.18);
-  --drag-bg: #0d1524;
+  --drag-bg: #1c2a4c;
   /* 阴影必须完全落在窗口留白（上下各 4px）内，否则被窗口边界裁成硬边 */
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
@@ -36,7 +38,8 @@ html, body {
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
   user-select: none;
-  cursor: default;
+  /* 悬停灵动岛本体用「手指」光标：整块胶囊都是可点区域 */
+  cursor: pointer;
 }
 
 body { position: relative; display: flex; align-items: center; justify-content: center; padding: 4px 16px; }
@@ -44,6 +47,7 @@ body { position: relative; display: flex; align-items: center; justify-content: 
 .pill {
   position: relative;
   display: flex;
+  cursor: pointer;
   align-items: center;
   gap: 9px;
   width: 100%;
@@ -58,7 +62,7 @@ body { position: relative; display: flex; align-items: center; justify-content: 
               background 200ms ease, border-color 200ms ease;
 }
 
-.pill:hover { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(1.015); background: var(--pill-bg-hover); }
+.pill:hover { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(1.015); background: color-mix(in srgb, var(--pill-bg-hover) calc(var(--pill-alpha) * 100%), transparent); }
 .pill:active { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(0.985); }
 
 /* 空闲文案轮换：轻轻浮入 */
@@ -294,75 +298,94 @@ body { position: relative; display: flex; align-items: center; justify-content: 
   .face-inner, .face .eye { animation: none !important; transition: none !important; }
 }
 
-/* 用户关闭界面动效：表情与光效一并隐藏 */
-html.motion-off .face { visibility: hidden; }
-html.motion-off .fx-glow, html.motion-off .fx-shine, html.motion-off .pulse { display: none !important; }
+/* 面板的「界面动效」开关不再作用于胶囊：表情、呼吸与光效属于岛的常态反馈，
+   关掉面板动效时它们照旧（仅系统「减少动效」偏好会简化，见上面的 media query）。 */
 
 /* 磨砂质感（与 panel.css 同步：界面内模拟，非窗体级系统材质） */
-html.glass-weak .pill { background: rgba(var(--pill-rgb), calc(var(--island-alpha) * 0.9)); }
-html.glass-on .pill { background: rgba(var(--pill-rgb), calc(var(--island-alpha) * 0.8)); }
+html.glass-weak .pill { background: rgba(var(--pill-rgb), calc(var(--pill-alpha) * 0.9)); }
+html.glass-on .pill { background: rgba(var(--pill-rgb), calc(var(--pill-alpha) * 0.8)); }
 
-/* ================= 主题覆盖块（与 panel.css 保持同步） ================= */
+html[data-theme="obsidian"] {
+  --pill-rgb: 10, 9, 7;
+  --pill-bg-hover: #17130c;
+  --pill-border: rgba(212, 175, 55, 0.34);
+  --ink: #f7f1e3;
+  --ink-2: #b3a385;
+  --accent: #d4af37;
+  --accent-text: #ecd28a;
+  --accent-text-strong: #f7e6b8;
+  --face: #d4af37;
+  --drag-bg: #2b2418;
+  --shadow: 0 1px 4px rgba(0, 0, 0, 0.7),
+            inset 0 1px 0 rgba(240, 212, 135, 0.24);
+}
 
 html[data-theme="graphite"] {
-  --pill-rgb: 17, 19, 22;
-  --pill-bg-hover: #1e2228;
+  --pill-rgb: 20, 22, 24;
+  --pill-bg-hover: #1b1e21;
   --pill-border: rgba(255, 255, 255, 0.09);
-  --ink: #e7e9ec;
-  --ink-2: #9ba3ad;
-  --accent: #7d95b5;
-  --accent-text: #a5bcd8;
-  --accent-text-strong: #c3d3e6;
-  --drag-bg: #1a212b;
+  --ink: #e7eaed;
+  --ink-2: #939ba6;
+  --accent: #8fa8c0;
+  --accent-text: #b3c6d9;
+  --accent-text-strong: #d2dfea;
+  --face: #8fa8c0;
+  --drag-bg: #202328;
 }
 
-html[data-theme="forest"] {
-  --pill-rgb: 13, 19, 15;
-  --pill-bg-hover: #18231c;
-  --pill-border: rgba(255, 255, 255, 0.09);
-  --ink: #e8efe9;
-  --ink-2: #9db3a4;
-  --accent: #34c77b;
-  --accent-text: #7fdda9;
-  --accent-text-strong: #a8ebc6;
-  --drag-bg: #0f2318;
+html[data-theme="teal"] {
+  --pill-rgb: 22, 50, 63;
+  --pill-bg-hover: #204859;
+  --pill-border: rgba(255, 255, 255, 0.11);
+  --ink: #eef8fb;
+  --ink-2: #a1bfcb;
+  --accent: #5fb8c9;
+  --accent-text: #99d9e5;
+  --accent-text-strong: #c6ecf3;
+  --face: #5fb8c9;
+  --drag-bg: #295769;
 }
 
-html[data-theme="sunset"] {
-  --pill-rgb: 21, 16, 11;
-  --pill-bg-hover: #2a2018;
-  --pill-border: rgba(255, 255, 255, 0.09);
-  --ink: #f1ebe4;
-  --ink-2: #b3a696;
-  --accent: #ff8c42;
-  --accent-text: #ffb37e;
-  --accent-text-strong: #ffcaa4;
-  --drag-bg: #2b1a0c;
+html[data-theme="mauve"] {
+  --pill-rgb: 255, 250, 243;
+  --pill-bg-hover: #faf4e9;
+  --pill-border: rgba(120, 78, 34, 0.14);
+  --ink: #3a2a18;
+  --ink-2: #8b7252;
+  --accent: #b8823a;
+  --accent-text: #966524;
+  --accent-text-strong: #7a4f17;
+  --face: #b8823a;
+  --face-border: rgba(120, 78, 34, 0.3);
+  --drag-bg: #f2e4cf;
+  --shadow: 0 1px 4px rgba(120, 78, 34, 0.16);
 }
 
 html[data-theme="lavender"] {
-  --pill-rgb: 16, 14, 23;
-  --pill-bg-hover: #221e30;
-  --pill-border: rgba(255, 255, 255, 0.09);
-  --ink: #ece9f2;
-  --ink-2: #a9a2bc;
-  --accent: #a78bfa;
-  --accent-text: #c4b1fd;
-  --accent-text-strong: #d9ccfe;
-  --drag-bg: #1c1430;
+  --pill-rgb: 242, 237, 250;
+  --pill-bg-hover: #e6dff5;
+  --pill-border: rgba(70, 45, 120, 0.14);
+  --ink: #2b2240;
+  --ink-2: #72668e;
+  --accent: #6f52b8;
+  --accent-text: #5b3f9e;
+  --accent-text-strong: #482d85;
+  --face: #6f52b8;
+  --face-border: rgba(70, 45, 120, 0.3);
+  --drag-bg: #d9cdee;
+  --shadow: 0 1px 4px rgba(70, 45, 120, 0.16);
 }
 
-/* 浅色主题：胶囊换浅底深字，表情改深色，边框/阴影反相 */
 html[data-theme="cloud"] {
   --pill-rgb: 255, 255, 255;
-  --pill-bg-hover: #f3f6fa;
+  --pill-bg-hover: #edf3f9;
   --pill-border: rgba(15, 23, 42, 0.12);
-  --ink: #1f2937;
-  --ink-2: #5b6774;
-  --accent: #2563eb;
-  --accent-text: #1d4ed8;
-  --accent-text-strong: #1e40af;
-  --face: #1f2937;
+  --ink: #1c2a3b;
+  --ink-2: #64758a;
+  --accent: #3970c9;
+  --accent-text: #2a58a8;
+  --accent-text-strong: #1f4488;
+  --face: #3970c9;
   --face-border: rgba(15, 23, 42, 0.28);
   --drag-bg: #e3ecfa;
   --shadow: 0 1px 4px rgba(15, 23, 42, 0.16);
@@ -370,16 +393,16 @@ html[data-theme="cloud"] {
 
 html[data-theme="sakura"] {
   --pill-rgb: 255, 250, 252;
-  --pill-bg-hover: #faeef2;
+  --pill-bg-hover: #fbe5ed;
   --pill-border: rgba(120, 40, 70, 0.14);
   --ink: #3d2530;
-  --ink-2: #7d5b68;
-  --accent: #d94f7d;
-  --accent-text: #c13a68;
-  --accent-text-strong: #a82a54;
-  --face: #3d2530;
+  --ink-2: #876775;
+  --accent: #c94670;
+  --accent-text: #a82e58;
+  --accent-text-strong: #8d2148;
+  --face: #c94670;
   --face-border: rgba(120, 40, 70, 0.3);
-  --drag-bg: #fbe0e8;
+  --drag-bg: #f9dbe4;
   --shadow: 0 1px 4px rgba(120, 40, 70, 0.16);
 }
 

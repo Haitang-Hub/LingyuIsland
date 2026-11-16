@@ -725,7 +725,7 @@ test('同名策略：saveSettings 规范化并落盘', () => {
 
 test('外观：主题注册表与 normalizeTheme / normalizeAccent', () => {
   const { normalizeTheme, normalizeAccent, THEMES, DEFAULT_THEME } = require('../src/core/themes');
-  assert.strictEqual(THEMES.length, 7);
+  assert.strictEqual(THEMES.length, 8);
   assert.strictEqual(DEFAULT_THEME, 'midnight');
   assert.strictEqual(normalizeTheme('sakura'), 'sakura');
   assert.strictEqual(normalizeTheme('nope'), 'midnight');
@@ -740,17 +740,18 @@ test('外观：主题注册表与 normalizeTheme / normalizeAccent', () => {
 test('外观：normalizeAppearance 钳制 / 白名单 / 回退', () => {
   const { normalizeAppearance, ALPHA_MIN, ALPHA_MAX, RADIUS_MAX } = require('../src/core/appearance');
   const a = normalizeAppearance({
-    theme: 'forest', accent: '#FF8C42', alpha: 0.3, radius: 99,
+    theme: 'nosuchtheme', accent: '#FF8C42', alpha: 0.3, radius: 99, bgDim: 0.05,
     glass: 'x', panel: { w: 9, h: 99999 }, motion: 0,
     bg: { type: 'video', file: 'a.png' }, // 扩展名与类型不符 → 整体回退
   }, null);
-  assert.strictEqual(a.theme, 'forest');
+  assert.strictEqual(a.theme, 'midnight', '非法主题回退默认主题');
   assert.strictEqual(a.accent, '#ff8c42');
   assert.strictEqual(a.alpha, ALPHA_MIN, '低于下限钳回 0.55');
-  assert.strictEqual(a.radius, RADIUS_MAX, '高于上限钳回 22');
+  assert.strictEqual(a.radius, RADIUS_MAX, '高于上限钳回 25');
   assert.strictEqual(a.glass, 'off');
-  assert.deepStrictEqual(a.panel, { w: 460, h: 1000 }, '面板宽高各自钳制');
+  assert.deepStrictEqual(a.panel, { w: 360, h: 1000 }, '面板宽高各自钳制');
   assert.strictEqual(a.motion, false);
+  assert.strictEqual(a.bgDim, 0.35, '背景遮罩低于下限钳回 0.35');
   assert.deepStrictEqual(a.bg, { type: 'video', file: '', name: '' }, '扩展名与类型不符 → 文件置空，类型保留');
 
   const b = normalizeAppearance({ alpha: 1.5, radius: 3, bg: { type: 'image' } }, null);
@@ -766,7 +767,13 @@ test('外观：normalizeAppearance 钳制 / 白名单 / 回退', () => {
   assert.strictEqual(c.glass, 'off');
   assert.deepStrictEqual(c.panel, { w: 560, h: 700 }, '默认基准尺寸');
   assert.strictEqual(c.motion, true);
+  assert.strictEqual(c.bgDim, 0.62, '背景遮罩默认 0.62');
   assert.deepStrictEqual(c.bg, { type: 'none', file: '', name: '' });
+
+  // 只改主题时不重置遮罩（缺省字段沿用上一次）
+  const e = normalizeAppearance({ theme: 'cloud' }, { bgDim: 0.5, bg: { type: 'image', file: 'bg-1.png' } });
+  assert.strictEqual(e.bgDim, 0.5);
+  assert.strictEqual(e.bg.file, 'bg-1.png');
 
   // 文件名白名单：杜绝目录穿越
   const d = normalizeAppearance({ bg: { type: 'image', file: '..\\evil.png' } }, null);

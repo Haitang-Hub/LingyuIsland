@@ -462,7 +462,7 @@ async function run({ store, island, indexer, updater }) {
     })()`);
     check('外观页：主题网格 / 强调色 / 滑杆 / 分段控件', () => {
       assert.deepStrictEqual(appearanceState.tabs, ['home', 'search', 'restore', 'appearance', 'settings']);
-      assert.strictEqual(appearanceState.cards.length, 7, '主题卡片数=' + appearanceState.cards.length);
+      assert.strictEqual(appearanceState.cards.length, 8, '主题卡片数=' + appearanceState.cards.length);
       assert.ok(appearanceState.accents >= 7, '强调色点数=' + appearanceState.accents);
       assert.strictEqual(appearanceState.theme, 'sakura');
       assert.strictEqual(appearanceState.activeCard, 'sakura', '主题卡片高亮同步');
@@ -470,7 +470,7 @@ async function run({ store, island, indexer, updater }) {
       assert.strictEqual(appearanceState.radius, '14px', '圆角写入 CSS 变量');
       assert.strictEqual(appearanceState.glassSeg, 3);
       assert.strictEqual(appearanceState.presets, 3, '尺寸预设数=' + appearanceState.presets);
-      assert.strictEqual(appearanceState.panelW, '460-1040', '宽滑杆范围');
+      assert.strictEqual(appearanceState.panelW, '360-1040', '宽滑杆范围');
       assert.strictEqual(appearanceState.bgSeg, 3);
       assert.ok(/%$/.test(appearanceState.alphaVal), appearanceState.alphaVal);
       assert.strictEqual(appearanceState.resetTheme, 'midnight', '还原默认主题');
@@ -714,7 +714,7 @@ async function run({ store, island, indexer, updater }) {
     // 模拟点击面板外导致失焦（自动化环境无法真实抢焦点，这里驱动 blur 回调）
     panelWin.isFocused = () => false;
     panelWin.emit('blur');
-    await sleep(320);
+    await sleep(480); // blur 防抖 180ms + 收起过渡约 120ms
     const hiddenAfterBlur = !panelWin.isVisible();
     panelWin.isFocused = origIsFocused;
 
@@ -722,6 +722,7 @@ async function run({ store, island, indexer, updater }) {
     island.showPanel();
     const visibleBeforePill = panelWin.isVisible();
     island.onPillClick();
+    await sleep(240); // 收起过渡约 120ms
     const hiddenAfterPill = !panelWin.isVisible();
 
     panelWin.show = origShow;

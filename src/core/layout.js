@@ -26,7 +26,7 @@ const BASE = {
  * 宽高独立，于是可以「细长」（窄而高，适合长列表）或「宽扁」（宽而矮，
  * 适合表格 / 并排文本），而不是整体倍率放大到占满全屏。
  */
-const PANEL_LIMITS = { minW: 460, maxW: 1040, minH: 520, maxH: 1000 };
+const PANEL_LIMITS = { minW: 360, maxW: 1040, minH: 360, maxH: 1000 };
 
 /** 快捷预设（面板 CSS 视口尺寸） */
 const PANEL_PRESETS = {
