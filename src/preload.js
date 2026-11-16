@@ -14,6 +14,7 @@ const INVOKE_CHANNELS = new Set([
   'app:open-vault-folder',
   'update:check', 'update:status', 'update:install', 'update:apply', 'update:open-page',
   'panel:hide', 'panel:show-tab', 'pill:expand', 'pill:collapse', 'pill:peek', 'pill:hide',
+  'pill:drag-start', 'pill:drag-end', 'pill:reset-position',
 ]);
 
 const SEND_CHANNELS = new Set([

@@ -87,8 +87,9 @@ function autoUiScale(width, height) {
 
 /**
  * @param {{x:number,y:number,width:number,height:number}} workArea 主显示器工作区（DIP）
- * @param {{panelW?:number, panelH?:number, uiScale?:string, collapsed?:boolean}} [opts]
- *   panelW/panelH = 面板 CSS 视口尺寸（宽高独立，可细长可宽扁）；uiScale 为旧档位值，仅迁移兼容用
+ * @param {{panelW?:number, panelH?:number, uiScale?:string, collapsed?:boolean, pillX?:number}} [opts]
+ *   panelW/panelH = 面板 CSS 视口尺寸（宽高独立，可细长可宽扁）；uiScale 为旧档位值，仅迁移兼容用；
+ *   pillX = 灵动岛中心相对工作区宽度的比例（0~1，默认 0.5 居中），拖动换位后持久化的值
  * @returns {{uiScale:number, pillScale:number, panelScale:number, pill:{x,y,width,height}, panel:{x,y,width,height}}}
  */
 function computeIslandLayout(workArea, opts = {}) {
@@ -125,8 +126,16 @@ function computeIslandLayout(workArea, opts = {}) {
   const panelW = Math.round(Math.min(target.w * scale, availW));
   const panelH = Math.round(Math.min(target.h * scale, maxPanelH));
 
-  const pillX = wa.x + Math.round((wa.width - pillW) / 2);
-  const panelX = wa.x + Math.round((wa.width - panelW) / 2);
+  // 灵动岛水平位置：中心相对工作区宽度的比例（拖动换位），钳在安全留白内；
+  // 面板以胶囊中心为锚随动，同样钳在屏内。比例缺省 0.5 时与旧的纯居中完全一致。
+  // 注意 0 是合法值（最左），不能用 || 兜底
+  const pillXRaw = Number(opts.pillX);
+  const pillXRatio = clamp(Number.isFinite(pillXRaw) ? pillXRaw : 0.5, 0, 1);
+  const pillCenterX = wa.x + wa.width * pillXRatio;
+  const minXPill = wa.x + edge, maxXPill = wa.x + wa.width - edge - pillW;
+  const pillX = Math.round(Math.min(Math.max(pillCenterX - pillW / 2, minXPill), Math.max(minXPill, maxXPill)));
+  const minXPanel = wa.x + edge, maxXPanel = wa.x + wa.width - edge - panelW;
+  const panelX = Math.round(Math.min(Math.max(pillCenterX - panelW / 2, minXPanel), Math.max(minXPanel, maxXPanel)));
 
   return {
     uiScale: scale,          // 兼容旧调用方：等同于 panelScale

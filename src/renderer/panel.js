@@ -38,6 +38,7 @@ const els = {
   panelWSlider: $('#panelWSlider'), panelWVal: $('#panelWVal'),
   panelHSlider: $('#panelHSlider'), panelHVal: $('#panelHVal'),
   panelPresets: $('#panelPresets'), motionSwitch: $('#motionSwitch'),
+  pillResetBtn: $('#pillResetBtn'),
   detectHead: $('#detectHead'), detectBody: $('#detectBody'),
   detectSummary: $('#detectSummary'), detectToggleBtn: $('#detectToggleBtn'),
   settingRoot: $('#settingRoot'), settingRootBtn: $('#settingRootBtn'),
@@ -1128,6 +1129,10 @@ for (const b of els.panelPresets.children) {
     commitPanelSize();
   });
 }
+
+// 灵动岛恢复默认位置（顶部居中）：主进程负责移动窗口与持久化
+els.pillResetBtn.addEventListener('click', () =>
+  window.island.invoke('pill:reset-position'));
 
 window.island.on('panel:state', (open) => setBgPlayback(!!open));
 

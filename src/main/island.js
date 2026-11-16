@@ -33,6 +33,10 @@ class Island {
     this.pillCollapsed = false;   // 当前是否处于线段收起态
     // 托盘菜单重建钩子（createTray 注入），状态切换后同步「隐藏/显示灵动岛」文案
     this.onPillStateChange = null;
+    // 灵动岛水平位置（中心相对工作区宽度的比例）；main.js 启动时从外观设置注入
+    this.pillX = 0.5;
+    // 拖动换位结束后的持久化钩子（main.js 注入：写设置 + 广播）
+    this.onPillOffsetChange = null;
     this.panelSize = { w: BASE.panelW, h: BASE.panelH }; // 面板 CSS 视口尺寸（宽高独立，可细长 / 宽扁）
   }
 
@@ -43,6 +47,7 @@ class Island {
       panelW: this.panelSize.w,
       panelH: this.panelSize.h,
       collapsed: this.pillCollapsed,
+      pillX: this.pillX,
     });
   }
 
@@ -222,6 +227,7 @@ class Island {
 
   /** 胶囊在面板之外，点击它也应视为「点击外部」而收起 */
   onPillClick(tab) {
+    if (this._dragMoved) { this._dragMoved = false; return; } // 拖动结束的误触不算点击
     if (this._closing) { this.showPanel(tab); return; } // 收起中再点 = 重新打开
     if (this.panel && this.panel.isVisible()) this.hidePanel();
     else this.showPanel(tab);
@@ -334,6 +340,73 @@ class Island {
         }
       }
     }, 300);
+  }
+
+  /* ---------------- 灵动岛拖动换位 ----------------
+   * 渲染端 mousedown → startPillDrag()：主进程 16ms 轮询光标并 setPosition，
+   * 窗口跟随光标水平移动（Y 恒贴屏幕顶边）。mouseup → stopPillDrag()：
+   * 停轮询、把最终比例经 onPillOffsetChange 持久化，并让面板跟随到新位置。
+   * 拖动过的下一次 onPillClick 会被吞掉，避免松手误开面板。 */
+
+  /** 拖动中实时更新的水平比例（0~1），layout() / _plan() 都用它定位 */
+  _dragStep() {
+    const d = this._drag;
+    const w = this.pill;
+    if (!d || !w || w.isDestroyed()) return this.stopPillDrag();
+    // 兜底：渲染端 mouseup 丢失（如指针被系统弹窗截走）时 15s 后自动结束拖动
+    if (Date.now() - d.startedAt > 15000) return this.stopPillDrag();
+    try {
+      const c = screen.getCursorScreenPoint();
+      if (Math.abs(c.x - d.startCursorX) > 4) d.moved = true;
+      const wa = screen.getPrimaryDisplay().workArea;
+      const b = w.getBounds();
+      const nx = Math.min(wa.x + wa.width - b.width,
+        Math.max(wa.x, c.x - d.offsetX));
+      if (nx !== b.x) w.setPosition(nx, b.y);
+      // 比例按「钳制后的中心」计算：贴边时比例就是 0/1，持久化与布局严格一致
+      this.pillX = Math.round(((nx + b.width / 2 - wa.x) / wa.width) * 1000) / 1000;
+    } catch { this.stopPillDrag(); }
+  }
+
+  startPillDrag() {
+    if (!this.pill || this.pill.isDestroyed() || this.pillCollapsed) return false;
+    try {
+      const c = screen.getCursorScreenPoint();
+      const b = this.pill.getBounds();
+      this._drag = {
+        offsetX: c.x - b.x,       // 光标相对胶囊左缘的偏移：拖动中保持不跳变
+        startCursorX: c.x,
+        moved: false,
+        startedAt: Date.now(),
+      };
+      if (!this._dragTimer) this._dragTimer = setInterval(() => this._dragStep(), 16);
+      return true;
+    } catch { return false; }
+  }
+
+  stopPillDrag() {
+    if (this._dragTimer) { clearInterval(this._dragTimer); this._dragTimer = null; }
+    const d = this._drag;
+    this._drag = null;
+    if (!d) return;
+    if (d.moved) {
+      this._dragMoved = true; // 下一次 onPillClick 吞掉（400ms 内没来也自动清）
+      setTimeout(() => { this._dragMoved = false; }, 400);
+      this.layout();          // 面板跟随到新位置（比例已在 _dragStep 实时更新）
+      if (typeof this.onPillOffsetChange === 'function') {
+        try { this.onPillOffsetChange(this.pillX); } catch { /* ignore */ }
+      }
+    }
+  }
+
+  /** 恢复默认位置（顶部居中）：托盘菜单与外观页按钮共用入口 */
+  resetPillPosition() {
+    this.pillX = 0.5;
+    if (!this.pill || this.pill.isDestroyed() || this.pillCollapsed) return;
+    this.layout();
+    if (typeof this.onPillOffsetChange === 'function') {
+      try { this.onPillOffsetChange(0.5); } catch { /* ignore */ }
+    }
   }
 
   broadcast(channel, payload) {

@@ -331,6 +331,31 @@ pill.addEventListener('click', () => {
   window.island.invoke('pill:expand');
 });
 
+/* ---------------- 拖动换位 ----------------
+ * 按住胶囊水平拖动（始终贴屏幕顶边）：mousedown 请求主进程开始光标跟随，
+ * mouseup 结束并持久化位置。窗口跟着光标走，位移判定在主进程；
+ * 拖动结束的那次 click 会被主进程吞掉，不会误开面板。 */
+
+let pillDragging = false; // 拖动进行中：抑制磁吸跟随，光标换成「抓手」
+
+pill.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;                                  // 只响应左键
+  if (document.body.classList.contains('collapsed')) return;   // 收起态不可拖
+  // 「还原文本」chip 与关闭按钮上不启动拖动，保证点击可用
+  if (!clipChip.hidden && (e.target === clipChip || clipChip.contains(e.target))) return;
+  if (e.target === clipClose || clipClose.contains(e.target)) return;
+  pillDragging = true;
+  pill.classList.add('dragging');
+  window.island.invoke('pill:drag-start');
+});
+
+window.addEventListener('mouseup', () => {
+  if (!pillDragging) return;
+  pillDragging = false;
+  pill.classList.remove('dragging');
+  window.island.invoke('pill:drag-end');
+});
+
 /* ---------------- 右键隐藏 ---------------- */
 
 // 右键 = 收起为顶部线段（与托盘「隐藏灵动岛」一致），并阻止 Chromium 原生右键菜单。
@@ -605,6 +630,7 @@ function celebrate() {
 
 // 磁性跟随：胶囊轻微靠向光标，柔光落在光标位置；小家伙的眼睛看向光标
 pill.addEventListener('mousemove', (e) => {
+  if (pillDragging) return; // 拖动换位中：窗口随光标整体移动，不做磁吸偏移
   const r = pill.getBoundingClientRect();
   const px = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
   const py = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));

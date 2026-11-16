@@ -18,6 +18,10 @@ const RADIUS_MIN = 10, RADIUS_MAX = 25, RADIUS_DEFAULT = 18;
 const FONT_SCALE_MIN = 0.85, FONT_SCALE_MAX = 1.3, FONT_SCALE_DEFAULT = 1;
 const FONT_SCALE_STEPS = [0.9, 1, 1.15, 1.3];
 
+/** 灵动岛水平位置：中心相对工作区宽度的比例（0~1，0.5 = 顶部居中）。
+ *  拖动换位后持久化；存比例可在换分辨率/缩放后保持相对位置 */
+const PILL_X_DEFAULT = 0.5;
+
 /** 旧字段：自定义背景遮罩浓度（0.35~0.95）。
  *  背景可见度已合并到「面板不透明度」一个旋钮，本字段仅为旧存档兼容保留，
  *  渲染层不再读取；遮罩在 CSS 里固定为可读性兜底值。 */
@@ -103,6 +107,9 @@ function normalizeAppearance(raw, prev) {
     // 字体大小：钳制后吸附到最近档位（旧滑杆中间值顺带迁移），patch 缺省时沿用 prev
     fontScale: snapFontScale(clampNum(r.fontScale, FONT_SCALE_MIN, FONT_SCALE_MAX,
       clampNum(p.fontScale, FONT_SCALE_MIN, FONT_SCALE_MAX, FONT_SCALE_DEFAULT))),
+    // 灵动岛水平位置比例：保留三位小数（≈1~2px 精度），patch 缺省时沿用 prev
+    pillX: Math.round(clampNum(r.pillX, 0, 1,
+      clampNum(p.pillX, 0, 1, PILL_X_DEFAULT)) * 1000) / 1000,
     // 背景遮罩：patch 缺省时沿用 prev，避免调主题 / 透明度把遮罩重置
     bgDim: clampNum(r.bgDim, BG_DIM_MIN, BG_DIM_MAX,
       clampNum(p.bgDim, BG_DIM_MIN, BG_DIM_MAX, BG_DIM_DEFAULT)),
@@ -119,6 +126,7 @@ module.exports = {
   ALPHA_MIN, ALPHA_MAX, ALPHA_DEFAULT,
   RADIUS_MIN, RADIUS_MAX, RADIUS_DEFAULT,
   FONT_SCALE_MIN, FONT_SCALE_MAX, FONT_SCALE_DEFAULT, FONT_SCALE_STEPS,
+  PILL_X_DEFAULT,
   BG_DIM_MIN, BG_DIM_MAX, BG_DIM_DEFAULT,
   BG_IMAGE_MAX, BG_VIDEO_MAX, BG_IMAGE_EXTS, BG_VIDEO_EXTS, BG_FILE_RE, BG_TYPES, GLASS_MODES,
 };

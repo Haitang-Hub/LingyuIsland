@@ -253,6 +253,11 @@ function register(ctx) {
   ipc_handle('pill:peek', () => { island.expandPill(); return true; });
   // 右键胶囊隐藏：与托盘「隐藏灵动岛」同一入口，收起为顶部线段并刷新托盘文案
   ipc_handle('pill:hide', () => { island.setPillVisible(false); return true; });
+  // 灵动岛拖动换位：mousedown 开始（主进程光标跟随）、mouseup 结束（持久化比例）
+  ipc_handle('pill:drag-start', () => island.startPillDrag());
+  ipc_handle('pill:drag-end', () => { island.stopPillDrag(); return true; });
+  // 恢复默认位置（顶部居中）：托盘菜单与外观页按钮共用
+  ipc_handle('pill:reset-position', () => { island.resetPillPosition(); return true; });
 }
 
 function app_ref() { return electronApp; }

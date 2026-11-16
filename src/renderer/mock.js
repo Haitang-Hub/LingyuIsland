@@ -45,7 +45,7 @@ if (!window.island) {
     uiScale: 'auto',
     launchOnBoot: false,
     appearance: {
-      theme: 'midnight', accent: '', alpha: 0.97, radius: 18, fontScale: 1, glass: 'off', bgDim: 0.62,
+      theme: 'midnight', accent: '', alpha: 0.97, radius: 18, fontScale: 1, pillX: 0.5, glass: 'off', bgDim: 0.62,
       panel: { w: 560, h: 700 }, motion: true, bg: { type: 'none', file: '', name: '' },
     },
   };

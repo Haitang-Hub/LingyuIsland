@@ -85,6 +85,13 @@ app.whenReady().then(() => {
   island = new Island();
   // 密度按外观设置初始化（档位由布局层钳制，不会越出屏幕）
   island.setPanelSize(store.settings.appearance.panel);
+  // 灵动岛位置：启动时恢复上次拖动换位保存的比例
+  island.pillX = Number(store.settings.appearance.pillX) || 0.5;
+  // 拖动换位结束 → 写回外观设置并广播（面板/胶囊同步）
+  island.onPillOffsetChange = (ratio) => {
+    const next = store.saveSettings({ appearance: { pillX: ratio } });
+    island.broadcast('settings:changed', next);
+  };
   island.create();
   island.pill.webContents.on('did-finish-load', () => island.pill.showInactive());
 

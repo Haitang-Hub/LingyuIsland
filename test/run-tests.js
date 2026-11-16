@@ -1225,6 +1225,41 @@ test('自适应布局：非法工作区不抛错且结果仍为有限整数', ()
   assert.ok(p.panel.height >= 1);
 });
 
+/* ---------------- 灵动岛拖动换位（pillX 比例） ---------------- */
+
+test('灵动岛位置：0.5 居中与旧版纯居中完全一致，缺省回退 0.5', () => {
+  const area = wa(1920, 1040, 100, 30);
+  const legacy = computeIslandLayout(area);
+  const center = computeIslandLayout(area, { pillX: 0.5 });
+  assert.strictEqual(center.pill.x, legacy.pill.x);
+  assert.strictEqual(center.panel.x, legacy.panel.x);
+  assert.strictEqual(computeIslandLayout(area, { pillX: undefined }).pill.x, legacy.pill.x);
+});
+
+test('灵动岛位置：0 与 1 分别贴左右安全边，且 0 不被当成缺省', () => {
+  const area = wa(1920, 1040, 100, 30);
+  const left = computeIslandLayout(area, { pillX: 0 });
+  const right = computeIslandLayout(area, { pillX: 1 });
+  const edge = 8; // 1080p 基准 sys=1
+  assert.strictEqual(left.pill.x, 100 + edge);            // 贴左边安全留白
+  assert.strictEqual(right.pill.x, 100 + 1920 - edge - right.pill.width); // 贴右边
+  assert.notStrictEqual(left.pill.x, computeIslandLayout(area).pill.x);
+});
+
+test('灵动岛位置：越界比例被钳回，面板跟随胶囊且不越出屏幕', () => {
+  const area = wa(1920, 1040, 100, 30);
+  const edge = 8;
+  for (const ratio of [-0.3, 0.02, 0.5, 0.97, 1.6]) {
+    const p = computeIslandLayout(area, { pillX: ratio });
+    assert.ok(p.pill.x >= 100 + edge && p.pill.x <= 100 + 1920 - edge - p.pill.width,
+      `ratio=${ratio} 胶囊越界`);
+    assert.ok(p.panel.x >= 100 + edge && p.panel.x <= 100 + 1920 - edge - p.panel.width,
+      `ratio=${ratio} 面板越界`);
+    assert.ok(Math.abs(p.panel.x + p.panel.width / 2 - (p.pill.x + p.pill.width / 2))
+      <= p.panel.width / 2 + p.pill.width / 2, `ratio=${ratio} 面板未跟随胶囊`);
+  }
+});
+
 /* ---------------- 规则精度重构（段落级拼接 / 位置信息 / 姓名边界） ---------------- */
 
 const { transformXmlText, xmlBlockTexts } = require('../src/core/xmltext');

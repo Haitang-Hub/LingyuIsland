@@ -65,6 +65,7 @@ body { position: relative; display: flex; align-items: center; justify-content: 
 /* 悬停视觉由 JS 加 .hover 类驱动（不再用 :hover）：Windows 透明置顶窗偶发丢
    mouseleave，:hover 一旦卡住只能等下次移入才恢复；.hover 类可被看门狗强制清除 */
 .pill.hover { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(1.015); background: color-mix(in srgb, var(--pill-bg-hover) calc(var(--pill-alpha) * 100%), transparent); }
+.pill:active, .pill.dragging { cursor: grabbing; }
 .pill:active { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(0.985); }
 
 /* 空闲文案轮换：轻轻浮入 */

@@ -26,6 +26,7 @@ function createTray(island, store) {
       label: island._pillVisible ? '隐藏灵动岛' : '显示灵动岛',
       click: () => island.setPillVisible(!island._pillVisible),
     },
+    { label: '灵动岛恢复默认位置', click: () => island.resetPillPosition() },
     { type: 'separator' },
     {
       label: '文件根目录快速查找',
