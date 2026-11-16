@@ -3,26 +3,26 @@
    --island-alpha 由渲染层按外观设置实时写入。 */
 
 :root {
-  --pill-rgb: 16, 26, 56;
+  --pill-rgb: 10, 13, 24;
   --island-alpha: 1;   /* 渲染层按外观设置写入（0.55~1）：统一不透明度旋钮 */
   /* 灵动岛跟随旋钮但幅度明显小于面板：0.70~1，胶囊上的文字与表情始终压得住背景 */
   --pill-alpha: calc(0.70 + (var(--island-alpha) - 0.55) * 0.6667);
   --pill-bg: rgba(var(--pill-rgb), var(--pill-alpha));
-  --pill-bg-hover: #1c2a4c;
+  --pill-bg-hover: #121828;
   --pill-border: rgba(255, 255, 255, 0.10);
   --ink: #e9ebef;
   --ink-2: #98a0ac;
-  --accent: #6f9dff;
+  --accent: #7ba3f2;
   --green: #30d158;
   --busy: #ff9f0a;
   --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
   --accent-border: color-mix(in srgb, var(--accent) 35%, transparent);
   --accent-strong: color-mix(in srgb, var(--accent) 65%, transparent);
-  --accent-text: #94b7ff;
-  --accent-text-strong: #bcd5ff;
-  --face: #6f9dff;                       /* 表情眼睛跟随主题强调色，换主题时灵动岛一眼可见 */
+  --accent-text: #a3c1f8;
+  --accent-text-strong: #cadcff;
+  --face: #7ba3f2;                       /* 表情眼睛跟随主题强调色，换主题时灵动岛一眼可见 */
   --face-border: rgba(255, 255, 255, 0.18);
-  --drag-bg: #1c2a4c;
+  --drag-bg: #1a2338;
   /* 阴影必须完全落在窗口留白（上下各 4px）内，否则被窗口边界裁成硬边 */
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
@@ -62,7 +62,9 @@ body { position: relative; display: flex; align-items: center; justify-content: 
               background 200ms ease, border-color 200ms ease;
 }
 
-.pill:hover { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(1.015); background: color-mix(in srgb, var(--pill-bg-hover) calc(var(--pill-alpha) * 100%), transparent); }
+/* 悬停视觉由 JS 加 .hover 类驱动（不再用 :hover）：Windows 透明置顶窗偶发丢
+   mouseleave，:hover 一旦卡住只能等下次移入才恢复；.hover 类可被看门狗强制清除 */
+.pill.hover { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(1.015); background: color-mix(in srgb, var(--pill-bg-hover) calc(var(--pill-alpha) * 100%), transparent); }
 .pill:active { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(0.985); }
 
 /* 空闲文案轮换：轻轻浮入 */
@@ -94,8 +96,8 @@ body { position: relative; display: flex; align-items: center; justify-content: 
   transition: opacity 180ms ease;
 }
 .label-hover { color: var(--ink-2); opacity: 0; }
-.pill:hover .label-idle  { opacity: 0; }
-.pill:hover .label-hover { opacity: 1; }
+.pill.hover .label-idle  { opacity: 0; }
+.pill.hover .label-hover { opacity: 1; }
 
 /* 剪贴板恢复提示 */
 .chip {
@@ -306,18 +308,18 @@ html.glass-weak .pill { background: rgba(var(--pill-rgb), calc(var(--pill-alpha)
 html.glass-on .pill { background: rgba(var(--pill-rgb), calc(var(--pill-alpha) * 0.8)); }
 
 html[data-theme="obsidian"] {
-  --pill-rgb: 10, 9, 7;
-  --pill-bg-hover: #17130c;
-  --pill-border: rgba(212, 175, 55, 0.34);
-  --ink: #f7f1e3;
-  --ink-2: #b3a385;
-  --accent: #d4af37;
-  --accent-text: #ecd28a;
-  --accent-text-strong: #f7e6b8;
-  --face: #d4af37;
-  --drag-bg: #2b2418;
+  --pill-rgb: 11, 9, 6;
+  --pill-bg-hover: #181309;
+  --pill-border: rgba(217, 182, 88, 0.3);
+  --ink: #f6f0e0;
+  --ink-2: #b0a07e;
+  --accent: #d9b658;
+  --accent-text: #eed494;
+  --accent-text-strong: #f8e7bc;
+  --face: #d9b658;
+  --drag-bg: #292115;
   --shadow: 0 1px 4px rgba(0, 0, 0, 0.7),
-            inset 0 1px 0 rgba(240, 212, 135, 0.24);
+            inset 0 1px 0 rgba(242, 216, 148, 0.28);
 }
 
 html[data-theme="graphite"] {
@@ -334,16 +336,16 @@ html[data-theme="graphite"] {
 }
 
 html[data-theme="teal"] {
-  --pill-rgb: 22, 50, 63;
-  --pill-bg-hover: #204859;
+  --pill-rgb: 10, 20, 24;
+  --pill-bg-hover: #122026;
   --pill-border: rgba(255, 255, 255, 0.11);
-  --ink: #eef8fb;
-  --ink-2: #a1bfcb;
-  --accent: #5fb8c9;
-  --accent-text: #99d9e5;
-  --accent-text-strong: #c6ecf3;
-  --face: #5fb8c9;
-  --drag-bg: #295769;
+  --ink: #e9f2f4;
+  --ink-2: #849ba2;
+  --accent: #64c0cb;
+  --accent-text: #9ad8e2;
+  --accent-text-strong: #c8eef4;
+  --face: #64c0cb;
+  --drag-bg: #1a2f36;
 }
 
 html[data-theme="mauve"] {
@@ -497,7 +499,7 @@ body.collapsed .pill {
   opacity: 0;
   transition: opacity 260ms ease;
 }
-.pill:hover .fx-glow { opacity: 1; }
+.pill.hover .fx-glow { opacity: 1; }
 
 /* 高光扫过：成功反馈时一道柔光掠过胶囊 */
 .fx-shine { overflow: hidden; }

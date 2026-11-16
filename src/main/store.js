@@ -10,7 +10,7 @@ const { app, safeStorage } = require('electron');
 const { Vault } = require('../core/masker');
 const { normalizeConflictPolicy } = require('../core/imports');
 const { BASE } = require('../core/layout');
-const { normalizeAppearance, ALPHA_DEFAULT, RADIUS_DEFAULT, BG_DIM_DEFAULT } = require('../core/appearance');
+const { normalizeAppearance, ALPHA_DEFAULT, RADIUS_DEFAULT, FONT_SCALE_DEFAULT, BG_DIM_DEFAULT } = require('../core/appearance');
 
 /** 面板自动收起时长（秒）的合法范围与默认值 */
 const COLLAPSE_MIN_SEC = 5;
@@ -54,7 +54,8 @@ const DEFAULT_SETTINGS = {
     theme: 'midnight',
     accent: '',                   // 空串 = 跟随主题默认强调色
     alpha: ALPHA_DEFAULT,         // 面板/胶囊底色不透明度（0.55~1；内容片另有衬底，文字不受影响）
-    radius: RADIUS_DEFAULT,       // 面板圆角 px（10~25）
+      radius: RADIUS_DEFAULT,       // 面板圆角 px（10~25）
+      fontScale: FONT_SCALE_DEFAULT, // 字体大小系数（0.85~1.3，1=100%）：面板内所有文字统一缩放
     bgDim: BG_DIM_DEFAULT,        // 旧字段：背景遮罩已合并进 alpha，仅保留以兼容旧存档
     glass: 'off',                 // 磨砂质感：off=实色 | auto=轻磨砂 | on=强磨砂（界面内模拟，非窗体级系统材质）
     panel: { w: BASE.panelW, h: BASE.panelH }, // 面板 CSS 视口尺寸（宽高独立，可细长 / 宽扁）

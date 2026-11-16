@@ -13,6 +13,11 @@ const ALPHA_MIN = 0.55, ALPHA_MAX = 1, ALPHA_DEFAULT = 0.97;
 /** 面板圆角范围（px）；胶囊圆角 = 面板圆角 + 4，但胶囊本身是胶囊形，上限仍是 22 */
 const RADIUS_MIN = 10, RADIUS_MAX = 25, RADIUS_DEFAULT = 18;
 
+/** 字体大小系数：面板内所有文字按此缩放，布局与控件尺寸不动。
+ *  外观页是档位选择（小/标准/大/特大），非档位值（如旧滑杆存的中间值）吸附到最近档 */
+const FONT_SCALE_MIN = 0.85, FONT_SCALE_MAX = 1.3, FONT_SCALE_DEFAULT = 1;
+const FONT_SCALE_STEPS = [0.9, 1, 1.15, 1.3];
+
 /** 旧字段：自定义背景遮罩浓度（0.35~0.95）。
  *  背景可见度已合并到「面板不透明度」一个旋钮，本字段仅为旧存档兼容保留，
  *  渲染层不再读取；遮罩在 CSS 里固定为可读性兜底值。 */
@@ -36,6 +41,12 @@ function clampNum(v, lo, hi, fallback) {
   const n = Number(v);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(hi, Math.max(lo, n));
+}
+
+/** 吸附到最近的字体档位 */
+function snapFontScale(v) {
+  return FONT_SCALE_STEPS.reduce((best, s) =>
+    Math.abs(s - v) < Math.abs(best - v) ? s : best);
 }
 
 function normalizeBgType(v) { return BG_TYPES.has(v) ? v : 'none'; }
@@ -89,6 +100,9 @@ function normalizeAppearance(raw, prev) {
       clampNum(p.alpha, ALPHA_MIN, ALPHA_MAX, ALPHA_DEFAULT)),
     radius: Math.round(clampNum(r.radius, RADIUS_MIN, RADIUS_MAX,
       clampNum(p.radius, RADIUS_MIN, RADIUS_MAX, RADIUS_DEFAULT))),
+    // 字体大小：钳制后吸附到最近档位（旧滑杆中间值顺带迁移），patch 缺省时沿用 prev
+    fontScale: snapFontScale(clampNum(r.fontScale, FONT_SCALE_MIN, FONT_SCALE_MAX,
+      clampNum(p.fontScale, FONT_SCALE_MIN, FONT_SCALE_MAX, FONT_SCALE_DEFAULT))),
     // 背景遮罩：patch 缺省时沿用 prev，避免调主题 / 透明度把遮罩重置
     bgDim: clampNum(r.bgDim, BG_DIM_MIN, BG_DIM_MAX,
       clampNum(p.bgDim, BG_DIM_MIN, BG_DIM_MAX, BG_DIM_DEFAULT)),
@@ -104,6 +118,7 @@ module.exports = {
   normalizeAppearance, normalizeBgFile, normalizeBgName,
   ALPHA_MIN, ALPHA_MAX, ALPHA_DEFAULT,
   RADIUS_MIN, RADIUS_MAX, RADIUS_DEFAULT,
+  FONT_SCALE_MIN, FONT_SCALE_MAX, FONT_SCALE_DEFAULT, FONT_SCALE_STEPS,
   BG_DIM_MIN, BG_DIM_MAX, BG_DIM_DEFAULT,
   BG_IMAGE_MAX, BG_VIDEO_MAX, BG_IMAGE_EXTS, BG_VIDEO_EXTS, BG_FILE_RE, BG_TYPES, GLASS_MODES,
 };

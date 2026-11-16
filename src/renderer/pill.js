@@ -264,7 +264,7 @@ function scheduleIdleRotate() {
     if (mode === 'idle' && clipChip.hidden
         && !document.body.classList.contains('collapsed')
         && !holdActive()
-        && !pill.matches(':hover')) {
+        && !pill.classList.contains('hover')) {
       refreshIdleLabel();
     }
     scheduleIdleRotate();
@@ -528,6 +528,7 @@ function resetIdleTimer() {
 function applyPillState(state) {
   document.body.classList.toggle('collapsed', state === 'collapsed');
   if (state === 'collapsed') {
+    clearHover(); // 收起前若悬停态因丢事件残留，随收起一并清除
     clearTimeout(idleTimer);
     peekSent = false;
   } else {
@@ -537,6 +538,11 @@ function applyPillState(state) {
 }
 
 window.island.on('pill:state', applyPillState);
+
+// 主进程光标看门狗：光标已离开胶囊窗口但渲染端悬停态未清（mouseleave 丢失）→ 强制清除
+window.island.on('pill:hover-sync', (inside) => {
+  if (!inside) clearHover();
+});
 
 // 面板打开 → 暂停空闲计时；面板关闭 → 恢复计时
 window.island.on('panel:state', (open) => {
@@ -618,17 +624,25 @@ pill.addEventListener('mousemove', (e) => {
   face.style.setProperty('--face-y', clamp(dy / 22, -2.4, 2.4).toFixed(1) + 'px');
   face.style.setProperty('--tilt', clamp(dx / 9, -7, 7).toFixed(1) + 'deg');
 });
-pill.addEventListener('mouseleave', () => {
+/** 清除悬停态：Windows 透明置顶窗偶发丢 mouseleave，悬停视觉改由 .hover 类驱动，
+    这样除了事件路径，还能被看门狗（pill:hover-sync）与收起逻辑强制清除 */
+function clearHover() {
+  pill.classList.remove('hover');
+  hovering = false;
   pill.style.setProperty('--mx', '0px');
   pill.style.setProperty('--my', '0px');
+  pill.style.setProperty('--gx', '50%');
+  pill.style.setProperty('--gy', '50%');
   // 目光与身体归位
   for (const p of ['--look-x', '--look-y', '--face-x', '--face-y']) {
     face.style.setProperty(p, '0px');
   }
   face.style.setProperty('--tilt', '0deg');
-});
-pill.addEventListener('mouseenter', () => { hovering = true; updateFace(); });
-pill.addEventListener('mouseleave', () => { hovering = false; updateFace(); });
+  updateFace();
+}
+
+pill.addEventListener('mouseenter', () => { hovering = true; pill.classList.add('hover'); updateFace(); });
+pill.addEventListener('mouseleave', clearHover);
 
 /* ---------------- 拖放 ---------------- */
 

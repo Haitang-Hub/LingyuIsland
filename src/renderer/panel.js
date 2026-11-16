@@ -31,6 +31,7 @@ const els = {
   themeGrid: $('#themeGrid'), accentRow: $('#accentRow'),
   alphaSlider: $('#alphaSlider'), alphaVal: $('#alphaVal'),
   radiusSlider: $('#radiusSlider'), radiusVal: $('#radiusVal'),
+  fontSeg: $('#fontSeg'),
   bgSeg: $('#bgSeg'), bgPickBtn: $('#bgPickBtn'), bgClearBtn: $('#bgClearBtn'),
   bgFileNote: $('#bgFileNote'), bgDesc: $('#bgDesc'), bgThumb: $('#bgThumb'),
   glassSeg: $('#glassSeg'), glassDesc: $('#glassDesc'),
@@ -766,9 +767,11 @@ function applyAppearance(a) {
   root.dataset.theme = themeId;
   root.classList.toggle('motion-off', a.motion === false);
   root.style.setProperty('--island-alpha', String(Math.min(1, Math.max(0.55, Number(a.alpha) || 0.97))));
-  const r = Math.round(Math.min(25, Math.max(10, Number(a.radius) || 18)));
-  root.style.setProperty('--panel-radius', r + 'px');
-  root.style.setProperty('--pill-radius', Math.min(22, r + 4) + 'px');
+    const r = Math.round(Math.min(25, Math.max(10, Number(a.radius) || 18)));
+    root.style.setProperty('--panel-radius', r + 'px');
+    root.style.setProperty('--pill-radius', Math.min(22, r + 4) + 'px');
+    // 字体大小：面板内所有文字统一缩放（0.85~1.3），布局与控件尺寸不动
+    root.style.setProperty('--font-scale', String(Math.min(1.3, Math.max(0.85, Number(a.fontScale) || 1))));
   // 强调色：自定义色要同步「文字色」——亮色强调配深墨字，避免白字糊在浅蓝/浅绿上
   root.style.setProperty('--accent-on', inkOn(a.accent || themeAccent(themeId)));
   if (a.accent) root.style.setProperty('--accent', a.accent);
@@ -914,6 +917,13 @@ function renderAppearance(st) {
   if (document.activeElement !== els.radiusSlider) els.radiusSlider.value = String(a.radius);
   els.radiusVal.textContent = a.radius + 'px';
   syncRangeFill(els.radiusSlider);
+  // 字体大小：档位选中态（存档可能是旧滑杆的中间值，主进程已吸附到档位）
+  const fontScale = Number(a.fontScale) || 1;
+  for (const b of els.fontSeg.children) {
+    const active = Number(b.dataset.v) === fontScale;
+    b.classList.toggle('is-active', active);
+    b.setAttribute('aria-checked', String(active));
+  }
 
   const hasBg = !!(a.bg && a.bg.file && a.bg.type !== 'none');
 
@@ -981,6 +991,15 @@ els.radiusSlider.addEventListener('input', () => {
 });
 els.radiusSlider.addEventListener('change', () =>
   window.island.invoke('settings:set', { appearance: { radius: Number(els.radiusSlider.value) } }));
+
+// 字体大小档位：点击先本地生效（不等广播回环），再落盘等待 settings:changed 校准
+for (const b of els.fontSeg.children) {
+  b.addEventListener('click', () => {
+    const v = Number(b.dataset.v);
+    document.documentElement.style.setProperty('--font-scale', String(v));
+    window.island.invoke('settings:set', { appearance: { fontScale: v } });
+  });
+}
 
 /* ---------- 鼠标交互：面板跟随光晕 + 按钮水滴涟漪 ----------
    两者都只在「界面动效」开启时生成，关掉后 DOM 里不会出现动画元素。 */

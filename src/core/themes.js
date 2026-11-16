@@ -12,10 +12,10 @@
 
   // 8 款主题：ID 保持稳定，旧存档不会失效；霜雪（冷白）收尾。
   const THEMES = [
-    { id: 'obsidian', name: '黑金', group: 'dark', swatch: ['#080808', '#1c1810', '#d4af37'] },
+    { id: 'obsidian', name: '黑金', group: 'dark', swatch: ['#070605', '#1e1811', '#d9b658'] },
     { id: 'graphite', name: '墨砚', group: 'dark', swatch: ['#141618', '#202328', '#8fa8c0'] },
-    { id: 'midnight', name: '曜夜', group: 'dark', swatch: ['#101a38', '#1c2a4c', '#6f9dff'] },
-    { id: 'teal',     name: '青黛', group: 'dark', swatch: ['#16323f', '#204859', '#5fb8c9'] },
+    { id: 'midnight', name: '曜夜', group: 'dark', swatch: ['#0a0d18', '#1a2338', '#7ba3f2'] },
+    { id: 'teal',     name: '青黛', group: 'dark', swatch: ['#0a1418', '#1a2f36', '#64c0cb'] },
     { id: 'lavender', name: '雾紫', group: 'light', swatch: ['#b9aed6', '#e6dff5', '#6f52b8'] },
     { id: 'mauve',    name: '晨雾', group: 'light', swatch: ['#f0e6d6', '#faf4e9', '#b8823a'] },
     { id: 'sakura',   name: '樱落', group: 'light', swatch: ['#fbeaf0', '#ffffff', '#c94670'] },

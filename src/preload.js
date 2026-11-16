@@ -19,7 +19,7 @@ const INVOKE_CHANNELS = new Set([
 const SEND_CHANNELS = new Set([
   'clip:found', 'clip:cleared', 'mask:progress', 'mask:converting', 'mask:done',
   'index:updated', 'settings:changed', 'panel:show-tab', 'history:changed',
-  'pill:state', 'panel:state', 'panel:enter', 'panel:exit',
+  'pill:state', 'panel:state', 'pill:hover-sync', 'panel:enter', 'panel:exit',
   'update:found', 'update:progress', 'update:staged', 'update:error',
 ]);
 

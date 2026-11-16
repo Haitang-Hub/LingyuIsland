@@ -117,6 +117,9 @@ class Island {
         w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
       }
     }
+
+    // Windows 透明置顶窗偶发丢 mouseleave → 渲染端悬停态卡住，主进程轮询兜底
+    this.startPillHoverWatch();
   }
 
   /** 面板尺寸变化 → 立即重新布局（宽高独立：可细长 / 宽扁） */
@@ -309,6 +312,28 @@ class Island {
         if (!w.isDestroyed()) w.webContents.send('panel:state', !!open);
       } catch { /* ignore */ }
     }
+  }
+
+  /* 悬停纠偏看门狗：Windows 上透明无边框窗口指针快速移出时 WM_MOUSELEAVE 偶发丢失，
+     渲染端拿不到 mouseleave，:hover 悬停效果会一直挂着。
+     这里轮询光标位置，发现光标从胶囊窗口内→外就发 pill:hover-sync(false)，
+     由渲染端强制清除悬停态（仅在跳变瞬间发一次，不重复刷 IPC）。 */
+  startPillHoverWatch() {
+    if (this._hoverWatch) return;
+    this._cursorInPill = false;
+    this._hoverWatch = setInterval(() => {
+      const w = this.pill;
+      if (!w || w.isDestroyed() || this.pillCollapsed || !w.isVisible()) return;
+      const c = screen.getCursorScreenPoint();
+      const b = w.getContentBounds();
+      const inside = c.x >= b.x && c.x < b.x + b.width && c.y >= b.y && c.y < b.y + b.height;
+      if (inside !== this._cursorInPill) {
+        this._cursorInPill = inside;
+        if (!inside) {
+          try { w.webContents.send('pill:hover-sync', false); } catch { /* ignore */ }
+        }
+      }
+    }, 300);
   }
 
   broadcast(channel, payload) {
