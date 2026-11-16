@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const INVOKE_CHANNELS = new Set([
   'settings:get', 'settings:set',
+  'dialog:pick-bg', 'appearance:clear-bg',
   'dialog:pick-root', 'dialog:pick-files',
   'mask:files', 'mask:restore-file', 'mask:restore-text',
   'search:query', 'index:stats', 'index:rescan',

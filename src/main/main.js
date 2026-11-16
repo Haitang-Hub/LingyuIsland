@@ -3,9 +3,10 @@
  * 灵屿岛 —— 应用入口
  */
 
-const { app, Menu } = require('electron');
+const { app, Menu, protocol, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('node:url');
 
 const { Store } = require('./store');
 const { Island } = require('./island');
@@ -15,6 +16,31 @@ const { register } = require('./ipc');
 const { createUpdater } = require('./updater');
 const { createAutoUpdater } = require('./electron-updater');
 const { createTray } = require('./tray');
+const { BG_FILE_RE } = require('../core/appearance');
+
+// islandbg:// 协议：面板自定义背景（图片/视频）从 userData/appearance 安全读取。
+// standard 协议必须 Relative URL 以 host 形式解析（islandbg://bg/<file>），
+// 且必须在 app ready 之前注册 privileged schemes。
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'islandbg', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+]);
+
+/** islandbg://bg/<file> → userData/appearance/<file>；白名单文件名，杜绝目录穿越 */
+function registerAppearanceProtocol(store) {
+  protocol.handle('islandbg', (request) => {
+    try {
+      const u = new URL(request.url);
+      if (u.hostname !== 'bg') return new Response(null, { status: 404 });
+      const name = decodeURIComponent(u.pathname.replace(/^\//, ''));
+      if (!BG_FILE_RE.test(name)) return new Response(null, { status: 404 });
+      const file = path.join(store.paths.appearanceDir, name);
+      if (!fs.existsSync(file)) return new Response(null, { status: 404 });
+      return net.fetch(pathToFileURL(file).toString());
+    } catch {
+      return new Response(null, { status: 404 });
+    }
+  });
+}
 
 // E2E 跑测试时使用独立 userData：不与正在运行的应用实例争单实例锁/磁盘缓存
 if (process.env.ISLAND_E2E) {
@@ -53,8 +79,12 @@ app.whenReady().then(() => {
   store = new Store();
   store.init();
 
+  // 背景协议依赖 store.paths，ready 后注册
+  registerAppearanceProtocol(store);
+
   island = new Island();
-  island.setUiScale(store.settings.uiScale);
+  // 密度按外观设置初始化（档位由布局层钳制，不会越出屏幕）
+  island.setPanelSize(store.settings.appearance.panel);
   island.create();
   island.pill.webContents.on('did-finish-load', () => island.pill.showInactive());
 

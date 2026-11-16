@@ -11,7 +11,7 @@
 
 const { BrowserWindow, screen } = require('electron');
 const path = require('path');
-const { computeIslandLayout, normalizeUiScale, BASE } = require('../core/layout');
+const { computeIslandLayout, normalizePanelSize, BASE } = require('../core/layout');
 
 // 设计基准尺寸（实际窗口尺寸由 computeIslandLayout 按当前工作区动态计算）
 const PILL_W = BASE.pillW, PILL_H = BASE.pillH;
@@ -26,14 +26,15 @@ class Island {
     this.pillCollapsed = false;   // 当前是否处于线段收起态
     // 托盘菜单重建钩子（createTray 注入），状态切换后同步「隐藏/显示灵动岛」文案
     this.onPillStateChange = null;
-    this.uiScalePref = 'auto';    // 'auto' | 'compact' | 'standard' | 'large'
+    this.panelSize = { w: BASE.panelW, h: BASE.panelH }; // 面板 CSS 视口尺寸（宽高独立，可细长 / 宽扁）
   }
 
   /** 按当前主显示器工作区算出胶囊/面板的尺寸、位置与 UI 缩放 */
   _plan() {
     const display = screen.getPrimaryDisplay();
     return computeIslandLayout(display.workArea, {
-      uiScale: this.uiScalePref,
+      panelW: this.panelSize.w,
+      panelH: this.panelSize.h,
       collapsed: this.pillCollapsed,
     });
   }
@@ -111,18 +112,28 @@ class Island {
     }
   }
 
-  /** 用户设置的界面大小变化 → 立即重新布局（含等比缩放） */
-  setUiScale(value) {
-    this.uiScalePref = normalizeUiScale(value);
+  /** 面板尺寸变化 → 立即重新布局（宽高独立：可细长 / 宽扁） */
+  setPanelSize(size) {
+    this.panelSize = normalizePanelSize(size, this.panelSize);
     this.layout();
   }
 
   /** 应用尺寸、缩放与位置；只有真正变化时才动窗口，避免透明窗重绘闪烁 */
   _apply(win, bounds, scale) {
     if (!win || win.isDestroyed()) return;
-    const b = win.getBounds();
-    if (b.width !== bounds.width || b.height !== bounds.height) {
+    const before = win.getBounds();
+    if (before.width !== bounds.width || before.height !== bounds.height) {
+      // Windows 上 resizable:false 的窗口会被系统把「可调尺寸范围」钳在当前尺寸，
+      // setSize 只能变大不能变小：密度档位从大往小切时尺寸被忽略，CSS 视口随之错乱。
+      // 临时放开 resizable 再改尺寸，随即恢复，双向切换才都生效。
+      let unlocked = false;
+      try {
+        if (!win.isResizable()) { win.setResizable(true); unlocked = true; }
+      } catch { /* ignore */ }
       win.setSize(bounds.width, bounds.height);
+      if (unlocked) {
+        try { win.setResizable(false); } catch { /* ignore */ }
+      }
     }
     // 窗口 DIP 尺寸 = 设计尺寸 × scale，渲染层同步缩放 → CSS 视口恒为设计尺寸
     if (win._islandZoom !== scale) {
@@ -131,14 +142,16 @@ class Island {
         win._islandZoom = scale;
       } catch { /* ignore */ }
     }
-    if (b.x !== bounds.x || b.y !== bounds.y) win.setPosition(bounds.x, bounds.y);
+    // 尺寸变化后重新取位置：setSize 可能带来系统侧 1px 修正，用旧值比较会漏掉补正
+    const after = win.getBounds();
+    if (after.x !== bounds.x || after.y !== bounds.y) win.setPosition(bounds.x, bounds.y);
   }
 
   layout() {
     if (!this.pill || !this.panel) return;
     const plan = this._plan();
-    this._apply(this.pill, plan.pill, plan.uiScale);
-    this._apply(this.panel, plan.panel, plan.uiScale);
+    this._apply(this.pill, plan.pill, plan.pillScale);
+    this._apply(this.panel, plan.panel, plan.panelScale);
   }
 
   showPanel(tab) {
@@ -232,10 +245,14 @@ class Island {
     }
   }
 
-  /** 向胶囊同步面板开关状态：面板打开时不进行空闲收起计时 */
+  /** 向胶囊同步面板开关状态：面板打开时不进行空闲收起计时。
+   *  面板窗口也接收同一事件：隐藏时暂停自定义背景视频（省 GPU/电量）。 */
   _notifyPanel(open) {
-    if (this.pill && !this.pill.isDestroyed()) {
-      this.pill.webContents.send('panel:state', !!open);
+    for (const w of [this.pill, this.panel]) {
+      if (!w) continue;
+      try {
+        if (!w.isDestroyed()) w.webContents.send('panel:state', !!open);
+      } catch { /* ignore */ }
     }
   }
 

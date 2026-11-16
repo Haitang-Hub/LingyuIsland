@@ -1,12 +1,26 @@
-/* 灵屿岛胶囊 —— 深色浮岛（true-black-flat：亮度分层，色彩只落在数据与动作上） */
+/* 灵屿岛胶囊 —— 深色浮岛（true-black-flat：亮度分层，色彩只落在数据与动作上）
+   主题系统与面板一致：:root 为默认主题，其余见文件末尾 html[data-theme=…] 覆盖块；
+   --island-alpha 由渲染层按外观设置实时写入。 */
 
 :root {
-  --pill-bg: #0b0d11;
+  --pill-rgb: 11, 13, 17;
+  --island-alpha: 1;   /* 渲染层按外观设置写入（0.55~1） */
+  --pill-bg: rgba(var(--pill-rgb), var(--island-alpha));
+  --pill-bg-hover: #10131a;
   --pill-border: rgba(255, 255, 255, 0.10);
   --ink: #e9ebef;
   --ink-2: #98a0ac;
   --accent: #0a84ff;
   --green: #30d158;
+  --busy: #ff9f0a;
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent-border: color-mix(in srgb, var(--accent) 35%, transparent);
+  --accent-strong: color-mix(in srgb, var(--accent) 65%, transparent);
+  --accent-text: #79b8ff;
+  --accent-text-strong: #a9d1ff;
+  --face: #edf0f5;                       /* 胶囊表情（眼睛）颜色 */
+  --face-border: rgba(255, 255, 255, 0.18);
+  --drag-bg: #0d1524;
   /* 阴影必须完全落在窗口留白（上下各 4px）内，否则被窗口边界裁成硬边 */
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
@@ -35,7 +49,7 @@ body { position: relative; display: flex; align-items: center; justify-content: 
   width: 100%;
   height: 44px;
   padding: 0 16px 0 14px;
-  border-radius: 22px;
+  border-radius: var(--pill-radius, 22px);
   background: var(--pill-bg);
   border: 1px solid var(--pill-border);
   box-shadow: var(--shadow);
@@ -44,7 +58,7 @@ body { position: relative; display: flex; align-items: center; justify-content: 
               background 200ms ease, border-color 200ms ease;
 }
 
-.pill:hover { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(1.015); background: #10131a; }
+.pill:hover { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(1.015); background: var(--pill-bg-hover); }
 .pill:active { transform: translate(var(--mx, 0px), var(--my, 0px)) scale(0.985); }
 
 /* 空闲文案轮换：轻轻浮入 */
@@ -62,7 +76,7 @@ body { position: relative; display: flex; align-items: center; justify-content: 
   background: var(--green);
   transition: background 240ms ease;
 }
-.dot.busy  { background: #ff9f0a; }
+.dot.busy  { background: var(--busy); }
 .dot.clip  { background: var(--accent); }
 
 /* 文案：默认与悬停两层交叉淡入 */
@@ -86,9 +100,9 @@ body { position: relative; display: flex; align-items: center; justify-content: 
   max-width: 100%;
   padding: 3px 10px;
   border-radius: 12px;
-  background: rgba(10, 132, 255, 0.14);
-  border: 1px solid rgba(10, 132, 255, 0.35);
-  color: #79b8ff;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  color: var(--accent-text);
   font-family: inherit;
   font-size: 11.5px; font-weight: 500;
   white-space: nowrap; overflow: hidden;
@@ -97,7 +111,7 @@ body { position: relative; display: flex; align-items: center; justify-content: 
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
   animation: chipIn 240ms cubic-bezier(0.2, 0.9, 0.3, 1);
 }
-.chip:hover { background: rgba(10, 132, 255, 0.26); border-color: rgba(10, 132, 255, 0.65); color: #a9d1ff; }
+.chip:hover { background: color-mix(in srgb, var(--accent) 26%, transparent); border-color: var(--accent-strong); color: var(--accent-text-strong); }
 .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .chip:disabled { opacity: 0.55; cursor: default; }
 .chip svg { flex: none; }
@@ -122,7 +136,7 @@ body { position: relative; display: flex; align-items: center; justify-content: 
   transition: background 120ms ease, color 120ms ease, transform 120ms ease;
   animation: chipIn 240ms cubic-bezier(0.2, 0.9, 0.3, 1);
 }
-.chip-close:hover { background: rgba(255, 255, 255, 0.12); color: #dfe5ee; transform: scale(1.12); }
+.chip-close:hover { background: rgba(128, 128, 128, 0.15); color: var(--ink); transform: scale(1.12); }
 .chip-close:active { transform: scale(0.92); }
 .chip-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
@@ -163,7 +177,7 @@ body { position: relative; display: flex; align-items: center; justify-content: 
   width: 5.5px;
   height: 14px;
   border-radius: 3px;
-  background: #edf0f5;
+  background: var(--face);
   transform: translate(var(--look-x, 0px), var(--look-y, 0px)) scaleY(var(--blink, 1));
   transition: transform 130ms ease,
               width 240ms cubic-bezier(0.2, 0.9, 0.3, 1),
@@ -243,7 +257,7 @@ body { position: relative; display: flex; align-items: center; justify-content: 
   background: transparent;
   box-sizing: border-box;
   border: 2.6px solid transparent;
-  border-top-color: #edf0f5;
+  border-top-color: var(--face);
   border-radius: 50%;
 }
 /* 蹦跳一下（celebrate 触发） */
@@ -280,12 +294,101 @@ body { position: relative; display: flex; align-items: center; justify-content: 
   .face-inner, .face .eye { animation: none !important; transition: none !important; }
 }
 
+/* 用户关闭界面动效：表情与光效一并隐藏 */
+html.motion-off .face { visibility: hidden; }
+html.motion-off .fx-glow, html.motion-off .fx-shine, html.motion-off .pulse { display: none !important; }
+
+/* 磨砂质感（与 panel.css 同步：界面内模拟，非窗体级系统材质） */
+html.glass-weak .pill { background: rgba(var(--pill-rgb), calc(var(--island-alpha) * 0.9)); }
+html.glass-on .pill { background: rgba(var(--pill-rgb), calc(var(--island-alpha) * 0.8)); }
+
+/* ================= 主题覆盖块（与 panel.css 保持同步） ================= */
+
+html[data-theme="graphite"] {
+  --pill-rgb: 17, 19, 22;
+  --pill-bg-hover: #1e2228;
+  --pill-border: rgba(255, 255, 255, 0.09);
+  --ink: #e7e9ec;
+  --ink-2: #9ba3ad;
+  --accent: #7d95b5;
+  --accent-text: #a5bcd8;
+  --accent-text-strong: #c3d3e6;
+  --drag-bg: #1a212b;
+}
+
+html[data-theme="forest"] {
+  --pill-rgb: 13, 19, 15;
+  --pill-bg-hover: #18231c;
+  --pill-border: rgba(255, 255, 255, 0.09);
+  --ink: #e8efe9;
+  --ink-2: #9db3a4;
+  --accent: #34c77b;
+  --accent-text: #7fdda9;
+  --accent-text-strong: #a8ebc6;
+  --drag-bg: #0f2318;
+}
+
+html[data-theme="sunset"] {
+  --pill-rgb: 21, 16, 11;
+  --pill-bg-hover: #2a2018;
+  --pill-border: rgba(255, 255, 255, 0.09);
+  --ink: #f1ebe4;
+  --ink-2: #b3a696;
+  --accent: #ff8c42;
+  --accent-text: #ffb37e;
+  --accent-text-strong: #ffcaa4;
+  --drag-bg: #2b1a0c;
+}
+
+html[data-theme="lavender"] {
+  --pill-rgb: 16, 14, 23;
+  --pill-bg-hover: #221e30;
+  --pill-border: rgba(255, 255, 255, 0.09);
+  --ink: #ece9f2;
+  --ink-2: #a9a2bc;
+  --accent: #a78bfa;
+  --accent-text: #c4b1fd;
+  --accent-text-strong: #d9ccfe;
+  --drag-bg: #1c1430;
+}
+
+/* 浅色主题：胶囊换浅底深字，表情改深色，边框/阴影反相 */
+html[data-theme="cloud"] {
+  --pill-rgb: 255, 255, 255;
+  --pill-bg-hover: #f3f6fa;
+  --pill-border: rgba(15, 23, 42, 0.12);
+  --ink: #1f2937;
+  --ink-2: #5b6774;
+  --accent: #2563eb;
+  --accent-text: #1d4ed8;
+  --accent-text-strong: #1e40af;
+  --face: #1f2937;
+  --face-border: rgba(15, 23, 42, 0.28);
+  --drag-bg: #e3ecfa;
+  --shadow: 0 1px 4px rgba(15, 23, 42, 0.16);
+}
+
+html[data-theme="sakura"] {
+  --pill-rgb: 255, 250, 252;
+  --pill-bg-hover: #faeef2;
+  --pill-border: rgba(120, 40, 70, 0.14);
+  --ink: #3d2530;
+  --ink-2: #7d5b68;
+  --accent: #d94f7d;
+  --accent-text: #c13a68;
+  --accent-text-strong: #a82a54;
+  --face: #3d2530;
+  --face-border: rgba(120, 40, 70, 0.3);
+  --drag-bg: #fbe0e8;
+  --shadow: 0 1px 4px rgba(120, 40, 70, 0.16);
+}
+
 /* 剪贴板提示时的呼吸脉冲 */
 .pulse {
   display: none;
   position: absolute; inset: -1px;
   border-radius: 22px;
-  border: 1px solid rgba(10, 132, 255, 0.5);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   pointer-events: none;
 }
 .pill.clip .pulse { display: block; animation: breathe 2.2s ease-in-out infinite; }
@@ -296,8 +399,8 @@ body { position: relative; display: flex; align-items: center; justify-content: 
 
 /* 拖入状态：胶囊加深、边框点亮 */
 .pill.drag {
-  background: #0d1524;
-  border-color: rgba(10, 132, 255, 0.55);
+  background: var(--drag-bg);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
   transform: scale(1.03);
 }
 .pill.drag .label-hover, .pill.drag .label-idle { opacity: 0; }
@@ -306,8 +409,8 @@ body { position: relative; display: flex; align-items: center; justify-content: 
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
   font-size: 12.5px; font-weight: 600;
-  color: #79b8ff;
-  border-radius: 22px;
+  color: var(--accent-text);
+  border-radius: var(--pill-radius, 22px);
 }
 
 /* 忙碌 */
@@ -331,7 +434,7 @@ body { position: relative; display: flex; align-items: center; justify-content: 
   height: 4px;
   border-radius: 2px;
   background: var(--pill-bg);
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid var(--face-border);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
   opacity: 0;
   transform: translateX(-50%) scale(0.2);
@@ -433,7 +536,7 @@ body.collapsed .pill {
 }
 .dot { animation: dotBreathe 2.8s ease-in-out infinite; }
 .pill.busy .dot { --ring: rgba(255, 159, 10, 0.4);  animation: dotRing 1.4s ease-out infinite; }
-.pill.clip .dot { --ring: rgba(10, 132, 255, 0.45); animation: dotRing 1.8s ease-out infinite; }
+.pill.clip .dot { --ring: color-mix(in srgb, var(--accent) 45%, transparent); animation: dotRing 1.8s ease-out infinite; }
 .pill.ok .dot, .pill.pop .dot { --ring: rgba(48, 213, 88, 0.5); animation: dotRing 640ms ease-out; }
 
 /* 收起线段的轻微呼吸：偶尔泛起微光，提示这里可以唤回灵动岛 */

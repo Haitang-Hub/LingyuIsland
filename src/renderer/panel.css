@@ -1,6 +1,9 @@
-/* 灵屿岛面板 —— true-black-flat：亮度分层、平面卡面、色彩只落在数据与动作上 */
+/* 灵屿岛面板 —— true-black-flat：亮度分层、平面卡面、色彩只落在数据与动作上
+   主题系统：:root 为默认主题（midnight），其余主题见文件末尾的 html[data-theme=…] 覆盖块；
+   --island-alpha / --panel-radius 由渲染层按设置实时写入。 */
 
 :root {
+  /* 主题可覆盖的基础色 */
   --ground: #0e1014;
   --surface: #15181e;
   --surface-2: #1b1f27;
@@ -10,13 +13,27 @@
   --ink-2: #9aa2ae;
   --ink-3: #6b7280;
   --accent: #0a84ff;
-  --accent-soft: rgba(10, 132, 255, 0.13);
   --green: #30d158;
-  --green-soft: rgba(48, 209, 88, 0.14);
   --red: #ff453a;
-  --red-soft: rgba(255, 69, 58, 0.13);
   --orange: #ff9f0a;
-  --orange-soft: rgba(255, 159, 10, 0.14);
+  /* 色彩 soft 变体跟随主色自动推导（Chromium 106+ 支持 color-mix） */
+  --accent-soft: color-mix(in srgb, var(--accent) 13%, transparent);
+  --accent-text: #79b8ff;
+  --accent-hover: #2492ff;
+  --green-soft: color-mix(in srgb, var(--green) 14%, transparent);
+  --red-soft: color-mix(in srgb, var(--red) 13%, transparent);
+  --orange-soft: color-mix(in srgb, var(--orange) 14%, transparent);
+  /* 面板本体 / 复合面 */
+  --panel-rgb: 14, 16, 20;
+  --island-alpha: 0.97;   /* 渲染层按外观设置写入（0.55~1） */
+  --panel-radius: 18px;   /* 渲染层按外观设置写入（10~22px） */
+  --panel-border: rgba(255, 255, 255, 0.09);
+  --panel-shadow: 0 2px 8px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --hover-bg: #232833;
+  --modal-bg: #1b2028;
+  --toast-bg: #232833;
+  --knob: #06220f;        /* 开关/勾选的对勾与旋钮色（压在主色上） */
+  --scheme: dark;
   --radius: 10px;
   --ctrl-h: 32px;
 }
@@ -44,11 +61,11 @@ body { padding: 6px 10px 12px; }
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: rgba(14, 16, 20, 0.97);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 18px;
+  background: rgba(var(--panel-rgb), var(--island-alpha));
+  border: 1px solid var(--panel-border);
+  border-radius: var(--panel-radius);
   /* 留白 = 阴影最大扩散距离（左右 8、上 8-2、下 2+8），边缘才会自然衰减到 0 */
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: var(--panel-shadow);
   overflow: hidden;
   animation: panelIn 220ms cubic-bezier(0.2, 0.9, 0.3, 1);
 }
@@ -150,7 +167,7 @@ h1 { font-size: 14px; font-weight: 600; letter-spacing: 0.2px; }
 .dropzone.drag {
   background: var(--accent-soft);
   border-color: var(--accent);
-  color: #79b8ff;
+  color: var(--accent-text);
 }
 .dz-title { font-size: 14px; font-weight: 600; color: var(--ink); }
 .dz-sub { font-size: 12px; color: var(--ink-2); }
@@ -239,7 +256,7 @@ h2 { font-size: 13px; font-weight: 600; }
   font-size: 11px;
   font-weight: 500;
   background: var(--accent-soft);
-  color: #79b8ff;
+  color: var(--accent-text);
   white-space: nowrap;
 }
 
@@ -271,11 +288,11 @@ h2 { font-size: 13px; font-weight: 600; }
 }
 .btn:disabled { opacity: 0.45; cursor: default; }
 .btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover:not(:disabled) { background: #2492ff; }
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .btn-ghost { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); }
-.btn-ghost:hover:not(:disabled) { background: #232833; }
+.btn-ghost:hover:not(:disabled) { background: var(--hover-bg); }
 .btn-mini { height: 26px; padding: 0 10px; font-size: 11.5px; background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); }
-.btn-mini:hover { background: #232833; color: var(--ink); }
+.btn-mini:hover { background: var(--hover-bg); color: var(--ink); }
 .btn-danger { background: transparent; border: 1px solid var(--red); color: var(--red); }
 .btn-danger:hover { background: var(--red-soft); }
 
@@ -423,7 +440,7 @@ input[type="text"]::placeholder, textarea::placeholder { color: var(--ink-3); }
   transition: transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1), background 160ms ease;
 }
 .switch.on { background: var(--green); border-color: var(--green); }
-.switch.on::after { transform: translateX(14px); background: #06220f; }
+.switch.on::after { transform: translateX(14px); background: var(--knob); }
 
 /* ---------------- 设置：检测项（折叠 + 紧凑网格） ---------------- */
 
@@ -482,7 +499,7 @@ input[type="text"]::placeholder, textarea::placeholder { color: var(--ink-3); }
   top: 1px;
   width: 4px;
   height: 8px;
-  border: solid #06220f;
+  border: solid var(--knob);
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
@@ -514,7 +531,7 @@ input[type="text"]::placeholder, textarea::placeholder { color: var(--ink-3); }
   border: 1px solid var(--line-strong);
   border-radius: 7px;
   outline: none;
-  color-scheme: dark; /* 数字微调箭头适配深色主题 */
+  color-scheme: var(--scheme, dark); /* 数字微调箭头跟随主题明暗 */
 }
 .delay-control input[type="number"]:focus { border-color: var(--accent); }
 .delay-control input[type="number"]:disabled { cursor: not-allowed; }
@@ -572,7 +589,7 @@ input[type="text"]::placeholder, textarea::placeholder { color: var(--ink-3); }
 .toast {
   padding: 8px 16px;
   border-radius: 10px;
-  background: #232833;
+  background: var(--toast-bg);
   border: 1px solid var(--line-strong);
   font-size: 12.5px;
   color: var(--ink);
@@ -588,7 +605,10 @@ input[type="text"]::placeholder, textarea::placeholder { color: var(--ink-3); }
 
 .modal-mask {
   position: fixed;
-  inset: 0;
+  /* 只盖住面板本体的圆角区域，与 body 留白（6px 10px 12px）和 .panel 圆角（18px）保持一致：
+     遮罩若铺满整个窗口，透明留白区会被涂上暗色，圆角外露出带直角的暗色矩形 */
+  inset: 6px 10px 12px;
+  border-radius: var(--panel-radius, 18px);
   background: rgba(0, 0, 0, 0.45);
   display: flex;
   align-items: center;
@@ -600,7 +620,7 @@ input[type="text"]::placeholder, textarea::placeholder { color: var(--ink-3); }
 .modal {
   width: 320px;
   padding: 18px;
-  background: #1b2028;
+  background: var(--modal-bg);
   border: 1px solid var(--line-strong);
   border-radius: 14px;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
@@ -733,3 +753,286 @@ kbd {
 .warning-note svg { flex: none; margin-top: 2px; color: var(--orange); }
 .warning-note p { margin: 0; font-size: 11.5px; line-height: 1.65; color: var(--ink-2); }
 .warning-note b { color: var(--orange); font-weight: 600; }
+
+/* ================= 外观页 ================= */
+
+/* 主题色板卡片网格 */
+.theme-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.theme-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.theme-card:hover { background: var(--surface-2); }
+.theme-card.is-active { border-color: var(--accent); background: var(--accent-soft); }
+.theme-swatches { display: flex; gap: 4px; }
+.theme-swatches i {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+}
+.theme-name { font-size: 11.5px; color: var(--ink); }
+
+/* 强调色预设点 */
+.accent-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.accent-dot {
+  width: 24px; height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+  transition: transform 120ms ease, border-color 120ms ease;
+}
+.accent-dot:hover { transform: scale(1.12); }
+.accent-dot.is-active { border-color: var(--ink); }
+.accent-dot.follow {
+  background: linear-gradient(135deg, #0a84ff 33%, #34c77b 33% 66%, #ff8c42 66%);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 12px; font-weight: 700;
+}
+
+/* 滑杆行（透明度 / 圆角） */
+.slider-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.slider-row label { flex: none; width: 64px; font-size: 12.5px; color: var(--ink); }
+.slider-row input[type="range"] {
+  flex: 1;
+  -webkit-appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-strong);
+  outline: none;
+  cursor: pointer;
+}
+.slider-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+.slider-row input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.12); }
+.slider-row .slider-val {
+  flex: none;
+  width: 46px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 分段控件行（毛玻璃 / 密度 / 背景类型）：整行等分，四项之间留足间距，选中态一眼可辨 */
+.appearance-seg { display: flex; width: 100%; gap: 4px; margin-bottom: 2px; }
+.appearance-seg .seg { flex: 1; padding: 0 8px; }
+
+/* 尺寸预设（细长 / 标准 / 宽扁） */
+.preset-row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.preset {
+  flex: 1;
+  min-width: 116px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-family: inherit;
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+.preset:hover { background: var(--surface-2); color: var(--ink); }
+.preset.is-active { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+
+/* 背景选择行 */
+.bg-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.bg-file-note {
+  flex: 1; min-width: 0;
+  font-size: 11px;
+  color: var(--ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ================= 面板自定义背景（islandbg://） ================= */
+
+.panel { position: relative; }
+.panel-bg {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  z-index: 0;
+  pointer-events: none;
+  display: none;
+}
+.panel.has-bg .panel-bg { display: block; }
+.panel-bg img, .panel-bg video {
+  width: 100%; height: 100%;
+  object-fit: cover;
+}
+/* 背景上的暗化层：透明度滑杆控制浓淡，保证文字可读 */
+.panel.has-bg .panel-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 10, 14, calc((1 - var(--island-alpha)) * 0.85));
+}
+.panel > *:not(.panel-bg) { position: relative; z-index: 1; }
+
+/* ================= 动效开关（html.motion-off） ================= */
+
+html.motion-off .panel,
+html.motion-off .toast,
+html.motion-off .modal-mask { animation: none !important; }
+
+/* 磨砂质感：只作用于面板本体（窗体级系统材质会涂满整个窗口矩形，
+   圆角留白处会露出带直角的模糊底，故用界面内半透明磨砂替代） */
+html.glass-weak .panel { background: rgba(var(--panel-rgb), calc(var(--island-alpha) * 0.9)); }
+html.glass-on .panel {
+  background: rgba(var(--panel-rgb), calc(var(--island-alpha) * 0.78));
+  box-shadow: var(--panel-shadow), inset 0 0 0 1px rgba(128, 128, 128, 0.16);
+}
+
+/* ================= 主题覆盖块 ================= */
+
+/* 石墨：中性灰、低饱和 */
+html[data-theme="graphite"] {
+  --ground: #101214;
+  --surface: #17191d;
+  --surface-2: #1d2126;
+  --line: #2a2e34;
+  --line-strong: #363b42;
+  --ink: #e7e9ec;
+  --ink-2: #9ba3ad;
+  --ink-3: #6f757e;
+  --accent: #7d95b5;
+  --accent-text: #a5bcd8;
+  --accent-hover: #8fa6c4;
+  --panel-rgb: 16, 18, 20;
+  --hover-bg: #262a30;
+  --modal-bg: #1f2329;
+  --toast-bg: #262a30;
+}
+
+/* 松林：墨绿底、绿 accent */
+html[data-theme="forest"] {
+  --ground: #0c120e;
+  --surface: #131b16;
+  --surface-2: #19241d;
+  --line: #24322a;
+  --line-strong: #2f4036;
+  --ink: #e8efe9;
+  --ink-2: #9db3a4;
+  --ink-3: #6e8276;
+  --accent: #34c77b;
+  --accent-text: #7fdda9;
+  --accent-hover: #45d68a;
+  --panel-rgb: 12, 18, 14;
+  --hover-bg: #202c25;
+  --modal-bg: #182119;
+  --toast-bg: #202c25;
+  --knob: #07230f;
+}
+
+/* 落日：暖褐底、橙 accent */
+html[data-theme="sunset"] {
+  --ground: #14100b;
+  --surface: #1c1610;
+  --surface-2: #241c14;
+  --line: #332820;
+  --line-strong: #403327;
+  --ink: #f1ebe4;
+  --ink-2: #b3a696;
+  --ink-3: #7f7466;
+  --accent: #ff8c42;
+  --accent-text: #ffb37e;
+  --accent-hover: #ff9c58;
+  --panel-rgb: 20, 16, 11;
+  --hover-bg: #2d241b;
+  --modal-bg: #221b13;
+  --toast-bg: #2d241b;
+  --knob: #2b1102;
+}
+
+/* 薰衣草：暗紫底、紫 accent */
+html[data-theme="lavender"] {
+  --ground: #0f0d16;
+  --surface: #171420;
+  --surface-2: #1e1a2a;
+  --line: #2b2638;
+  --line-strong: #373146;
+  --ink: #ece9f2;
+  --ink-2: #a9a2bc;
+  --ink-3: #757086;
+  --accent: #a78bfa;
+  --accent-text: #c4b1fd;
+  --accent-hover: #b59ffc;
+  --panel-rgb: 15, 13, 22;
+  --hover-bg: #2a2438;
+  --modal-bg: #1d1929;
+  --toast-bg: #2a2438;
+  --knob: #1f103d;
+}
+
+/* 云白：浅灰白底、蓝 accent（浅色系需整体反转亮度与边框） */
+html[data-theme="cloud"] {
+  --ground: #f2f5f9;
+  --surface: #ffffff;
+  --surface-2: #eaeff5;
+  --line: #dfe5ec;
+  --line-strong: #c8d1dc;
+  --ink: #1f2937;
+  --ink-2: #5b6774;
+  --ink-3: #8b95a1;
+  --accent: #2563eb;
+  --accent-text: #1d4ed8;
+  --accent-hover: #1d4ed8;
+  --green: #15803d;
+  --red: #dc2626;
+  --orange: #b45309;
+  --panel-rgb: 255, 255, 255;
+  --panel-border: rgba(15, 23, 42, 0.10);
+  --panel-shadow: 0 2px 10px rgba(15, 23, 42, 0.12);
+  --hover-bg: #e3e9f0;
+  --modal-bg: #ffffff;
+  --toast-bg: #ffffff;
+  --knob: #ffffff;
+  --scheme: light;
+}
+
+/* 樱粉：粉白底、玫红 accent */
+html[data-theme="sakura"] {
+  --ground: #fdf2f5;
+  --surface: #ffffff;
+  --surface-2: #fbe9ee;
+  --line: #f3dbe2;
+  --line-strong: #e5bcc7;
+  --ink: #3d2530;
+  --ink-2: #7d5b68;
+  --ink-3: #a98e98;
+  --accent: #d94f7d;
+  --accent-text: #c13a68;
+  --accent-hover: #c74470;
+  --green: #15803d;
+  --red: #dc2626;
+  --orange: #b45309;
+  --panel-rgb: 255, 250, 252;
+  --panel-border: rgba(120, 40, 70, 0.12);
+  --panel-shadow: 0 2px 10px rgba(120, 40, 70, 0.12);
+  --hover-bg: #f7dde4;
+  --modal-bg: #ffffff;
+  --toast-bg: #ffffff;
+  --knob: #ffffff;
+  --scheme: light;
+}

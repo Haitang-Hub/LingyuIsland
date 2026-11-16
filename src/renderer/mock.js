@@ -44,6 +44,10 @@ if (!window.island) {
     autoCollapseDelay: 20,
     uiScale: 'auto',
     launchOnBoot: false,
+    appearance: {
+      theme: 'midnight', accent: '', alpha: 0.97, radius: 18, glass: 'off',
+      panel: { w: 560, h: 700 }, motion: true, bg: { type: 'none', file: '', name: '' },
+    },
   };
 
   const history = [
@@ -108,6 +112,15 @@ if (!window.island) {
           };
           if ('autoCollapseDelay' in patch) {
             next.autoCollapseDelay = clampDelay(patch.autoCollapseDelay, settings.autoCollapseDelay);
+          }
+          // 外观按字段合并（与主进程 normalizeAppearance 的「缺省沿用上一次」一致）
+          if (patch.appearance) {
+            const ap = patch.appearance;
+            next.appearance = {
+              ...settings.appearance, ...ap,
+              panel: ap.panel ? { ...(settings.appearance.panel || {}), ...ap.panel } : settings.appearance.panel,
+              bg: ap.bg ? { ...(settings.appearance.bg || {}), ...ap.bg } : settings.appearance.bg,
+            };
           }
           Object.assign(settings, next);
           return settings;

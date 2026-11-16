@@ -272,6 +272,26 @@ function scheduleIdleRotate() {
 }
 scheduleIdleRotate();
 
+/* ---------------- 外观：主题 / 强调色 / 透明度 / 圆角 / 动效 ---------------- */
+
+const THEMES_API = window.IslandThemes || { normalizeTheme: (v) => v || 'midnight' };
+
+/** 与面板同一套 CSS 变量（胶囊侧只用到其中与胶囊相关的部分） */
+function applyPillAppearance(a) {
+  if (!a) return;
+  const root = document.documentElement;
+  root.dataset.theme = THEMES_API.normalizeTheme(a.theme);
+  root.classList.toggle('motion-off', a.motion === false);
+  root.style.setProperty('--island-alpha', String(Math.min(1, Math.max(0.55, Number(a.alpha) || 1))));
+  const r = Math.round(Math.min(22, Math.max(10, Number(a.radius) || 18)));
+  root.style.setProperty('--pill-radius', Math.min(22, r + 4) + 'px');
+  if (a.accent) root.style.setProperty('--accent', a.accent);
+  else root.style.removeProperty('--accent');
+  // 磨砂质感（界面内模拟，与面板同源）
+  root.classList.toggle('glass-weak', a.glass === 'auto');
+  root.classList.toggle('glass-on', a.glass === 'on');
+}
+
 /* ---------------- 初始化 ---------------- */
 
 (async () => {
@@ -284,6 +304,7 @@ scheduleIdleRotate();
     const st = await window.island.invoke('settings:get');
     autoCollapse = !!st.settings.autoCollapse;
     collapseDelaySec = Number(st.settings.autoCollapseDelay) || 20;
+    applyPillAppearance(st.settings.appearance);
     // 主进程已处于收起态（如启动前托盘隐藏）→ 直接渲染线段
     if (st.pillCollapsed) applyPillState('collapsed');
     resetIdleTimer();
@@ -531,10 +552,11 @@ for (const ev of ['mousemove', 'mousedown', 'keydown', 'wheel', 'dragenter', 'dr
   window.addEventListener(ev, resetIdleTimer, { passive: true });
 }
 
-// 设置变化（开关或时长）→ 立即按新配置重新计时
+// 设置变化（开关或时长）→ 立即按新配置重新计时；外观字段同步换肤
 window.island.on('settings:changed', (s) => {
   autoCollapse = !!s.autoCollapse;
   collapseDelaySec = Number(s.autoCollapseDelay) || collapseDelaySec;
+  applyPillAppearance(s.appearance);
   resetIdleTimer();
 });
 

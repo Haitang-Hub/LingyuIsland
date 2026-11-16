@@ -21,18 +21,59 @@ const BASE = {
   edge: 8,       // 左右/底部安全留白
 };
 
-/** 手动界面大小；'auto' 按工作区自动计算 */
-const UI_SCALES = { compact: 0.85, standard: 1, large: 1.2 };
+/**
+ * 面板尺寸不再用「等比缩放档位」，而是直接给出 CSS 视口的宽 × 高。
+ * 宽高独立，于是可以「细长」（窄而高，适合长列表）或「宽扁」（宽而矮，
+ * 适合表格 / 并排文本），而不是整体倍率放大到占满全屏。
+ */
+const PANEL_LIMITS = { minW: 460, maxW: 1040, minH: 520, maxH: 1000 };
+
+/** 快捷预设（面板 CSS 视口尺寸） */
+const PANEL_PRESETS = {
+  narrow: { id: 'narrow', label: '细长', w: 470, h: 820 },
+  standard: { id: 'standard', label: '标准', w: 560, h: 700 },
+  wide: { id: 'wide', label: '宽扁', w: 820, h: 620 },
+};
+
+/** 旧存档的 density 档位 → 预设（compact/large/auto 分别映射到新形状） */
+const LEGACY_DENSITY = { auto: 'standard', compact: 'narrow', standard: 'standard', large: 'wide' };
+
 const AUTO_MIN = 0.85, AUTO_MAX = 1.3;
-const UI_SCALE_VALUES = new Set(['auto', ...Object.keys(UI_SCALES)]);
 
 function clamp(v, lo, hi) {
   return Math.min(hi, Math.max(lo, v));
 }
 
-/** 非法/未知设置值一律回退 'auto' */
-function normalizeUiScale(value) {
-  return UI_SCALE_VALUES.has(value) ? value : 'auto';
+/** 旧 density 档位值 → 面板尺寸（迁移用） */
+function sizeFromDensity(value) {
+  const key = LEGACY_DENSITY[value] || 'standard';
+  const p = PANEL_PRESETS[key];
+  return { w: p.w, h: p.h };
+}
+
+/** 面板尺寸规范化：宽高各自钳制，非法值回退到上一次的有效值 / 基准尺寸 */
+function normalizePanelSize(raw, prev) {
+  const r = (raw && typeof raw === 'object') ? raw : {};
+  const p = (prev && typeof prev === 'object') ? prev : {};
+  const num = (v, lo, hi, fb) => {
+    const n = Number(v);
+    // null / '' / NaN 都视为「未提供」，回退到上一次的有效值
+    return Math.round(clamp(v === null || v === '' || !Number.isFinite(n) ? fb : n, lo, hi));
+  };
+  return {
+    w: num(r.w, PANEL_LIMITS.minW, PANEL_LIMITS.maxW, num(p.w, PANEL_LIMITS.minW, PANEL_LIMITS.maxW, BASE.panelW)),
+    h: num(r.h, PANEL_LIMITS.minH, PANEL_LIMITS.maxH, num(p.h, PANEL_LIMITS.minH, PANEL_LIMITS.maxH, BASE.panelH)),
+  };
+}
+
+/** 命中的预设 id（宽高与预设完全一致时返回，供渲染层高亮） */
+function matchPreset(size) {
+  if (!size) return '';
+  for (const key of Object.keys(PANEL_PRESETS)) {
+    const p = PANEL_PRESETS[key];
+    if (size.w === p.w && size.h === p.h) return key;
+  }
+  return '';
 }
 
 /**
@@ -44,15 +85,11 @@ function autoUiScale(width, height) {
   return Math.round(clamp(raw, AUTO_MIN, AUTO_MAX) * 100) / 100;
 }
 
-function resolveUiScale(width, height, pref) {
-  if (pref && UI_SCALES[pref]) return UI_SCALES[pref];
-  return autoUiScale(width, height);
-}
-
 /**
  * @param {{x:number,y:number,width:number,height:number}} workArea 主显示器工作区（DIP）
- * @param {{uiScale?:string, collapsed?:boolean}} [opts]
- * @returns {{uiScale:number, pill:{x,y,width,height}, panel:{x,y,width,height}}}
+ * @param {{panelW?:number, panelH?:number, uiScale?:string, collapsed?:boolean}} [opts]
+ *   panelW/panelH = 面板 CSS 视口尺寸（宽高独立，可细长可宽扁）；uiScale 为旧档位值，仅迁移兼容用
+ * @returns {{uiScale:number, pillScale:number, panelScale:number, pill:{x,y,width,height}, panel:{x,y,width,height}}}
  */
 function computeIslandLayout(workArea, opts = {}) {
   const wa = {
@@ -62,26 +99,40 @@ function computeIslandLayout(workArea, opts = {}) {
     height: Math.max(1, Number.isFinite(workArea && workArea.height) ? workArea.height : 1040),
   };
 
-  const scale = resolveUiScale(wa.width, wa.height, opts.uiScale);
-  const edge = Math.round(BASE.edge * scale);
-  const topInset = Math.round(BASE.topInset * scale);
-  const gap = Math.round(BASE.gap * scale);
+  const sys = autoUiScale(wa.width, wa.height); // 系统/屏幕系数：DPI 与分辨率适配
+  const edge = Math.round(BASE.edge * sys);
+  const topInset = Math.round(BASE.topInset * sys);
+  const gap = Math.round(BASE.gap * sys);
 
   const availW = Math.max(1, wa.width - edge * 2);
-  const pillW = Math.min(Math.round(BASE.pillW * scale), availW);
-  const panelW = Math.min(Math.round(BASE.panelW * scale), availW);
-  const pillH = Math.round(BASE.pillH * scale);
 
+  // 胶囊固定比例，只跟随系统系数：面板拉宽压扁时胶囊不应跟着变形
+  const pillScale = Math.min(sys, availW / BASE.pillW);
+  const pillW = Math.round(BASE.pillW * pillScale);
+  const pillH = Math.round(BASE.pillH * pillScale);
+
+  // 面板：目标 CSS 视口宽高 × 统一系数（该系数同时作为渲染层 zoom），
+  // 系数被工作区钳制，空间不足时整体（含字号）一起缩小，绝不越出屏幕
+  const target = normalizePanelSize(
+    (opts.panelW || opts.panelH)
+      ? { w: opts.panelW, h: opts.panelH }
+      : sizeFromDensity(opts.uiScale),
+  );
   // 面板顶部固定在胶囊下方；高度按剩余空间裁剪，绝不靠「上移窗口」来硬塞
   const panelTopOffset = topInset + pillH + gap;
   const maxPanelH = Math.max(1, wa.height - panelTopOffset - edge);
-  const panelH = Math.min(Math.round(BASE.panelH * scale), maxPanelH);
+  const scale = clamp(Math.min(sys, availW / target.w, maxPanelH / target.h), AUTO_MIN, AUTO_MAX);
+  const panelW = Math.round(Math.min(target.w * scale, availW));
+  const panelH = Math.round(Math.min(target.h * scale, maxPanelH));
 
   const pillX = wa.x + Math.round((wa.width - pillW) / 2);
   const panelX = wa.x + Math.round((wa.width - panelW) / 2);
 
   return {
-    uiScale: scale,
+    uiScale: scale,          // 兼容旧调用方：等同于 panelScale
+    pillScale,
+    panelScale: scale,
+    target,
     pill: {
       x: pillX,
       y: wa.y + (opts.collapsed ? 0 : topInset),
@@ -98,6 +149,6 @@ function computeIslandLayout(workArea, opts = {}) {
 }
 
 module.exports = {
-  BASE, UI_SCALES, AUTO_MIN, AUTO_MAX,
-  normalizeUiScale, autoUiScale, computeIslandLayout,
+  BASE, PANEL_LIMITS, PANEL_PRESETS, LEGACY_DENSITY, AUTO_MIN, AUTO_MAX,
+  normalizePanelSize, sizeFromDensity, matchPreset, autoUiScale, computeIslandLayout,
 };

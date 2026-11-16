@@ -9,7 +9,8 @@ const path = require('path');
 const { app, safeStorage } = require('electron');
 const { Vault } = require('../core/masker');
 const { normalizeConflictPolicy } = require('../core/imports');
-const { normalizeUiScale } = require('../core/layout');
+const { BASE } = require('../core/layout');
+const { normalizeAppearance, ALPHA_DEFAULT, RADIUS_DEFAULT } = require('../core/appearance');
 
 /** 面板自动收起时长（秒）的合法范围与默认值 */
 const COLLAPSE_MIN_SEC = 5;
@@ -47,8 +48,18 @@ const DEFAULT_SETTINGS = {
   clipboardWatch: true,           // 剪贴板自动识别可恢复内容
   autoCollapse: true,             // 灵动岛无操作自动收起为顶部线段
   autoCollapseDelay: DEFAULT_COLLAPSE_SEC, // 自动收起时长（秒），可在设置中自定义
-  uiScale: 'auto',                // 界面缩放恒为自适应：手动档位入口已移除，见 _loadSettings / saveSettings
+  uiScale: 'auto',                // 旧字段：界面缩放恒为自适应，实际面板尺寸由 appearance.panel 控制
   launchOnBoot: false,            // 开机自启
+  appearance: {                   // 外观：主题 / 强调色 / 透明度 / 圆角 / 毛玻璃 / 面板尺寸 / 动效 / 背景
+    theme: 'midnight',
+    accent: '',                   // 空串 = 跟随主题默认强调色
+    alpha: ALPHA_DEFAULT,         // 面板/胶囊底色不透明度（0.55~1）
+    radius: RADIUS_DEFAULT,       // 面板圆角 px（10~22）
+    glass: 'off',                 // 磨砂质感：off=实色 | auto=轻磨砂 | on=强磨砂（界面内模拟，非窗体级系统材质）
+    panel: { w: BASE.panelW, h: BASE.panelH }, // 面板 CSS 视口尺寸（宽高独立，可细长 / 宽扁）
+    motion: true,                 // 界面动效
+    bg: { type: 'none', file: '', name: '' }, // 背景：none | image | video（file=islandbg:// 文件名，name=原始文件名，仅展示）
+  },
 };
 
 class Store {
@@ -105,6 +116,7 @@ class Store {
       vaultBin: path.join(this.dir, 'vault.bin'),
       vaultPlain: path.join(this.dir, 'vault.json'),
       history: path.join(this.dir, 'history.json'),
+      appearanceDir: path.join(this.dir, 'appearance'), // 自定义背景文件（islandbg:// 协议映射到这里）
     };
   }
 
@@ -124,6 +136,8 @@ class Store {
     // 界面大小手动档位入口已移除：旧存档里的 compact/standard/large 一律回到自适应，
     // 保证窗口始终按分辨率/DPI 完整落在屏幕内。
     this.settings.uiScale = 'auto';
+    // 外观设置逐字段规范化（旧配置缺 appearance 字段时走全局默认）
+    this.settings.appearance = normalizeAppearance(this.settings.appearance, null);
   }
 
   saveSettings(patch) {
@@ -141,6 +155,10 @@ class Store {
     }
     // 界面大小不再接受手动档位：即使外部传入也强制回到自适应
     next.uiScale = 'auto';
+    // 外观设置以主进程规范化结果为准（越界钳制 / 非法回退）
+    if ('appearance' in patch) {
+      next.appearance = normalizeAppearance(patch.appearance, this.settings.appearance);
+    }
     this.settings = next;
     fs.writeFileSync(this.paths.settings, JSON.stringify(this.settings, null, 2), 'utf8');
     return this.settings;
@@ -219,6 +237,6 @@ class Store {
 }
 
 module.exports = {
-  Store, DEFAULT_SETTINGS, normalizeCollapseDelay, normalizeUiScale,
+  Store, DEFAULT_SETTINGS, normalizeCollapseDelay,
   COLLAPSE_MIN_SEC, COLLAPSE_MAX_SEC, DEFAULT_COLLAPSE_SEC,
 };

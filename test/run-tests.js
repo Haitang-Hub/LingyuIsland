@@ -721,6 +721,109 @@ test('同名策略：saveSettings 规范化并落盘', () => {
   }
 });
 
+/* ---------------- 外观：主题 / appearance 规范化 ---------------- */
+
+test('外观：主题注册表与 normalizeTheme / normalizeAccent', () => {
+  const { normalizeTheme, normalizeAccent, THEMES, DEFAULT_THEME } = require('../src/core/themes');
+  assert.strictEqual(THEMES.length, 7);
+  assert.strictEqual(DEFAULT_THEME, 'midnight');
+  assert.strictEqual(normalizeTheme('sakura'), 'sakura');
+  assert.strictEqual(normalizeTheme('nope'), 'midnight');
+  assert.strictEqual(normalizeTheme('nope', 'cloud'), 'cloud');
+  assert.strictEqual(normalizeTheme('nope', 'bad'), 'midnight');
+  assert.strictEqual(normalizeAccent('#34C77B'), '#34c77b');
+  assert.strictEqual(normalizeAccent('red'), '');
+  assert.strictEqual(normalizeAccent('#12345'), '');
+  assert.strictEqual(normalizeAccent(''), '');
+});
+
+test('外观：normalizeAppearance 钳制 / 白名单 / 回退', () => {
+  const { normalizeAppearance, ALPHA_MIN, ALPHA_MAX, RADIUS_MAX } = require('../src/core/appearance');
+  const a = normalizeAppearance({
+    theme: 'forest', accent: '#FF8C42', alpha: 0.3, radius: 99,
+    glass: 'x', panel: { w: 9, h: 99999 }, motion: 0,
+    bg: { type: 'video', file: 'a.png' }, // 扩展名与类型不符 → 整体回退
+  }, null);
+  assert.strictEqual(a.theme, 'forest');
+  assert.strictEqual(a.accent, '#ff8c42');
+  assert.strictEqual(a.alpha, ALPHA_MIN, '低于下限钳回 0.55');
+  assert.strictEqual(a.radius, RADIUS_MAX, '高于上限钳回 22');
+  assert.strictEqual(a.glass, 'off');
+  assert.deepStrictEqual(a.panel, { w: 460, h: 1000 }, '面板宽高各自钳制');
+  assert.strictEqual(a.motion, false);
+  assert.deepStrictEqual(a.bg, { type: 'video', file: '', name: '' }, '扩展名与类型不符 → 文件置空，类型保留');
+
+  const b = normalizeAppearance({ alpha: 1.5, radius: 3, bg: { type: 'image' } }, null);
+  assert.strictEqual(b.alpha, ALPHA_MAX);
+  assert.strictEqual(b.radius, 10);
+  assert.strictEqual(b.bg.type, 'image', 'type 单独 patch 生效');
+  assert.strictEqual(b.bg.file, '');
+
+  const c = normalizeAppearance(null, null);
+  assert.strictEqual(c.theme, 'midnight');
+  assert.strictEqual(c.alpha, 0.97);
+  assert.strictEqual(c.radius, 18);
+  assert.strictEqual(c.glass, 'off');
+  assert.deepStrictEqual(c.panel, { w: 560, h: 700 }, '默认基准尺寸');
+  assert.strictEqual(c.motion, true);
+  assert.deepStrictEqual(c.bg, { type: 'none', file: '', name: '' });
+
+  // 文件名白名单：杜绝目录穿越
+  const d = normalizeAppearance({ bg: { type: 'image', file: '..\\evil.png' } }, null);
+  assert.strictEqual(d.bg.file, '');
+});
+
+test('外观：背景格式白名单（含 bmp/avif，拒绝 mov/mkv）与展示文件名', () => {
+  const { normalizeAppearance, normalizeBgFile, normalizeBgName } = require('../src/core/appearance');
+
+  // 图片：Chromium 能解码的格式都放行（用户素材常见 jfif→jpg、截图→png、聊天图→bmp）
+  for (const f of ['bg-1.png', 'bg-2.jpg', 'bg-3.jpeg', 'bg-4.webp', 'bg-5.gif', 'bg-6.bmp', 'bg-7.avif']) {
+    assert.strictEqual(normalizeBgFile(f, 'image'), f, '图片应允许 ' + f);
+  }
+  // 视频：只放行 Chromium 可解码的容器
+  assert.strictEqual(normalizeBgFile('bg-1.mp4', 'video'), 'bg-1.mp4');
+  assert.strictEqual(normalizeBgFile('bg-1.webm', 'video'), 'bg-1.webm');
+  assert.strictEqual(normalizeBgFile('bg-1.mov', 'video'), '', 'mov 无法解码，必须拒绝');
+  assert.strictEqual(normalizeBgFile('bg-1.mkv', 'video'), '', 'mkv 无法解码，必须拒绝');
+
+  // 展示名：去路径、去控制字符、限长；无文件时清空
+  assert.strictEqual(normalizeBgName('C:\\Users\\me\\图片\\风景.png', 'image'), '风景.png');
+  assert.strictEqual(normalizeBgName('/home/me/a<b>.png', 'image'), 'ab.png');
+  assert.strictEqual(normalizeBgName('x'.repeat(80), 'image').length, 60);
+  assert.strictEqual(normalizeBgName('风景.png', 'none'), '');
+
+  const a = normalizeAppearance({ bg: { type: 'image', file: 'bg-9.bmp', name: 'D:\\素材\\桌面.bmp' } }, null);
+  assert.deepStrictEqual(a.bg, { type: 'image', file: 'bg-9.bmp', name: '桌面.bmp' });
+  // 只改 type（不带 file/name）时沿用已有文件与展示名
+  const b = normalizeAppearance({ bg: { type: 'image' } }, a);
+  assert.strictEqual(b.bg.file, 'bg-9.bmp');
+  assert.strictEqual(b.bg.name, '桌面.bmp');
+  // 切回「无」时展示名一并清空
+  const c = normalizeAppearance({ bg: { type: 'none' } }, b);
+  assert.deepStrictEqual(c.bg, { type: 'none', file: '', name: '' });
+});
+
+test('外观：saveSettings 持久化并规范化 appearance', () => {
+  const s = new Store();
+  s.dir = TMP;
+  const file = s.paths.settings;
+  try {
+    const next = s.saveSettings({ appearance: { theme: 'sakura', alpha: 0.4, radius: 5, bg: { type: 'image', file: 'bg-abc.png' } } });
+    assert.strictEqual(next.appearance.theme, 'sakura');
+    assert.strictEqual(next.appearance.alpha, 0.55);
+    assert.strictEqual(next.appearance.radius, 10);
+    assert.strictEqual(next.appearance.bg.type, 'image');
+    assert.strictEqual(next.appearance.bg.file, 'bg-abc.png');
+    // 部分字段 patch：只改 theme 不丢 bg
+    const n2 = s.saveSettings({ appearance: { theme: 'cloud' } });
+    assert.strictEqual(n2.appearance.theme, 'cloud');
+    assert.strictEqual(n2.appearance.bg.file, 'bg-abc.png');
+    assert.strictEqual(JSON.parse(fs.readFileSync(file, 'utf8')).appearance.theme, 'cloud');
+  } finally {
+    try { fs.rmSync(file, { force: true }); } catch { /* ignore */ }
+  }
+});
+
 /* ---------------- 面板点击外部收起 & 灵动岛收起/展开（island.js） ---------------- */
 
 const { Island } = require('../src/main/island');
@@ -998,7 +1101,8 @@ test('无法转换的 .doc 明确失败，不静默丢弃也不改写原件', ()
 /* ---------------- 多分辨率 / DPI 自适应布局 ---------------- */
 
 const {
-  computeIslandLayout, normalizeUiScale, autoUiScale, BASE,
+  computeIslandLayout, normalizePanelSize, matchPreset, autoUiScale,
+  PANEL_PRESETS, PANEL_LIMITS, BASE,
 } = require('../src/core/layout');
 
 const wa = (width, height, x = 0, y = 0) => ({ x, y, width, height });
@@ -1060,15 +1164,37 @@ test('自适应布局：面板高度按可用空间裁剪，绝不靠上移窗�
   assert.ok(p.panel.height < BASE.panelH, '可用高度不足时应压缩面板');
 });
 
-test('自适应布局：手动界面大小覆盖自动值，放大也不越界', () => {
-  for (const v of ['compact', 'standard', 'large']) {
-    const p = computeIslandLayout(wa(1366, 728), { uiScale: v });
-    assertFits(wa(1366, 728), p, `手动 ${v}`);
+test('自适应布局：面板宽高独立，可细长 / 宽扁（非等比放大）', () => {
+  const area = wa(1920, 1040);
+  const { narrow, standard, wide } = PANEL_PRESETS;
+  const plan = (s) => computeIslandLayout(area, { panelW: s.w, panelH: s.h });
+  const pn = plan(narrow), ps = plan(standard), pw = plan(wide);
+
+  assert.ok(pn.panel.width < ps.panel.width && pn.panel.height > ps.panel.height, '细长档应更窄更高');
+  assert.ok(pw.panel.width > ps.panel.width && pw.panel.height < ps.panel.height, '宽扁档应更宽更矮');
+
+  // 窗口 = CSS 视口 × 缩放系数：CSS 视口必须恒等于用户设定的宽高
+  for (const [p, s, label] of [[pn, narrow, '细长'], [ps, standard, '标准'], [pw, wide, '宽扁']]) {
+    assert.ok(Math.abs(p.panel.width / p.panelScale - s.w) <= 1, `${label}档宽度视口不符`);
+    assert.ok(Math.abs(p.panel.height / p.panelScale - s.h) <= 1, `${label}档高度视口不符`);
+    assertFits(area, p, label);
   }
-  assert.strictEqual(computeIslandLayout(wa(3840, 2100), { uiScale: 'compact' }).uiScale, 0.85);
-  assert.strictEqual(computeIslandLayout(wa(1366, 728), { uiScale: 'large' }).uiScale, 1.2);
-  assert.strictEqual(normalizeUiScale('bogus'), 'auto');
-  assert.strictEqual(normalizeUiScale('auto'), 'auto');
+  // 各种分辨率下，三种形状都必须完整可见且不压胶囊
+  for (const [label, a] of SCREENS) {
+    for (const s of [narrow, standard, wide]) {
+      assertFits(a, computeIslandLayout(a, { panelW: s.w, panelH: s.h }), `${label}×${s.id}`);
+    }
+  }
+  // 面板变宽变扁时胶囊保持固定比例，不应跟着变形
+  assert.deepStrictEqual(computeIslandLayout(area, { panelW: wide.w, panelH: wide.h }).pill,
+    computeIslandLayout(area, { panelW: narrow.w, panelH: narrow.h }).pill);
+
+  // 规范化：超出范围各自钳制、非法值回退基准
+  assert.deepStrictEqual(normalizePanelSize({ w: 99999, h: 1 }), { w: PANEL_LIMITS.maxW, h: PANEL_LIMITS.minH });
+  assert.deepStrictEqual(normalizePanelSize({ w: 'x', h: NaN }), { w: BASE.panelW, h: BASE.panelH });
+  assert.deepStrictEqual(normalizePanelSize(null, { w: 700, h: 640 }), { w: 700, h: 640 }, '缺省沿用上一次');
+  assert.strictEqual(matchPreset({ w: wide.w, h: wide.h }), 'wide');
+  assert.strictEqual(matchPreset({ w: 700, h: 640 }), '');
   assert.strictEqual(autoUiScale(1920, 1040), 1);
 });
 

@@ -432,6 +432,128 @@ async function run({ store, island, indexer, updater }) {
     });
     await shot(island.panel, path.join(shots, 'panel-settings.png'));
 
+    // 外观页：主题网格 / 强调色 / 滑杆 / 分段控件（走真实 IPC 与 CSS 变量链路）
+    const appearanceState = await wc.executeJavaScript(`(async function(){
+      const tabs = [...document.querySelectorAll('.tab')].map(function(t){ return t.dataset.tab; });
+      const cards = [...document.querySelectorAll('#themeGrid .theme-card')].map(function(b){ return b.dataset.theme; });
+      await window.island.invoke('settings:set', { appearance: { theme: 'sakura', alpha: 0.6, radius: 14 } });
+      await new Promise(function(r){ setTimeout(r, 250); });
+      const root = document.documentElement;
+      const out = {
+        tabs: tabs,
+        cards: cards,
+        accents: document.querySelectorAll('#accentRow .accent-dot').length,
+        theme: root.dataset.theme,
+        alpha: root.style.getPropertyValue('--island-alpha'),
+        radius: root.style.getPropertyValue('--panel-radius'),
+        activeCard: (document.querySelector('#themeGrid .theme-card.is-active') || {}).dataset
+          ? document.querySelector('#themeGrid .theme-card.is-active').dataset.theme : '',
+        glassSeg: document.querySelectorAll('#glassSeg .seg').length,
+        presets: document.querySelectorAll('#panelPresets .preset').length,
+        panelW: document.getElementById('panelWSlider').min + '-' + document.getElementById('panelWSlider').max,
+        bgSeg: document.querySelectorAll('#bgSeg .seg').length,
+        alphaVal: document.getElementById('alphaVal').textContent,
+      };
+      // 还原默认外观，避免影响后续用例
+      await window.island.invoke('settings:set', { appearance: { theme: 'midnight', accent: '', alpha: 0.97, radius: 18, glass: 'off', bg: { type: 'none', file: '' } } });
+      await new Promise(function(r){ setTimeout(r, 200); });
+      out.resetTheme = root.dataset.theme;
+      return out;
+    })()`);
+    check('外观页：主题网格 / 强调色 / 滑杆 / 分段控件', () => {
+      assert.deepStrictEqual(appearanceState.tabs, ['home', 'search', 'restore', 'appearance', 'settings']);
+      assert.strictEqual(appearanceState.cards.length, 7, '主题卡片数=' + appearanceState.cards.length);
+      assert.ok(appearanceState.accents >= 7, '强调色点数=' + appearanceState.accents);
+      assert.strictEqual(appearanceState.theme, 'sakura');
+      assert.strictEqual(appearanceState.activeCard, 'sakura', '主题卡片高亮同步');
+      assert.strictEqual(appearanceState.alpha, '0.6', '不透明度写入 CSS 变量');
+      assert.strictEqual(appearanceState.radius, '14px', '圆角写入 CSS 变量');
+      assert.strictEqual(appearanceState.glassSeg, 3);
+      assert.strictEqual(appearanceState.presets, 3, '尺寸预设数=' + appearanceState.presets);
+      assert.strictEqual(appearanceState.panelW, '460-1040', '宽滑杆范围');
+      assert.strictEqual(appearanceState.bgSeg, 3);
+      assert.ok(/%$/.test(appearanceState.alphaVal), appearanceState.alphaVal);
+      assert.strictEqual(appearanceState.resetTheme, 'midnight', '还原默认主题');
+    });
+    await wc.executeJavaScript("switchTab('appearance')");
+    await sleep(400);
+    await shot(island.panel, path.join(shots, 'panel-appearance.png'));
+
+    // 面板尺寸：宽高独立（细长 / 宽扁），且双向切换都生效
+    // （Windows 下 resizable:false 窗口的 setSize 曾只能放大不能缩小）
+    const panelSizes = [];
+    for (const [w, h] of [[470, 820], [820, 620], [560, 700], [470, 820], [560, 700]]) {
+      await wc.executeJavaScript(`window.island.invoke('settings:set', { appearance: { panel: { w: ${w}, h: ${h} } } })`);
+      await sleep(450);
+      const b = island.panel.getBounds();
+      const vp = JSON.parse(await wc.executeJavaScript('JSON.stringify({ w: innerWidth, h: innerHeight })'));
+      panelSizes.push({ w, h, winW: b.width, winH: b.height, vp });
+    }
+    check('外观页：面板宽高独立可调（细长 / 宽扁，双向生效）', () => {
+      const detail = JSON.stringify(panelSizes);
+      const [narrow, wide, std] = panelSizes;
+      assert.ok(narrow.winW < wide.winW, '细长档应比宽扁档更窄 ' + detail);
+      assert.ok(narrow.winH > wide.winH, '细长档应比宽扁档更高 ' + detail);
+      // CSS 视口必须等于设定宽高：缩放与窗口尺寸同步，形状才不会被等比抹平
+      for (const s of panelSizes) {
+        assert.ok(Math.abs(s.vp.w - s.w) <= 1, `宽度视口应=${s.w}，实测 ${s.vp.w} ` + detail);
+        assert.ok(Math.abs(s.vp.h - s.h) <= 1, `高度视口应=${s.h}，实测 ${s.vp.h} ` + detail);
+      }
+      // 细长 → 标准 → 细长 → 标准：每次都要精确复原（反向缩小曾失效）
+      assert.deepStrictEqual({ w: panelSizes[4].winW, h: panelSizes[4].winH },
+        { w: std.winW, h: std.winH }, '往返后尺寸必须复原 ' + detail);
+      assert.deepStrictEqual({ w: panelSizes[3].winW, h: panelSizes[3].winH },
+        { w: narrow.winW, h: narrow.winH }, '再次切回细长尺寸必须一致 ' + detail);
+    });
+
+    // 背景图片：整链路验证（系统对话框 → 拷贝入库 → islandbg:// 协议 → 渲染）
+    // 对话框用桩替换，避免 E2E 卡在原生窗口上；这一步正是「点了没反应」的回归点。
+    const { dialog } = require('electron');
+    const realOpen = dialog.showOpenDialog;
+    let bgState = null;
+    let bgCleared = null;
+    try {
+      dialog.showOpenDialog = async () => ({
+        canceled: false,
+        filePaths: [path.join(shots, 'panel-home.png')],
+      });
+      await wc.executeJavaScript("window.island.invoke('settings:set', { appearance: { bg: { type: 'image' } } })");
+      await sleep(250);
+      await wc.executeJavaScript("document.getElementById('bgPickBtn').click()");
+      await sleep(1000);
+      bgState = JSON.parse(await wc.executeJavaScript(`(function(){
+        const bg = document.getElementById('panelBg');
+        const img = bg.querySelector('img');
+        return JSON.stringify({
+          hasBg: document.querySelector('.panel').classList.contains('has-bg'),
+          children: bg.children.length,
+          complete: img ? img.complete : null,
+          naturalW: img ? img.naturalWidth : null,
+          note: document.getElementById('bgFileNote').textContent,
+          clearDisabled: document.getElementById('bgClearBtn').disabled,
+        });
+      })()`));
+      await wc.executeJavaScript("window.island.invoke('appearance:clear-bg')");
+      await sleep(350);
+      bgCleared = await wc.executeJavaScript(
+        "document.querySelector('.panel').classList.contains('has-bg')");
+    } finally {
+      dialog.showOpenDialog = realOpen;
+    }
+    check('外观页：选择背景图片全链路（对话框→拷贝→协议→渲染）', () => {
+      const detail = JSON.stringify(bgState);
+      assert.strictEqual(bgState.hasBg, true, '面板应进入 has-bg 状态 ' + detail);
+      assert.strictEqual(bgState.children, 1, '背景层应有 1 个节点 ' + detail);
+      assert.strictEqual(bgState.complete, true, '图片应加载完成 ' + detail);
+      assert.ok(bgState.naturalW > 0, '图片应真正解码（naturalWidth>0）' + detail);
+      assert.ok(/已应用/.test(bgState.note), '应显示原始文件名与已应用提示：' + bgState.note);
+      assert.strictEqual(bgState.clearDisabled, false, '有背景时清除按钮应可点');
+      assert.strictEqual(bgCleared, false, '清除后应退出 has-bg 状态');
+    });
+
+    await wc.executeJavaScript("switchTab('settings')");
+    await sleep(200);
+
     // 自定义自动收起时长 + 映射库按钮文案
     const settingsState = await wc.executeJavaScript(`(async function(){
       const input = document.getElementById('collapseDelayInput');

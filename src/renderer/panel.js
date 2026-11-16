@@ -7,9 +7,12 @@ const els = {
   vaultChip: $('#vaultChip'),
   closeBtn: $('#closeBtn'),
   tabs: [...document.querySelectorAll('.tab')],
+  panelRoot: document.querySelector('.panel'),
+  panelBg: $('#panelBg'),
   views: {
     home: $('#view-home'), search: $('#view-search'),
-    restore: $('#view-restore'), settings: $('#view-settings'),
+    restore: $('#view-restore'), appearance: $('#view-appearance'),
+    settings: $('#view-settings'),
   },
   dropzone: $('#dropzone'),
   pickBtn: $('#pickBtn'),
@@ -25,6 +28,15 @@ const els = {
   restoreWarn: $('#restoreWarn'), copyRestoreBtn: $('#copyRestoreBtn'),
   clearRestoreBtn: $('#clearRestoreBtn'),
   toggleList: $('#toggleList'), behaviorList: $('#behaviorList'),
+  themeGrid: $('#themeGrid'), accentRow: $('#accentRow'),
+  alphaSlider: $('#alphaSlider'), alphaVal: $('#alphaVal'),
+  radiusSlider: $('#radiusSlider'), radiusVal: $('#radiusVal'),
+  bgSeg: $('#bgSeg'), bgPickBtn: $('#bgPickBtn'), bgClearBtn: $('#bgClearBtn'),
+  bgFileNote: $('#bgFileNote'), bgDesc: $('#bgDesc'),
+  glassSeg: $('#glassSeg'), glassDesc: $('#glassDesc'),
+  panelWSlider: $('#panelWSlider'), panelWVal: $('#panelWVal'),
+  panelHSlider: $('#panelHSlider'), panelHVal: $('#panelHVal'),
+  panelPresets: $('#panelPresets'), motionList: $('#motionList'),
   detectHead: $('#detectHead'), detectBody: $('#detectBody'),
   detectSummary: $('#detectSummary'), detectToggleBtn: $('#detectToggleBtn'),
   settingRoot: $('#settingRoot'), settingRootBtn: $('#settingRootBtn'),
@@ -380,7 +392,11 @@ function renderSearch(data) {
       window.island.invoke('app:open-path', fullPath));
     li.querySelector('[data-act="reveal"]').addEventListener('click', () =>
       window.island.invoke('app:reveal-path', fullPath));
-    li.addEventListener('click', () => window.island.invoke('app:open-path', fullPath));
+    // 整行点击打开文件；点在按钮上时跳过，避免「定位到文件夹」冒泡后又把文件打开（也避免「打开」触发两次）
+    li.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      window.island.invoke('app:open-path', fullPath);
+    });
     els.searchList.appendChild(li);
   });
   highlightSelected();
@@ -680,8 +696,278 @@ async function saveCollapseDelay(value) {
   }
 }
 
-function renderVaultChip(st) {
-  const n = st.vaultSize;
+/* ---------------- 外观：主题 / 强调色 / 透明度 / 圆角 / 背景 / 毛玻璃 / 密度 / 动效 ---------------- */
+
+const T = window.IslandThemes || { THEMES: [], ACCENT_PRESETS: [], normalizeTheme: (v) => v || 'midnight' };
+let bgVideoEl = null;
+
+/** 应用外观到当前窗口（面板与胶囊共用同一套变量名） */
+function applyAppearance(a) {
+  const root = document.documentElement;
+  root.dataset.theme = T.normalizeTheme(a.theme);
+  root.classList.toggle('motion-off', a.motion === false);
+  root.style.setProperty('--island-alpha', String(Math.min(1, Math.max(0.55, Number(a.alpha) || 0.97))));
+  const r = Math.round(Math.min(22, Math.max(10, Number(a.radius) || 18)));
+  root.style.setProperty('--panel-radius', r + 'px');
+  root.style.setProperty('--pill-radius', Math.min(22, r + 4) + 'px');
+  if (a.accent) root.style.setProperty('--accent', a.accent);
+  else root.style.removeProperty('--accent');
+  // 磨砂质感：界面内模拟（窗体级系统材质会涂满窗口矩形、破坏圆角）
+  root.classList.toggle('glass-weak', a.glass === 'auto');
+  root.classList.toggle('glass-on', a.glass === 'on');
+  applyBackground(a);
+}
+
+/** 背景层：islandbg:// 协议文件名 → 图片 / 静音循环视频 */
+function applyBackground(a) {
+  const wrap = els.panelBg;
+  const type = a.bg && a.bg.type;
+  const file = a.bg && a.bg.file;
+  if ((type === 'image' || type === 'video') && file) {
+    const url = 'islandbg://bg/' + encodeURIComponent(file);
+    // 同一文件重复渲染时保留现有节点，避免视频每广播一次就重头播放
+    const cur = wrap.firstElementChild;
+    if (cur && cur.dataset.bgFile === file && cur.tagName.toLowerCase() === (type === 'video' ? 'video' : 'img')) {
+      els.panelRoot.classList.add('has-bg');
+      return;
+    }
+    wrap.innerHTML = '';
+    // 文件无法解码（损坏 / 编码不受支持）时明确告知，而不是留一块没反应的空白
+    const onErr = () => {
+      toast(type === 'video'
+        ? '这段视频无法播放（需 H.264 编码的 mp4 或 webm），已恢复为无背景'
+        : '这张图片无法显示，已恢复为无背景，请换用 png / jpg 格式', 'err');
+      window.island.invoke('appearance:clear-bg');
+    };
+    if (type === 'video') {
+      bgVideoEl = document.createElement('video');
+      bgVideoEl.src = url;
+      bgVideoEl.autoplay = true;
+      bgVideoEl.muted = true;
+      bgVideoEl.loop = true;
+      bgVideoEl.playsInline = true;
+      bgVideoEl.dataset.bgFile = file;
+      bgVideoEl.addEventListener('error', onErr, { once: true });
+      wrap.appendChild(bgVideoEl);
+    } else {
+      bgVideoEl = null;
+      const img = document.createElement('img');
+      img.alt = '';
+      img.dataset.bgFile = file;
+      img.addEventListener('error', onErr, { once: true });
+      img.src = url;
+      wrap.appendChild(img);
+    }
+    els.panelRoot.classList.add('has-bg');
+  } else {
+    wrap.innerHTML = '';
+    bgVideoEl = null;
+    els.panelRoot.classList.remove('has-bg');
+  }
+}
+
+/** 面板隐藏时暂停背景视频，省 GPU / 电量 */
+function setBgPlayback(play) {
+  if (!bgVideoEl) return;
+  try { if (play) bgVideoEl.play().catch(() => {}); else bgVideoEl.pause(); } catch { /* ignore */ }
+}
+
+function buildThemeGrid() {
+  els.themeGrid.innerHTML = '';
+  for (const t of T.THEMES) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'theme-card';
+    b.dataset.theme = t.id;
+    b.setAttribute('role', 'radio');
+    const sw = document.createElement('span');
+    sw.className = 'theme-swatches';
+    for (const c of t.swatch) {
+      const i = document.createElement('i');
+      i.style.setProperty('background', c);
+      sw.appendChild(i);
+    }
+    const name = document.createElement('span');
+    name.className = 'theme-name';
+    name.textContent = t.name;
+    b.appendChild(sw);
+    b.appendChild(name);
+    b.addEventListener('click', () =>
+      window.island.invoke('settings:set', { appearance: { theme: t.id } }));
+    els.themeGrid.appendChild(b);
+  }
+}
+
+function buildAccentRow() {
+  els.accentRow.innerHTML = '';
+  for (const v of T.ACCENT_PRESETS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'accent-dot' + (v === '' ? ' follow' : '');
+    b.dataset.accent = v;
+    b.setAttribute('role', 'radio');
+    b.title = v === '' ? '跟随主题' : v;
+    b.setAttribute('aria-label', v === '' ? '跟随主题' : '强调色 ' + v);
+    if (v) b.style.setProperty('background', v);
+    else b.textContent = 'A';
+    b.addEventListener('click', () =>
+      window.island.invoke('settings:set', { appearance: { accent: v } }));
+    els.accentRow.appendChild(b);
+  }
+}
+
+/** 同步外观页控件到设置值（不覆盖正在拖动的滑杆） */
+function renderAppearance(st) {
+  const a = st.settings.appearance;
+  if (!a) return;
+  applyAppearance(a);
+
+  for (const b of els.themeGrid.children) {
+    const active = b.dataset.theme === a.theme;
+    b.classList.toggle('is-active', active);
+    b.setAttribute('aria-checked', String(active));
+  }
+  for (const b of els.accentRow.children) {
+    const active = (b.dataset.accent || '') === (a.accent || '');
+    b.classList.toggle('is-active', active);
+    b.setAttribute('aria-checked', String(active));
+  }
+
+  const alphaPct = Math.round(Math.min(1, Math.max(0.55, Number(a.alpha) || 0.97)) * 100);
+  if (document.activeElement !== els.alphaSlider) els.alphaSlider.value = String(alphaPct);
+  els.alphaVal.textContent = alphaPct + '%';
+  if (document.activeElement !== els.radiusSlider) els.radiusSlider.value = String(a.radius);
+  els.radiusVal.textContent = a.radius + 'px';
+
+  for (const group of [els.bgSeg, els.glassSeg]) {
+    const key = group === els.bgSeg ? (a.bg && a.bg.type) : a.glass;
+    for (const b of group.children) {
+      const active = b.dataset.v === key;
+      b.classList.toggle('is-active', active);
+      b.setAttribute('aria-checked', String(active));
+    }
+  }
+
+  // 面板尺寸：滑杆不被拖动中的输入框覆盖，预设按钮按精确宽高命中高亮
+  const pw = (a.panel && a.panel.w) || 560;
+  const ph = (a.panel && a.panel.h) || 700;
+  if (document.activeElement !== els.panelWSlider) els.panelWSlider.value = String(pw);
+  els.panelWVal.textContent = pw + ' px';
+  if (document.activeElement !== els.panelHSlider) els.panelHSlider.value = String(ph);
+  els.panelHVal.textContent = ph + ' px';
+  markPanelPreset(pw, ph);
+  els.bgPickBtn.disabled = !a.bg || a.bg.type === 'none';
+  els.bgClearBtn.disabled = !a.bg || !a.bg.file;
+  els.bgFileNote.textContent = a.bg && a.bg.file
+    ? (a.bg.name ? a.bg.name + '（已应用）' : a.bg.file)
+    : '';
+  els.bgDesc.textContent = a.bg && a.bg.type === 'video' && a.bg.file
+    ? '视频背景运行中：面板隐藏时自动暂停。若画面卡顿，建议更换更小的文件或使用图片背景。'
+    : '图片 ≤10MB，视频 ≤20MB（mp4/webm，静音循环播放）。背景文件仅存本机，面板隐藏时视频自动暂停。';
+
+  els.glassDesc.textContent = a.glass === 'off'
+    ? '当前为实色底。开启磨砂可以让面板透出一点桌面底色，与「不透明度」滑杆叠加生效。'
+    : '磨砂已开启：只作用于面板本体（圆角外保持透明），浓度随下方「不透明度」联动。';
+}
+
+/* 滑杆：input 实时预览，change 落盘（CSS 变量自动联动背景暗化层，无需重建背景） */
+els.alphaSlider.addEventListener('input', () => {
+  const v = Number(els.alphaSlider.value) / 100;
+  document.documentElement.style.setProperty('--island-alpha', String(v));
+  els.alphaVal.textContent = els.alphaSlider.value + '%';
+});
+els.alphaSlider.addEventListener('change', () =>
+  window.island.invoke('settings:set', { appearance: { alpha: Number(els.alphaSlider.value) / 100 } }));
+
+els.radiusSlider.addEventListener('input', () => {
+  const r = Number(els.radiusSlider.value);
+  document.documentElement.style.setProperty('--panel-radius', r + 'px');
+  document.documentElement.style.setProperty('--pill-radius', Math.min(22, r + 4) + 'px');
+  els.radiusVal.textContent = r + 'px';
+});
+els.radiusSlider.addEventListener('change', () =>
+  window.island.invoke('settings:set', { appearance: { radius: Number(els.radiusSlider.value) } }));
+
+for (const b of els.bgSeg.children) {
+  b.addEventListener('click', async () => {
+    try {
+      await window.island.invoke('settings:set', { appearance: { bg: { type: b.dataset.v } } });
+    } catch (err) {
+      toast('切换背景类型失败：' + (err && err.message ? err.message : err), 'err');
+    }
+  });
+}
+els.bgPickBtn.addEventListener('click', async () => {
+  const a = settingsCache && settingsCache.appearance;
+  const kind = a && a.bg && a.bg.type === 'video' ? 'video' : 'image';
+  // 旧实例（preload 未更新）或主进程异常时，这里会抛错；必须给提示，
+  // 否则表现就是「点了完全没反应」
+  let r;
+  try {
+    r = await window.island.invoke('dialog:pick-bg', kind);
+  } catch (err) {
+    toast('无法打开文件选择框：' + (err && err.message ? err.message : err) + '（若刚更新过，请重启应用）', 'err');
+    return;
+  }
+  if (!r) return;
+  if (r.ok === false && r.canceled) return;
+  if (r.ok === false) {
+    toast('背景设置失败：' + (r.reason || '未知原因'), 'err');
+    return;
+  }
+  toast(kind === 'video' ? '视频背景已应用' : '图片背景已应用', 'ok');
+});
+els.bgClearBtn.addEventListener('click', async () => {
+  try {
+    await window.island.invoke('appearance:clear-bg');
+    toast('背景已清除', 'ok');
+  } catch (err) {
+    toast('清除背景失败：' + (err && err.message ? err.message : err), 'err');
+  }
+});
+
+for (const b of els.glassSeg.children) {
+  b.addEventListener('click', () =>
+    window.island.invoke('settings:set', { appearance: { glass: b.dataset.v } }));
+}
+/* 面板尺寸：拖动时只更新数值显示，松手（change）才真正改窗口。
+   不边拖边改窗口——面板是水平居中的，改宽度会让滑杆在指针下移位，
+   数值会被反复推高（正反馈），松手生效才不会「一拖就到底」。 */
+function panelSizeFromSliders() {
+  return { w: Number(els.panelWSlider.value), h: Number(els.panelHSlider.value) };
+}
+function markPanelPreset(w, h) {
+  for (const b of els.panelPresets.children) {
+    const active = Number(b.dataset.w) === w && Number(b.dataset.h) === h;
+    b.classList.toggle('is-active', active);
+    b.setAttribute('aria-pressed', String(active));
+  }
+}
+function showPanelSizeLabels() {
+  const s = panelSizeFromSliders();
+  els.panelWVal.textContent = s.w + ' px';
+  els.panelHVal.textContent = s.h + ' px';
+  markPanelPreset(s.w, s.h);
+}
+function commitPanelSize() {
+  window.island.invoke('settings:set', { appearance: { panel: panelSizeFromSliders() } });
+}
+for (const el2 of [els.panelWSlider, els.panelHSlider]) {
+  el2.addEventListener('input', showPanelSizeLabels);
+  el2.addEventListener('change', commitPanelSize);
+}
+for (const b of els.panelPresets.children) {
+  b.addEventListener('click', () => {
+    els.panelWSlider.value = b.dataset.w;
+    els.panelHSlider.value = b.dataset.h;
+    showPanelSizeLabels();
+    commitPanelSize();
+  });
+}
+
+window.island.on('panel:state', (open) => setBgPlayback(!!open));
+
+function renderVaultChip(st) {  const n = st.vaultSize;
   els.vaultChip.textContent = st.vaultEncrypted
     ? `映射 ${n} 条 · 已加密`
     : `映射 ${n} 条 · 未加密`;
@@ -896,6 +1182,7 @@ window.island.on('settings:changed', async () => {
   settingsCache = st.settings;
   renderVaultChip(st);
   renderSettings(st);
+  renderAppearance(st);
   renderRoot(st.settings, st.index);
 });
 
@@ -910,6 +1197,9 @@ window.island.on('index:updated', (stats) => {
   await loadHome();
   const st = await window.island.invoke('settings:get');
   renderSettings(st);
+  buildThemeGrid();
+  buildAccentRow();
+  renderAppearance(st);
   buildChips();
   // 关于区块：当前版本号 + 恢复更新状态（面板重开时 staged/available 不丢）
   try {

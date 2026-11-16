@@ -4,11 +4,24 @@
  */
 
 const { dialog, shell, clipboard, BrowserWindow, ipcMain, app: electronApp } = require('electron');
+const fs = require('fs');
+const path = require('path');
 const { restoreFile } = require('../core/fileproc');
 const { restoreText } = require('../core/masker');
+const { BG_IMAGE_MAX, BG_VIDEO_MAX, BG_IMAGE_EXTS, BG_VIDEO_EXTS } = require('../core/appearance');
 const importer = require('./importer');
 const { COLLAPSE_MIN_SEC, COLLAPSE_MAX_SEC, DEFAULT_COLLAPSE_SEC } = require('./store');
-const path = require('path');
+
+/** 清空外观背景目录里的历史文件（保留指定文件与目录本身） */
+function clearBgFiles(dir, except) {
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      if (f !== except) {
+        try { fs.rmSync(path.join(dir, f), { force: true }); } catch { /* ignore */ }
+      }
+    }
+  } catch { /* 目录不存在视为空 */ }
+}
 
 function register(ctx) {
   const { store, island, indexer, clipboardWatcher, updater } = ctx;
@@ -49,10 +62,72 @@ function register(ctx) {
       try { app_ref().setLoginItemSettings({ openAtLogin: !!next.launchOnBoot }); } catch { /* ignore */ }
     }
     if (patch && 'uiScale' in patch) {
-      island.setUiScale(next.uiScale); // 界面大小立即生效：重算窗口尺寸、缩放与位置
+      island.setPanelSize(next.appearance.panel); // 旧字段：仍按当前面板尺寸重排一次
+    }
+    if (patch && 'appearance' in patch) {
+      const app2 = next.appearance;
+      // 密度变化 → 重算窗口尺寸与缩放（档位最终仍由工作区钳制）
+      island.setPanelSize(app2.panel); // 面板宽高立即生效
     }
     island.broadcast('settings:changed', next);
     return next;
+  });
+
+  /* ---------------- 外观：自定义背景 ---------------- */
+
+  // 选择背景文件：拷入 userData/appearance 并切换设置（同一时刻只保留一份背景）
+  ipc_handle('dialog:pick-bg', async (e, kind) => {
+    const isVideo = kind === 'video';
+    const allowed = isVideo ? BG_VIDEO_EXTS : BG_IMAGE_EXTS;
+    const exts = [...allowed];
+    const limit = isVideo ? BG_VIDEO_MAX : BG_IMAGE_MAX;
+    const type = isVideo ? 'video' : 'image';
+    island.dialogOpen = true;
+    try {
+      const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
+        title: isVideo ? '选择背景视频' : '选择背景图片',
+        properties: ['openFile'],
+        // 「所有文件」兜底：格式不对时由下方显式拒绝并说明原因，
+        // 好过让文件在对话框里变灰、用户完全不知道发生了什么
+        filters: [
+          { name: isVideo ? '视频' : '图片', extensions: exts },
+          { name: '所有文件', extensions: ['*'] },
+        ],
+      });
+      if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true };
+      const src = r.filePaths[0];
+      const ext = path.extname(src).slice(1).toLowerCase();
+      if (!allowed.has(ext)) {
+        return {
+          ok: false,
+          reason: `不支持 .${ext || '未知'} 格式，请使用 ${exts.join(' / ')}`,
+        };
+      }
+      const stat = fs.statSync(src);
+      if (stat.size > limit) {
+        return { ok: false, reason: `文件超过 ${Math.round(limit / 1024 / 1024)}MB 上限` };
+      }
+      const dir = store.paths.appearanceDir;
+      fs.mkdirSync(dir, { recursive: true });
+      const file = `bg-${Date.now().toString(36)}.${ext}`;
+      fs.copyFileSync(src, path.join(dir, file));
+      clearBgFiles(dir, file); // 旧的背景文件一并清掉，目录里只留当前这份
+      store.saveSettings({
+        appearance: { bg: { type, file, name: path.basename(src) } },
+      });
+      island.broadcast('settings:changed', store.settings);
+      return { ok: true, file, name: path.basename(src) };
+    } catch (err) {
+      return { ok: false, reason: String(err && err.message || err) };
+    } finally { island.dialogOpen = false; }
+  });
+
+  // 清除背景：切回「无」并删除背景文件
+  ipc_handle('appearance:clear-bg', () => {
+    store.saveSettings({ appearance: { bg: { type: 'none', file: '' } } });
+    clearBgFiles(store.paths.appearanceDir, null);
+    island.broadcast('settings:changed', store.settings);
+    return { ok: true };
   });
 
   ipc_handle('dialog:pick-root', async (e) => {

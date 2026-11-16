@@ -2,12 +2,14 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' islandbg:; media-src islandbg:; " />
 <link rel="stylesheet" href="panel.css" />
 <title>灵屿岛</title>
 </head>
 <body>
   <div class="panel" data-ui>
+    <!-- 自定义背景层（islandbg:// 协议；无背景时不显示） -->
+    <div class="panel-bg" id="panelBg" aria-hidden="true"></div>
     <header class="titlebar">
       <span class="mark" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="22" height="22">
@@ -30,6 +32,7 @@
       <button class="tab is-active" data-tab="home" role="tab" aria-selected="true">概览</button>
       <button class="tab" data-tab="search" role="tab" aria-selected="false">快速查找</button>
       <button class="tab" data-tab="restore" role="tab" aria-selected="false">文本恢复</button>
+      <button class="tab" data-tab="appearance" role="tab" aria-selected="false">外观</button>
       <button class="tab" data-tab="settings" role="tab" aria-selected="false">设置</button>
     </nav>
 
@@ -104,6 +107,83 @@
       <div class="restore-actions">
         <button class="btn btn-primary" id="copyRestoreBtn" disabled>复制还原结果</button>
         <button class="btn btn-ghost" id="clearRestoreBtn">清空</button>
+      </div>
+    </section>
+
+    <!-- 外观 -->
+    <section class="view" id="view-appearance">
+      <div class="sec">
+        <h2>主题</h2>
+        <div class="theme-grid" id="themeGrid" role="radiogroup" aria-label="界面主题"></div>
+      </div>
+
+      <div class="sec">
+        <h2>强调色</h2>
+        <div class="accent-row" id="accentRow" role="radiogroup" aria-label="强调色"></div>
+        <p class="setting-desc">强调色用于按钮、高亮与状态点；选择「跟随主题」时由当前主题决定。</p>
+      </div>
+
+      <div class="sec">
+        <h2>透明度与圆角</h2>
+        <div class="slider-row">
+          <label for="alphaSlider">不透明度</label>
+          <input type="range" id="alphaSlider" min="55" max="100" step="1" value="97" aria-label="面板不透明度" />
+          <span class="slider-val" id="alphaVal">97%</span>
+        </div>
+        <div class="slider-row">
+          <label for="radiusSlider">面板圆角</label>
+          <input type="range" id="radiusSlider" min="10" max="22" step="1" value="18" aria-label="面板圆角" />
+          <span class="slider-val" id="radiusVal">18px</span>
+        </div>
+      </div>
+
+      <div class="sec">
+        <h2>背景</h2>
+        <div class="seg-group appearance-seg" id="bgSeg" role="radiogroup" aria-label="背景类型">
+          <button class="seg is-active" data-v="none" role="radio" aria-checked="true">无</button>
+          <button class="seg" data-v="image" role="radio" aria-checked="false">图片</button>
+          <button class="seg" data-v="video" role="radio" aria-checked="false">视频</button>
+        </div>
+        <div class="bg-actions">
+          <button class="btn btn-mini" id="bgPickBtn" disabled>选择文件…</button>
+          <button class="btn btn-mini" id="bgClearBtn" disabled>清除背景</button>
+          <span class="bg-file-note" id="bgFileNote"></span>
+        </div>
+        <p class="setting-desc" id="bgDesc">图片 ≤10MB，视频 ≤20MB（mp4/webm，静音循环播放）。背景文件仅存本机映射库目录旁，面板隐藏时视频自动暂停。</p>
+      </div>
+
+      <div class="sec">
+        <h2>磨砂质感</h2>
+        <div class="seg-group appearance-seg" id="glassSeg" role="radiogroup" aria-label="磨砂质感">
+          <button class="seg is-active" data-v="off" role="radio" aria-checked="true">关</button>
+          <button class="seg" data-v="auto" role="radio" aria-checked="false">轻磨砂</button>
+          <button class="seg" data-v="on" role="radio" aria-checked="false">强磨砂</button>
+        </div>
+        <p class="setting-desc" id="glassDesc">把面板底色变得通透一层，形成磨砂质感，与「不透明度」滑杆叠加生效。</p>
+      </div>
+
+      <div class="sec">
+        <h2>窗口尺寸</h2>
+        <div class="slider-row">
+          <label for="panelWSlider">宽度</label>
+          <input type="range" id="panelWSlider" min="460" max="1040" step="10" value="560" />
+          <span class="slider-val" id="panelWVal">560 px</span>
+        </div>
+        <div class="slider-row">
+          <label for="panelHSlider">高度</label>
+          <input type="range" id="panelHSlider" min="520" max="1000" step="10" value="700" />
+          <span class="slider-val" id="panelHVal">700 px</span>
+        </div>
+        <div class="preset-row" id="panelPresets">
+          <button class="preset" data-w="470" data-h="820">细长 470×820</button>
+          <button class="preset" data-w="560" data-h="700">标准 560×700</button>
+          <button class="preset" data-w="820" data-h="620">宽扁 820×620</button>
+        </div>
+        <p class="setting-desc">宽高分开调节：拉窄拉高是「细长」（长列表更省地方），拉宽压低是「宽扁」（表格与并排文本更好读）。实际尺寸始终由布局钳制在屏幕可见范围内。</p>
+      </div>
+
+      <div class="sec">
+        <div id="motionList"></div>
       </div>
     </section>
 
@@ -216,6 +296,7 @@
       </div>
     </div>
   </div>
+  <script src="../core/themes.js"></script>
   <script src="mock.js"></script>
   <script src="panel.js"></script>
 </body>
