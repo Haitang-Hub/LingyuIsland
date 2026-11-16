@@ -7,6 +7,15 @@
  *  - 〔〕内 6~12 位十六进制编码是找回原文的钥匙：
  *    只要编码未被改动（哪怕从文件里复制到别处），都能还原出真实内容
  *  - 同一真实值在全库中永远对应同一个编码
+ *
+ * v1.5 规则重构：
+ *  - 地址 / 机构名的保留前缀改为**固定 2 个汉字**，且只保留省级行政区，
+ *    其余一律用「某地 / 某某」占位。旧实现保留字号前 2 字，导致
+ *    「陈阿满是广东雷阳律师事务所」被屏蔽成「陈阿……律师事务所」——
+ *    人名首字反而残留在脱敏产物里。
+ *  - 固定长度前缀让 FULL 还原正则能精确对齐屏蔽值起点，不会多吃正文汉字。
+ *  - 导出 maskEdits / restoreEdits：把「算出编辑区间」与「应用到文本」拆开，
+ *    Office XML 段落级拼接管道可以复用同一套判定，再映射回各个 <w:t> 节点。
  */
 
 const crypto = require('crypto');
@@ -19,10 +28,19 @@ const ORG_SUFFIX_ALT = ORG_SUFFIXES.join('|');
 
 const TYPE_LABEL = {
   phone: '手机号', idCard: '身份证', bank: '银行卡', email: '邮箱',
-  name: '姓名', address: '住址', passport: '护照', plate: '车牌',
+  name: '姓名', address: '位置信息/住址', passport: '护照', plate: '车牌',
   caseNo: '案号', license: '执业证号', org: '机构名称',
   landline: '固定电话', im: '社交账号', hkmt: '港澳台证件', uscc: '统一社会信用代码',
 };
+
+// 省级行政区 / 直辖市：地址和机构名只保留这一级别，县市镇村一律不出现在脱敏产物里
+const PROVINCE_RE = /^(?:北京|天津|上海|重庆|河北|山西|辽宁|吉林|黑龙江|江苏|浙江|安徽|福建|江西|山东|河南|湖北|湖南|广东|广西|海南|四川|贵州|云南|陕西|甘肃|青海|宁夏|新疆|西藏|内蒙古|香港|澳门|台湾)/;
+
+/** 返回固定 2 字的安全前缀；不含省级行政区时返回占位词 */
+function safeHead(value, placeholder) {
+  const m = PROVINCE_RE.exec(String(value || ''));
+  return m ? m[0].slice(0, 2) : placeholder;
+}
 
 /* ------------------------------------------------------------------ */
 /* 映射库（Vault）：编码 ↔ 原文，由主进程负责加密持久化                    */
@@ -116,11 +134,8 @@ function buildMasked(type, value, code) {
       if (chars.length <= 2) return `${chars[0]}*〔${code}〕`;
       return `${chars[0]}*${chars[chars.length - 1]}〔${code}〕`;
     }
-    case 'address': { // 安徽省……〔..〕：只留行政区划，门牌号一个字都不留
-      const m = /^.{2,8}?(?:省|自治区|市|县|区|镇|乡|村)/.exec(value);
-      const head = m ? m[0] : [...value].slice(0, 2).join('');
-      return `${head}……〔${code}〕`;
-    }
+    case 'address': // 某地……〔..〕 / 浙江……〔..〕：门牌、县市镇村一个字都不留
+      return `${safeHead(value, '某地')}……〔${code}〕`;
     case 'caseNo': { // （2020）……号〔..〕
       const compact = value.replace(/\s+/g, '');
       const y = /[（(]((?:19|20)\d{2})[）)]/.exec(compact);
@@ -138,14 +153,122 @@ function buildMasked(type, value, code) {
       return `${value[0]}******${value.slice(-1)}〔${code}〕`;
     case 'uscc': // 91……WXYZ〔..〕：统一社会信用代码留首 2 尾 4
       return `${value.slice(0, 2)}……${value.slice(-4)}〔${code}〕`;
-    case 'org': { // 广东……律师事务所〔..〕
+    case 'org': { // 某某……有限公司〔..〕 / 安徽……有限公司〔..〕
       const suffix = ORG_SUFFIXES.find((s) => value.endsWith(s)) || '';
       const brand = suffix ? value.slice(0, -suffix.length) : value;
-      return `${brand.slice(0, 2)}……${suffix || brand.slice(-2)}〔${code}〕`;
+      return `${safeHead(brand, '某某')}……${suffix || brand.slice(-2)}〔${code}〕`;
     }
     default: // 兜底：首尾各 1 字符
       return `${value.slice(0, 1)}**${value.slice(-1)}〔${code}〕`;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* 编辑区间：纯文本与 Office XML 共用                                    */
+/* ------------------------------------------------------------------ */
+
+/** 把互不重叠的编辑按「从后往前」应用到文本 */
+function applyEdits(text, edits) {
+  let out = text;
+  const sorted = edits.slice().sort((a, b) => b.start - a.start);
+  let lastStart = Infinity;
+  for (const e of sorted) {
+    if (e.end > lastStart) continue; // 防御：跳过重叠编辑
+    out = out.slice(0, e.start) + e.replacement + out.slice(e.end);
+    lastStart = e.start;
+  }
+  return out;
+}
+
+/**
+ * 只计算屏蔽编辑，不改文本。Office XML 管道据此把编辑映射回各文本节点。
+ * @returns {{edits:Array, items:Array, counts:Object}}
+ */
+function maskEdits(text, vault, options = {}) {
+  const { items, counts } = detect(text, options);
+  const edits = items.map((it) => ({
+    start: it.start,
+    end: it.end,
+    replacement: buildMasked(it.type, it.value, vault.ensureCode(it.type, it.value)),
+  }));
+  return { edits, items, counts };
+}
+
+/** 各类型屏蔽值「修饰部分」的形状（用于连同修饰一起整体还原） */
+const FULL = {
+  phone: '\\d{3}\\*{4}\\d{4}',
+  idCard: '[0-9Xx]{4}……[0-9Xx]{4}',
+  bank: '\\d{4}\\*{6}\\d{4}',
+  email: '.\\*{3}@[^〔〕\\s]{1,80}',
+  passport: '[A-Za-z]\\*{6}[0-9A-Za-z]',
+  plate: '[\\u4e00-\\u9fa5][A-HJ-NP-Z]\\*{3}[0-9A-Za-z挂学警港澳]',
+  name: '[\\u4e00-\\u9fa5]\\*[\\u4e00-\\u9fa5]?',
+  // 固定 2 字前缀：精确对齐屏蔽值起点，不会把「户籍所在地」这类正文一起替换掉
+  address: '[\\u4e00-\\u9fa5]{2}……',
+  caseNo: '[（(]\\d{4}[）)]……号',
+  license: '[A-Za-z0-9]{4}……[A-Za-z0-9]{4}',
+  org: `[\\u4e00-\\u9fa5]{2}……(?:${ORG_SUFFIX_ALT})`,
+  landline: '\\d{3}\\*{4}\\d{4}',
+  im: '.{2}\\*{3}.{2}',
+  hkmt: '[A-Za-z]\\*{6}[0-9A-Za-z]',
+  uscc: '[0-9A-HJ-NPQRTUWXY]{2}……[0-9A-HJ-NPQRTUWXY]{4}',
+};
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * 只计算还原编辑，不改文本。
+ * 第一层：按类型匹配「修饰部分 + 编码」整体还原；
+ * 第二层：修饰部分被改动 / 丢弃时，裸编码兜底。
+ */
+function restoreEdits(text, vault) {
+  const codes = [];
+  let m;
+  CODE_RE.lastIndex = 0;
+  while ((m = CODE_RE.exec(text)) !== null) {
+    if (!codes.includes(m[1])) codes.push(m[1]);
+  }
+
+  const edits = [];
+  const restored = [];
+  const missing = [];
+  for (const code of codes) {
+    const hit = vault.lookup(code);
+    if (!hit) { missing.push(code); continue; }
+    const bare = '〔' + code + '〕';
+    const decor = FULL[hit.type] || '';
+    let matched = false;
+
+    if (decor) {
+      const fullRe = new RegExp(decor + escapeRe(bare), 'g');
+      while ((m = fullRe.exec(text)) !== null) {
+        edits.push({ start: m.index, end: m.index + m[0].length, replacement: hit.value });
+        matched = true;
+        if (m.index === fullRe.lastIndex) fullRe.lastIndex++;
+      }
+    }
+    if (!matched) {
+      let p = 0;
+      while ((p = text.indexOf(bare, p)) !== -1) {
+        edits.push({ start: p, end: p + bare.length, replacement: hit.value });
+        p += bare.length;
+      }
+    }
+    restored.push({ type: hit.type, value: hit.value, code });
+  }
+  return { edits, restored, missing };
+}
+
+/** 丢弃重叠编辑（保留靠前者），避免不同编码的修饰区间互相踩踏 */
+function cleanEdits(edits) {
+  const sorted = edits.slice().sort((a, b) => a.start - b.start || b.end - a.end);
+  const out = [];
+  for (const e of sorted) {
+    const last = out[out.length - 1];
+    if (last && e.start < last.end) continue;
+    out.push(e);
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------------ */
@@ -155,18 +278,12 @@ function buildMasked(type, value, code) {
 /**
  * @param {string} text 原文
  * @param {Vault} vault
- * @param {{toggles?:Record<string,boolean>}} [options]
+ * @param {{toggles?:Record<string,boolean>, knownNames?:Set<string>}} [options]
  * @returns {{masked:string, items:Array, counts:Record<string,number>}}
  */
 function maskText(text, vault, options = {}) {
-  const { items, counts } = detect(text, options);
-  let masked = text;
-  for (let i = items.length - 1; i >= 0; i--) {
-    const it = items[i];
-    const code = vault.ensureCode(it.type, it.value);
-    masked = masked.slice(0, it.start) + buildMasked(it.type, it.value, code) + masked.slice(it.end);
-  }
-  return { masked, items, counts };
+  const { edits, items, counts } = maskEdits(text, vault, options);
+  return { masked: applyEdits(text, edits), items, counts };
 }
 
 /**
@@ -175,63 +292,8 @@ function maskText(text, vault, options = {}) {
  * @returns {{text:string, resolved:number, restored:Array<{type,value,code}>, missing:string[]}}
  */
 function restoreText(text, vault) {
-  // 收集文本中的全部编码
-  const codes = [];
-  let m;
-  CODE_RE.lastIndex = 0;
-  while ((m = CODE_RE.exec(text)) !== null) {
-    if (!codes.includes(m[1])) codes.push(m[1]);
-  }
-
-  // 各类型屏蔽值“修饰部分”的形状（用于连同修饰一起整体还原）
-  const FULL = {
-    phone: '\\d{3}\\*{4}\\d{4}',
-    idCard: '[0-9Xx]{4}……[0-9Xx]{4}',
-    bank: '\\d{4}\\*{6}\\d{4}',
-    email: '.\\*{3}@[^〔〕\\s]{1,80}',
-    passport: '[A-Za-z]\\*{6}[0-9A-Za-z]',
-    plate: '[\\u4e00-\\u9fa5][A-HJ-NP-Z]\\*{3}[0-9A-Za-z挂学警港澳]',
-    name: '[\\u4e00-\\u9fa5]\\*[\\u4e00-\\u9fa5]?',
-    address: '(?:[\\u4e00-\\u9fa5]{2,8}……|[\\u4e00-\\u9fa50-9A-Za-z]{2,6}……[\\u4e00-\\u9fa50-9A-Za-z \\t\\u3000]{1,4})',
-    caseNo: '[（(]\\d{4}[）)]……号',
-    license: '[A-Za-z0-9]{4}……[A-Za-z0-9]{4}',
-    org: `[\\u4e00-\\u9fa5]{2}……(?:${ORG_SUFFIX_ALT})`,
-    landline: '\\d{3}\\*{4}\\d{4}',
-    im: '.{2}\\*{3}.{2}',
-    hkmt: '[A-Za-z]\\*{6}[0-9A-Za-z]',
-    uscc: '[0-9A-HJ-NPQRTUWXY]{2}……[0-9A-HJ-NPQRTUWXY]{4}',
-  };
-
-  let out = text;
-  const restored = [];
-  const missing = [];
-  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const escapeRep = (s) => s.replace(/\$/g, '$$$$');
-
-  for (const code of codes) {
-    const hit = vault.lookup(code);
-    if (!hit) { missing.push(code); continue; }
-    const decor = FULL[hit.type] || '';
-    // 第一层：修饰部分 + 编码 整体还原
-    const fullRe = new RegExp(decor + escapeRe('〔' + code + '〕'), 'g');
-    if (decor && fullRe.test(out)) {
-      out = out.replace(fullRe, escapeRep(hit.value));
-      restored.push({ type: hit.type, value: hit.value, code });
-    }
-  }
-  // 第二层：裸编码兜底（修饰部分被用户改动/丢弃时仍可还原编码本身）
-  for (const code of codes) {
-    const hit = vault.lookup(code);
-    if (!hit) continue;
-    const bare = '〔' + code + '〕';
-    if (out.includes(bare)) {
-      out = out.split(bare).join(hit.value);
-      if (!restored.some((r) => r.code === code)) {
-        restored.push({ type: hit.type, value: hit.value, code });
-      }
-    }
-  }
-  return { text: out, resolved: restored.length, restored, missing };
+  const { edits, restored, missing } = restoreEdits(text, vault);
+  return { text: applyEdits(text, cleanEdits(edits)), resolved: restored.length, restored, missing };
 }
 
 /** 快速判断文本中是否含有屏蔽编码 */
@@ -250,5 +312,6 @@ function countCodes(text) {
 
 module.exports = {
   Vault, buildMasked, maskText, restoreText, hasCodes, countCodes,
+  maskEdits, restoreEdits, applyEdits, cleanEdits, safeHead,
   CODE_RE, TYPE_LABEL,
 };

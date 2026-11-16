@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const AdmZip = require('adm-zip');
 const { detect, isValidIdCard, isValidUscc, luhnValid } = require('../src/core/detector');
-const { Vault, maskText, restoreText, buildMasked, hasCodes } = require('../src/core/masker');
+const { Vault, maskText, restoreText, buildMasked, hasCodes, maskEdits, restoreEdits, cleanEdits } = require('../src/core/masker');
 const { maskFile, restoreFile, decodeBuffer, encodeText, maskedPathOf } = require('../src/core/fileproc');
 const { compareVersions } = require('../src/core/version');
 const { copyTreeSync, depsEqual, SKIP_COPY, createUpdater } = require('../src/main/updater');
@@ -1090,6 +1090,135 @@ test('自适应布局：非法工作区不抛错且结果仍为有限整数', ()
     }
   }
   assert.ok(p.panel.height >= 1);
+});
+
+/* ---------------- 规则精度重构（段落级拼接 / 位置信息 / 姓名边界） ---------------- */
+
+const { transformXmlText, xmlBlockTexts } = require('../src/core/xmltext');
+
+// 与顶部 makeIdCard 同源，仅把校验位改错：模拟卷宗里手填的虚构号码
+const ID_BAD = (() => {
+  const good = makeIdCard('33010619900101567');
+  return good.slice(0, 17) + (good[17] === '0' ? '1' : '0');
+})();
+
+test('规则：身份证校验码不合法也命中（语境引导）', () => {
+  assert.strictEqual(isValidIdCard(ID_BAD), false);
+  const t = `公民身份号码 ${ID_BAD}，回族`;
+  assert.ok(detect(t).items.some((i) => i.type === 'idCard' && i.value === ID_BAD));
+});
+
+test('规则：角色标签长词优先，「被告人陈阿满在…」不漏检', () => {
+  const t = '2019年至2024年，被告人陈阿满在先后担任雷阳中学教务处主任期间';
+  const names = detect(t).items.filter((i) => i.type === 'name').map((i) => i.value);
+  assert.ok(names.includes('陈阿满'), names.join(','));
+  assert.ok(!names.includes('教务处'), names.join(','));
+});
+
+test('规则：机构名不吞并人名、系动词与时间词', () => {
+  const t = '答：陈阿满是广东雷阳律师事务所负责人。2022年9月初广东雷阳律师事务所经招投标';
+  const r = detect(t);
+  const orgs = r.items.filter((i) => i.type === 'org').map((i) => i.value);
+  assert.deepStrictEqual(orgs, ['广东雷阳律师事务所', '广东雷阳律师事务所'], JSON.stringify(r.items));
+  assert.ok(r.items.some((i) => i.type === 'name' && i.value === '陈阿满'));
+});
+
+test('规则：地址整串含门牌楼栋单元室，并按地址尾字裁剪后续叙述', () => {
+  const a = detect('户籍所在地浙江省杭州市西湖区文三路138号3幢201室，住杭州市西湖区文三花园19栋701室。');
+  assert.ok(a.items.some((i) => i.type === 'address' && i.value.endsWith('3幢201室')), JSON.stringify(a.items));
+  assert.ok(a.items.some((i) => i.type === 'address' && i.value.endsWith('19栋701室')), JSON.stringify(a.items));
+  const b = detect('从其位于杭州市西湖区文三花园19栋701室的住处抓获归案；');
+  const addr = b.items.find((i) => i.type === 'address');
+  assert.ok(addr && addr.value.endsWith('701室') && !addr.value.includes('住处'), addr && addr.value);
+});
+
+test('规则：籍贯命中，国家机关名中的行政区划不误伤', () => {
+  const a = detect('，回族，浙江杭州人，大学文化');
+  assert.ok(a.items.some((i) => i.type === 'address' && i.value === '浙江杭州'), JSON.stringify(a.items));
+  const b = detect('杭州市人民检察院查明，浙江省杭州市人民法院');
+  assert.strictEqual(b.items.filter((i) => i.type === 'address').length, 0, JSON.stringify(b.items));
+});
+
+test('规则：普通叙述不被当成地址', () => {
+  const t = '答：我今天要向组织我分别收受雷阳中学南校区食堂负责人李四14万元现金';
+  assert.strictEqual(detect(t).items.filter((i) => i.type === 'address').length, 0);
+});
+
+test('规则：姓名精度（开庭/许可/回族/教务处 不误报，陈阿元/张三/王芳 正确）', () => {
+  const bad = detect('请审判长开庭。应当经审判长或独任审判员许可。回族，教务处主任');
+  assert.strictEqual(bad.items.filter((i) => i.type === 'name').length, 0, JSON.stringify(bad.items));
+  // 「元」是常见人名末字，不能被尾字过滤规则截断成两字
+  const yuan = detect('书记员：陈阿元担任法庭记录。');
+  assert.ok(yuan.items.some((i) => i.type === 'name' && i.value === '陈阿元'), JSON.stringify(yuan.items));
+  const good = detect('书记员：张三担任法庭记录。审：被告人陈阿满，现法庭核实身份。答：我的学生王芳刚大学毕业');
+  const ns = good.items.filter((i) => i.type === 'name').map((i) => i.value);
+  for (const n of ['张三', '陈阿满', '王芳']) assert.ok(ns.includes(n), n + ' → ' + ns.join(','));
+});
+
+test('规则：职务语境姓名（李四/王芳/陈阿满/张伟）', () => {
+  const t = '食堂负责人李四贿赂14万元，法定代表人王芳银行转账2.09万元，总经理陈阿满贿赂2万元，副总经理张伟同意';
+  const ns = detect(t).items.filter((i) => i.type === 'name').map((i) => i.value);
+  for (const n of ['李四', '王芳', '陈阿满', '张伟']) assert.ok(ns.includes(n), n + ' → ' + ns.join(','));
+});
+
+test('规则：已知姓名传播 + 3 字候选被拒不阻断 2 字真名', () => {
+  const t = '以单位开支为借口向李四提出回扣，李四也同意了。每次培训后我会和李四核对人数';
+  const hits = detect(t, { knownNames: new Set(['李四']) }).items.filter((i) => i.type === 'name' && i.value === '李四');
+  assert.strictEqual(hits.length, 3, JSON.stringify(hits));
+});
+
+test('规则：机构名与地址屏蔽值不泄露字号 / 县市镇村 / 门牌', () => {
+  const v = new Vault();
+  const org = buildMasked('org', '雷阳会议服务有限公司', v.ensureCode('org', '雷阳会议服务有限公司'));
+  assert.ok(org.startsWith('某某……有限公司〔'), org);
+  assert.ok(!org.includes('雷阳'), org);
+  const addr = buildMasked('address', '杭州市西湖区文三花园19栋701室', v.ensureCode('address', 'addr1'));
+  assert.ok(addr.startsWith('某地……〔'), addr);
+  assert.ok(!/文三|西湖|701/.test(addr), addr);
+  const prov = buildMasked('address', '浙江省杭州市西湖区文三路138号', v.ensureCode('address', 'addr2'));
+  assert.ok(prov.startsWith('浙江……〔'), prov);
+});
+
+test('规则：地址 / 机构名 屏蔽→还原 往返', () => {
+  const v = new Vault();
+  const t = '户籍所在地浙江省杭州市西湖区文三路138号3幢201室，原告陈阿满是广东雷阳律师事务所负责人。';
+  const { masked } = maskText(t, v);
+  assert.ok(masked.includes('浙江……〔') && masked.includes('……律师事务所〔'), masked);
+  assert.strictEqual(restoreText(masked, v).text, t);
+});
+
+test('Office：跨 run 拼接识别身份证与完整地址，XML 结构不变且可逐字还原', () => {
+  const xml = `<?xml version="1.0"?><w:document><w:body>
+<w:p><w:r><w:t>日出生，公民身份号码</w:t></w:r><w:r><w:t xml:space="preserve"> ${ID_BAD}</w:t></w:r><w:r><w:t>，回族，户籍所在地浙江省杭州市西湖区文三路</w:t></w:r><w:r><w:t>138</w:t></w:r><w:r><w:t>号</w:t></w:r><w:r><w:t>3</w:t></w:r><w:r><w:t>幢</w:t></w:r><w:r><w:t>201</w:t></w:r><w:r><w:t>室</w:t></w:r></w:p>
+</w:body></w:document>`;
+  // 标签间的换行也是文本块，取非空块作为段落正文
+  const blocks = xmlBlockTexts(xml).filter((b) => b.trim());
+  assert.strictEqual(blocks.length, 1);
+  assert.ok(blocks[0].includes(ID_BAD), blocks[0]);
+  assert.ok(blocks[0].endsWith('138号3幢201室'), blocks[0]);
+
+  const v = new Vault();
+  const maskedXml = transformXmlText(xml, (t) => {
+    const { edits, items } = maskEdits(t, v, {});
+    return { edits, count: items.length };
+  }).xml;
+  assert.ok(!maskedXml.includes(ID_BAD), '身份证应被屏蔽');
+  assert.ok(!maskedXml.includes('文三路') && !maskedXml.includes('138号'), '地址应被整串屏蔽');
+  assert.strictEqual(
+    (maskedXml.match(/<w:t[^>]*>/g) || []).length,
+    (xml.match(/<w:t[^>]*>/g) || []).length,
+    'w:t 节点数不应改变'
+  );
+
+  const back = transformXmlText(maskedXml, (t) => {
+    const x = restoreEdits(t, v);
+    return { edits: cleanEdits(x.edits), count: x.restored.length };
+  }).xml;
+  assert.strictEqual(
+    xmlBlockTexts(back).filter((b) => b.trim()).join('\n'),
+    blocks.join('\n'),
+    '还原后拼接文本应逐字一致'
+  );
 });
 
 /* ---------------- 输出 ---------------- */

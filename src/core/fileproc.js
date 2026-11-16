@@ -12,8 +12,11 @@ const fs = require('fs');
 const path = require('path');
 const iconv = require('iconv-lite');
 const AdmZip = require('adm-zip');
-const { maskText, restoreText, countCodes } = require('./masker');
+const {
+  maskText, restoreText, countCodes, maskEdits, restoreEdits, cleanEdits,
+} = require('./masker');
 const { detect } = require('./detector');
+const { xmlBlockTexts, transformXmlText } = require('./xmltext');
 const {
   LEGACY_EXTS, getConverted, converterHint,
 } = require('./docconvert');
@@ -203,29 +206,27 @@ function mergeKnown(a, b) {
   return out;
 }
 
-/** 仅替换 >text< 之间的内容；返回 {xml, count} */
+/**
+ * 段落级拼接 → 统一检测 → 编辑映射回各 <w:t> 节点。
+ * 只改 >text< 之间的内容，标签、属性、run 结构一律不动。
+ */
 function maskXmlText(xml, vault, toggles, knownNames) {
-  let count = 0;
-  const out = xml.replace(/>([^<>]*)</g, (whole, seg) => {
-    if (!seg) return whole;
-    const r = maskText(seg, vault, { toggles, knownNames });
-    if (r.items.length === 0) return whole;
-    count += r.items.length;
-    return `>${r.masked}<`;
+  const r = transformXmlText(xml, (blockText) => {
+    const { edits, items } = maskEdits(blockText, vault, { toggles, knownNames });
+    return { edits, count: items.length };
   });
-  return { xml: out, count };
+  return { xml: r.xml, count: r.count };
 }
 
 function restoreXmlText(xml, vault) {
-  let count = 0;
-  const out = xml.replace(/>([^<>]*)</g, (whole, seg) => {
-    if (!seg || !seg.includes('〔')) return whole;
-    const r = restoreText(seg, vault);
-    if (r.resolved === 0) return whole;
-    count += r.resolved;
-    return `>${r.text}<`;
+  const missing = [];
+  const r = transformXmlText(xml, (blockText) => {
+    if (!blockText.includes('〔')) return { edits: [], count: 0 };
+    const x = restoreEdits(blockText, vault);
+    for (const c of x.missing) if (!missing.includes(c)) missing.push(c);
+    return { edits: cleanEdits(x.edits), count: x.restored.length };
   });
-  return { xml: out, count };
+  return { xml: r.xml, count: r.count, missing };
 }
 
 /* ---------------- 内容识别 ---------------- */
@@ -253,9 +254,9 @@ function readFileText(filePath) {
       for (const entry of zip.getEntries()) {
         if (!OFFICE_PARTS.some((re) => re.test(entry.entryName))) continue;
         const xml = entry.getData().toString('utf8');
-        let seg = '';
-        for (const m of xml.matchAll(/>([^<>]*)</g)) seg += m[1] + '\n';
-        parts.push(seg);
+        // 段落级拼接：跨 run 的关键词、地址、机构名、姓名语境在此恢复
+        const blocks = xmlBlockTexts(xml);
+        if (blocks.length) parts.push(blocks.join('\n'));
       }
       return parts.join('\n');
     } catch { return null; }
@@ -352,11 +353,10 @@ function maskOffice(filePath, vault, toggles, outPath, knownNames) {
       if (!OFFICE_PARTS.some((re) => re.test(entry.entryName))) continue;
       parts.push({ name: entry.entryName, xml: entry.getData().toString('utf8') });
     }
-    // 先扫一遍全文收集已确认姓名，再统一替换（保证后文只出现名字时也能命中）
+    // 先按段落级文本扫一遍收集已确认姓名，再统一替换
+    // （逐节点预扫会因「被告人：」与姓名分属不同 run 而整批漏掉）
     const segments = [];
-    for (const p of parts) {
-      for (const m of p.xml.matchAll(/>([^<>]*)</g)) if (m[1]) segments.push(m[1]);
-    }
+    for (const p of parts) segments.push(...xmlBlockTexts(p.xml));
     const known = mergeKnown(collectKnownNames(segments, toggles), knownNames);
 
     let count = 0;

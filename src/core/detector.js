@@ -10,9 +10,13 @@
 /* 姓名识别基础数据                                                     */
 /* ------------------------------------------------------------------ */
 
-// 常见单姓（按人口频次取前 ~130，收紧范围以降低误报）
+// 单姓表：覆盖《百家姓》常用姓 + 文书里高频出现的中低频姓。
+// 扩大姓氏表不会直接增加误报 —— 姓名判定仍要求「语境证据」，姓氏只是必要条件；
+// 但能避免「查/鲍/冼/岑/靳」等真实姓氏被整片漏掉的硬伤。
 const SURNAMES_1 = new Set((
-  '王李张刘陈杨黄赵吴周徐孙马朱胡郭何林罗高郑梁谢宋唐许韩冯邓曹彭曾肖田董潘袁蔡蒋余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石廖贾夏韦傅方白邹孟熊秦邱江尹薛闫段雷侯龙史陶黎贺顾毛郝龚邵万钱严覃武戴莫孔向汤常温康施文牛樊葛邢安齐易乔伍庞颜倪庄聂章鲁岳翟殷詹申欧耿关兰焦俞左柳甘祝包宁尚符舒阮柯纪梅童凌涂盛柴丘穆佟房景古缪卓屈'
+  '王李张刘陈杨黄赵吴周徐孙马朱胡郭何林罗高郑梁谢宋唐许韩冯邓曹彭曾肖田董潘袁蔡蒋余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石廖贾夏韦傅方白邹孟熊秦邱江尹薛闫段雷侯龙史陶黎贺顾毛郝龚邵万钱严覃武戴莫孔向汤常温康施文牛樊葛邢安齐易乔伍庞颜倪庄聂章鲁岳翟殷詹申欧耿关兰焦俞左柳甘祝包宁尚符舒阮柯纪梅童凌涂盛柴丘穆佟房景古缪卓屈' +
+  '查鲍岑仇单窦费盖勾广归贵桂过哈海杭衡弘红后呼忽户怀宦皇回稽汲计季加嘉坚简蹇靳经井敬静君亢匡旷奎赖蓝郎劳乐冷里利连练蔺令留隆娄禄路律洛骆麻买满茅冒门蒙弥米苗闵明牟母木牧那纳南年念农侬偶盘裴皮平蒲朴浦普祁岂千强青卿瞿权全泉阙冉饶仁荣容茹芮赛桑沙山商佘生师时寿疏束帅双水顺斯松宿粟隋索锁台邰泰谈滕铁土危维伟卫闻翁沃乌巫奚席习先鲜线相项辛新信幸修胥须续轩宣荀言阎晏仰羊阳衣依阴应英雍尤由游于虞鱼宇禹尉元原源远云郧运宰臧早湛长照折真甄之支直执郅终仲诸竹专子紫宗祖佐' +
+  '麦冼邝植揭招竺柒'
 ).split(''));
 
 // 复姓
@@ -71,6 +75,20 @@ const NAME_BLACKLIST = new Set([
   // 罕见姓扩展表的同名常见词
   '麦田', '麦子', '麦收', '麦片', '麦芽', '麦苗', '植物', '种植', '揭发', '揭示',
   '招工', '招标', '招生', '招呼', '招聘', '措施',
+  // 新增姓氏带来的易混淆常用词（尤以「查」开头的一组最常见）
+  '查看', '查询', '查明', '查获', '查证', '查找', '查阅', '查实', '查处', '查封',
+  '查封', '查清', '查对', '查账', '查办', '查收', '抽查', '检查', '调查', '审查',
+  '核查', '排查', '追查', '复查', '清查', '侦查', '查验', '查勘', '查访', '查问',
+  '经理', '总经理', '法定', '代表', '负责', '责任', '现任', '任职', '担任', '任职',
+  '时间', '时候', '时期', '事实', '事情', '证据', '证人', '证言', '证明', '证书',
+  '全部', '全民', '全局', '全年', '全新', '新生', '新闻', '新疆', '信号', '信任',
+  '同意', '同学', '同时', '同事', '原告', '被告', '本院', '本县', '本市', '本案',
+  '于是', '于是', '由此', '由于', '为此', '为人', '为我', '所在', '所属', '所有',
+  '文明', '文化', '文书', '文字', '文档', '文章', '万元', '万块', '万元', '万象',
+  '生平', '生产', '生活', '生日', '师生', '师资', '师范', '师长', '师傅', '时事',
+  // 法律文书固定用语，容易被单字姓 + 语境证据误判成姓名
+  '开庭', '许可', '司总', '司副总', '出庭', '到庭', '庭前', '闭庭', '休庭',
+  '回族', '汉族', '满族', '藏族', '壮族', '苗族', '彝族', '侗族', '白族', '傣族',
 ]);
 
 // 称呼词：紧随姓名（高置信）或直接跟在姓氏后（本身已是屏蔽表述）
@@ -95,6 +113,7 @@ const CLAUSE_END_RE = /[，,。；;、\n\r\t（）()：:]/;
 
 // 诉讼当事人标签：其后若接「方/各/双/本…」是「被告方」这类指代，不是姓名
 const PARTY_LABELS = ['反诉原告', '反诉被告', '原审原告', '原审被告', '再审申请人', '被再审申请人', '被答辩人', '答辩人', '原告', '被告', '第三人', '上诉人', '被上诉人', '申请人', '被申请人'];
+const PARTY_LABELS_SORTED = PARTY_LABELS.slice().sort((a, b) => b.length - a.length);
 
 // 角色标签：法律文书里「原告：陈X」「被告一：陈X」「负责人陈X」是最高置信的姓名语境
 const ROLE_LABELS = [
@@ -107,11 +126,19 @@ const ROLE_LABELS = [
   '客户', '患者', '病人', '业主', '租客', '承租人', '户主', '房主', '车主', '驾驶员', '司机',
   '收款人', '付款人', '领款人', '报销人', '报修人', '签单人', '收件人', '寄件人', '发货人',
   '经办人', '经手人', '复核人', '审核人', '审批人', '投保人', '被保险人', '受益人', '持卡人', '员工',
+  // 职务名（「总经理陈阿满」「法定代表人王芳」这类无冒号的紧邻语境）
+  '法定代表人', '总经理', '副总经理', '董事长', '执行董事', '负责人', '校长', '院长',
+  '庭长', '检察长', '警长', '厂长', '站长', '所长', '社长', '馆长', '总监', '主管',
+  '答', '问',
 ];
 
 // 角色标签 + 可选序号（原告/被告一/被告2）+ 可选括注（受托人（签名）：）+ 可选冒号 + 姓名
 // 标签内部允许空白：法律文书常见「审　　判　　长　　　郑怀瑾」
-const ROLE_PATTERN = ROLE_LABELS.map((l) => l.split('').join('\\s*')).join('|');
+// 必须按长度降序：否则「被告」会抢在「被告人」前匹配，把「人」吃进候选
+// （「被告人陈阿满在…」→ 捕获「人陈阿满」→ 姓名整片漏检）。
+const ROLE_PATTERN = ROLE_LABELS.slice()
+  .sort((a, b) => b.length - a.length)
+  .map((l) => l.split('').join('\\s*')).join('|');
 const ROLE_RE = new RegExp(
   `(?:${ROLE_PATTERN})\\s*(?:[一二三四五六七八九十\\d]{1,2})?\\s*(?:[（(][^）)\\n]{0,10}[）)])?\\s*[:：]?\\s*([\\u4e00-\\u9fa5]{2,4})`,
   'g'
@@ -119,6 +146,20 @@ const ROLE_RE = new RegExp(
 
 // 姓名后紧跟的连词/谓语字：`原告陈阿满与被告…` 这类不能把「与」吃进名字
 const NAME_TAIL_STOP = /[与和及等的系为在住于将已均也都还又再并对向从因被由至到后前同亦曾按依就才则而]/;
+
+/**
+ * 姓名「末字」黑名单：这些字几乎不会是人名最后一字，而是紧跟在人名后的谓语/宾语。
+ * 角色标签后的姓名不再要求「后接标点/连词」边界（法律文书里常见
+ * 「负责人李四贿赂14万元」「法定代表人王芳银行转账」，后面直接跟动词），
+ * 改为从长到短试候选，末字命中本表就缩短一位，避免把「李四贿」当名字。
+ */
+// 仅用于「3 字及以上候选」的末字判定：2 字真名（李刚 / 李元 / 张心）不能因此被拒。
+// 「王芳刚大学毕业」「李四送给我」「李四上述」「张伟出庭」都是把谓语首字吃进名字，
+// 命中本表就缩短一位。注意「元 / 心」等常见人名末字**不能**放进来（陈阿元会被切成陈阿）。
+const NAME_TAIL_BAD = new Set([...'贿赂银账转同表示称述供在担任先后与和及的是为向从对被将已均也都还又再并而则就才等受收给请辩诉商议签字负人于年月日时分起经买卖付领取办交货款项万族行位门构筑织团院校府所队局站厂店馆部室处司社送上刚按正便即把被说出问答陈称供担开，,。；;、：:（）()《》「」 　']);
+
+// 任何长度的姓名都不该以这些机构/职务泛称字收尾（「教务处」「回族」）。
+const NAME_ORG_TAIL = new Set([...'公位门构筑织团院校府所队局站厂店馆部室处司社族']);
 
 // 姓名之后允许出现的字（标点 / 连词 / 常见谓语）；不在此列说明是普通词，不是姓名
 const AFTER_NAME_RE = /[\s，,。；;、：:（）()《》「」与和及等的系为在住将已均也都还又再并对向从因被由至到后前同亦曾按依就才则而诉称辩表请述]/;
@@ -174,13 +215,24 @@ function roleNameAt(text, raw, start) {
     if (cand.length < 2) continue;
     const end = start + cand.length;
     if (NAME_BLACKLIST.has(cand) || ROLE_FALSE_NAMES.has(cand)) continue;
-    if (end < text.length && !AFTER_NAME_RE.test(text[end])) continue;
+    const last = cand[cand.length - 1];
+    if (NAME_ORG_TAIL.has(last)) continue;
+    if (cand.length >= 3 && NAME_TAIL_BAD.has(last)) continue;
+    if ([...cand].some((ch) => NAME_FUNC_CHARS.has(ch))) continue;
     if (looksLikeOrgOrPlace(text, start, end)) continue;
     if (!hasSurname(cand) && !looseNameOk(cand)) continue;
     return { value: cand, end };
   }
   return null;
 }
+
+// 姓名后紧跟的明确谓语：「与李四商议」「李四同意」「王芳供述」。
+// 只认这一类强动作词，不把「张伟开会」这类普通叙述放进证据，避免误报。
+const NAME_ACTION_WORDS = [
+  '同意', '商议', '商定', '约定', '协商', '洽谈', '表示', '供述', '陈述', '辩称', '供称',
+  '签字', '确认', '承认', '否认', '提出', '要求', '告知', '答复', '答复', '经办', '出具',
+  '提供', '收受', '收取', '支付', '转账', '汇款', '联系', '安排', '指派', '委托',
+];
 
 // 职业/身份前缀 + 姓名（「村医周济世」「米婆梁月娇」「村民吴阿琴」）
 const OCCUPATIONS = [
@@ -268,32 +320,129 @@ function luhnValid(s) {
   return sum % 10 === 0;
 }
 
-/* ---------------- 地址（保守组合模式） ---------------- */
+/* ---------------- 地址 / 位置信息 ---------------- */
 
+// 地址引导词（长词在前，避免单字「住」抢先于「户籍所在地」）
+const ADDR_KEYWORDS = [
+  '户籍所在地', '经常居住地', '户籍地址', '户籍地', '住所地', '居住地', '暂住地',
+  '现住址', '通讯地址', '联系地址', '家庭住址', '详细地址', '办公地址', '家庭地址',
+  '注册地', '所在地', '住址', '地址', '籍贯', '原籍', '祖籍', '出生地', '户籍',
+  '现住', '暂住', '居住', '家住', '住于', '住在', '位于', '坐落于', '住',
+].join('|');
+const ADDR_KEY_RE = new RegExp(`(?:${ADDR_KEYWORDS})\\s*[:：]?\\s*`, 'g');
+
+// 至少一个地址要素才算地址（防止「住」后面跟普通叙述被整句吞掉）
+const ADDR_FEATURE_RE = /(?:省|自治区|市|自治州|地区|盟|区|县|镇|乡|街道|村|路|街|大道|大街|巷|弄|号|栋|幢|座|单元|室|楼|层|户|组|队|屯|堡|寨|庄|苑|园|府|小区|花园|公寓|大厦|广场|家园|庭院|山庄|宿舍|大院|新村|社区)/;
+
+// 行政区划链：连续 ≥2 个层级（浙江省 / 杭州市 / 西湖区 / 文三路）
+const ADMIN_ATOM = /[\u4e00-\u9fa5]{1,8}?(?:省|自治区|自治州|地区|市|区|县|旗|盟|镇|乡|街道|苏木|村|社区|屯|寨|堡|庄|组|队|路|街|大道|大街|巷|弄)/;
+const ADMIN_CHAIN_RE = new RegExp(`(?:${ADMIN_ATOM.source}){2,6}`, 'g');
+
+// 行政区划串里不会出现功能字 / 动词 / 代词。扫描链时若混入这些字，
+// 说明是把一整句叙述当成了地名（「我今天要向组织我分别收受雷阳中学南校区」）。
+const PLACE_FORBIDDEN_RE = /[我你他她们的了着过是不没无未在要能与和及由从对为向至到等该本此其各将已均也都还又再并而则就才被把给让同亦曾按依说称辩请表诉判决书条款项收受问答供述担任食责员训验检执纪监组职]/;
+const PLACE_CORE_RE = /(?:省|自治区|自治州|地区|市|县|区|旗|盟|镇|乡|街道|苏木|村|社区|屯|寨|堡|庄)/;
+
+// 地址串的「最后一个地址要素」：门牌 / 楼栋 / 单元 / 室 / 村组等。
+// 「位于…701室的住处抓获归案」必须裁到「…701室」为止，不能把后续叙述一起屏蔽。
+const ADDR_TAIL_RE = /(?:[\u4e00-\u9fa5]{0,6}(?:路|街|大道|大街|巷|弄|村|镇|乡|区|县|市|省|苑|园|府|小区|花园|公寓|大厦|广场|家园|山庄|宿舍|大院|社区|号楼|楼|栋|幢|座|单元|室|层|户|组|队|屯|寨|堡|庄|号)[\s　]*\d{0,6}(?:室|号|栋|幢|座|单元|楼|层|户|组|队|屯|寨|堡|庄|村|苑|园|府|号楼)?)/g;
+
+function trimAddressTail(raw) {
+  ADDR_TAIL_RE.lastIndex = 0;
+  let lastEnd = 0;
+  let m;
+  while ((m = ADDR_TAIL_RE.exec(raw)) !== null) {
+    lastEnd = m.index + m[0].length;
+    if (m.index === ADDR_TAIL_RE.lastIndex) ADDR_TAIL_RE.lastIndex++;
+  }
+  return lastEnd > 0 && lastEnd < raw.length ? raw.slice(0, lastEnd) : raw;
+}
+
+// 籍贯 / 出生地表述：「，浙江杭州人，」「回族，浙江杭州人」
+const ORIGIN_RE = /(?:^|[,，、；;。\s（(])([\u4e00-\u9fa5]{2,12}(?:省|自治区|市|县|区|镇|乡|村|旗|盟|州)[\u4e00-\u9fa5]{0,6})人(?=[,，。；;、\s）)]|$)/g;
+
+// 国家机关 / 学校 / 医院等：地名链后面若紧跟这些词，说明是机构名称的一部分，
+// 屏蔽掉会让文书失去可读性（「杭州市人民检察院」→「……人民检察院」）
+const PUBLIC_BODY_WORDS = [
+  '人民法院', '人民检察院', '人民政府', '公安局', '派出所', '司法局', '监察委员会',
+  '管理委员会', '委员会', '村民委员会', '居民委员会', '中学', '小学', '大学', '学校',
+  '学院', '医院', '卫生院', '检察院', '法院', '政府', '公安局', '财政局', '教育局',
+  '税务局', '市场监管局', '自然资源局', '培训中心', '实验中学', '律师事务所',
+];
+
+function endsAtPublicBody(text, end) {
+  // 链尾可能停在「浙江省杭州市」，后面还有「市人民法院」，故用包含判断
+  const ahead = text.slice(end, end + 12);
+  return PUBLIC_BODY_WORDS.some((w) => ahead.includes(w));
+}
+
+/**
+ * 地址 / 位置信息检测（四路合并，统一产出 address 类型）
+ *  1. 引导词 + 整串地址：一条到句读为止，省市区县镇乡村 / 路街巷 / 门牌 / 楼栋单元室全部纳入
+ *  2. 连续行政区划链：即使没有引导词、没有门牌号，多层级地名本身也是位置信息
+ *  3. 籍贯「XX县人」「XX省XX市人」
+ *  4. 旧有的保守组合模式（兜底，覆盖「幸福路 123 号」这类空格排版）
+ */
 function detectAddress(text) {
   const out = [];
+  const push = (start, end, value) => {
+    const v = value.trim();
+    if (!v || v.length < 4 || v.length > 60) return;
+    out.push({ type: 'address', start, end, value: v });
+  };
+
+  // 1) 引导词整串
+  ADDR_KEY_RE.lastIndex = 0;
+  let m;
+  while ((m = ADDR_KEY_RE.exec(text)) !== null) {
+    const from = m.index + m[0].length;
+    let stop = from;
+    const limit = Math.min(text.length, from + 60);
+    while (stop < limit && !CLAUSE_END_RE.test(text[stop])) stop++;
+    let raw = text.slice(from, stop);
+    if (!ADDR_FEATURE_RE.test(raw)) continue;
+    // 裁掉地址之后的叙述（「…701室的住处抓获归案」→「…701室」）
+    raw = trimAddressTail(raw);
+    const lead = raw.length - raw.replace(/^[\s　]+/, '').length;
+    const trimmed = raw.trim();
+    push(from + lead, from + lead + trimmed.length, trimmed);
+  }
+
+  // 2) 连续行政区划链
+  ADMIN_CHAIN_RE.lastIndex = 0;
+  while ((m = ADMIN_CHAIN_RE.exec(text)) !== null) {
+    if (m.index === ADMIN_CHAIN_RE.lastIndex) { ADMIN_CHAIN_RE.lastIndex++; continue; }
+    const v = m[0];
+    if (v.length > 30 || PLACE_FORBIDDEN_RE.test(v) || !PLACE_CORE_RE.test(v)) continue;
+    if (endsAtPublicBody(text, m.index + v.length)) continue;
+    push(m.index, m.index + v.length, v);
+  }
+
+  // 3) 籍贯 / 出生地
+  ORIGIN_RE.lastIndex = 0;
+  while ((m = ORIGIN_RE.exec(text)) !== null) {
+    const v = m[1];
+    const start = m.index + m[0].lastIndexOf(v);
+    // 「…县人」本身已是强语境，且 lookahead 要求紧跟标点，
+    // 不会误吃「杭州市人民法院」；这里不再套用机关名排除（以免「，大学文化」误伤）。
+    push(start, start + v.length, v);
+  }
+
+  // 4) 保守组合模式（兜底）
   const C = '[\\u4e00-\\u9fa5]';
-  // W：地址连续体（汉字/数字/字母 + 半角空格/制表/全角空格），不含换行 ——
-  // 法律文书常用「幸福路 123 号」这种空格排版，不允许空格会整批漏检
   const W = '[\\u4e00-\\u9fa50-9A-Za-z \\t\\u3000]';
   const SP = '[ \\t\\u3000]*';
   const UNIT = `(?:${SP}(?:室|栋|幢|座|单元|号楼|楼))?`;
   const patterns = [
-    // 省/自治区 → 市 → … → 门牌号（法律文书里最常见的完整地址）
     new RegExp(`${C}{2,8}(?:省|自治区)${SP}${C}{1,12}(?:市|自治州|地区|盟)${W}{0,30}?\\d{1,6}${SP}号${UNIT}`, 'g'),
-    // 市/县 → 区县镇 → … → 门牌号
     new RegExp(`${C}{1,8}(?:市|县|区)${SP}${W}{0,18}?${C}{1,8}(?:区|县|镇|乡)${W}{0,20}?\\d{1,6}${SP}号${UNIT}`, 'g'),
-    // 路/街/村 + 门牌号（可带楼栋室）
     new RegExp(`${W}{2,20}?(?:路|街|大道|大街|巷|弄|村)${W}{0,12}\\d{1,6}${SP}号${UNIT}`, 'g'),
-    // 小区/公寓 + 楼栋（须含栋室字样或数字）
     new RegExp(`${C}{2,12}(?:小区|花园|公寓|大厦|广场|家园|庭院|山庄|宿舍|大院|苑)${W}{0,6}(?:\\d{1,4}${SP}(?:号|期|幢|栋|单元|室)|${C}{0,4}(?:栋|幢|号楼|单元|室))`, 'g'),
   ];
   for (const re of patterns) {
-    let m;
     while ((m = re.exec(text)) !== null) {
       if (m.index === re.lastIndex) re.lastIndex++;
       const raw = m[0];
-      // 匹配可能从前导空格起算，去掉后再定位，避免把空格算进地址
       const lead = raw.length - raw.replace(new RegExp(`^${SP}`), '').length;
       const v = raw.trim();
       if (v.length > 48 || v.length < 6) continue;
@@ -315,44 +464,52 @@ const ORG_SUFFIXES = [
   '事务所', '有限责任公司', '股份有限公司', '有限公司', '股份公司', '集团公司',
   '公司', '集团', '合作社',
 ];
-const RE_ORG = new RegExp(`[\\u4e00-\\u9fa5]{2,14}(?:${ORG_SUFFIXES.join('|')})`, 'g');
+// 后缀按长度降序，保证「股份有限公司」不会被短后缀「公司」截断
+const ORG_SUFFIX_RE = new RegExp(
+  `(?:${ORG_SUFFIXES.slice().sort((a, b) => b.length - a.length).join('|')})`, 'g'
+);
 
-// 机构名前不应并入的虚词/动词/代词（「委托广东海田律师事务所」→「广东海田律师事务所」）
-const ORG_LEAD_STOP = new Set([...'的了在是与和及由从对为向至到等该本此其各我你他她它将已均也都还又再并而则就才被把给让同亦曾按依第号年月日说称辩请委托聘诉']);
+/**
+ * 向左取字号时的「断点字」：动词 / 虚词 / 时间词 / 数词 / 标点。
+ * 旧实现用 `[汉字]{2,14}(后缀)` 贪婪回退，只裁前导虚词，
+ * 于是「陈阿满是广东雷阳律师事务所」中的人名、系动词、时间词
+ * 「2022年9月初」全被吃进字号，屏蔽后残留「陈阿……律师事务所」。
+ */
+// 注意：地名字号里常见的「上海 / 前海 / 同仁 / 中国」等字不能设为断点，
+// 否则「上海XX有限公司」会被切成「海XX有限公司」。
+const ORG_BREAK = new Set([...'的了在是与和及由从对为向至到等该本此其各我你他她它将已均也都还又再并而则就才被把给让同亦曾按依第号年月日时分初底旬份于说称辩请委托聘诉收受问答供述担任零○〇一二三四五六七八九十：:，,。；;、（）()《》「」 　']);
 
 // 泛指主体，不是具体机构名
 const ORG_FALSE_PREFIX = ['上述', '前述', '相关', '关联', '多家', '一家', '两家', '三家', '其他', '有关', '任何', '部分', '所有', '全部', '中小', '小微'];
 
-const orgSuffixLen = (s) => (ORG_SUFFIXES.find((x) => s.endsWith(x)) || '').length;
-
 /**
- * 机构名检测：只认具体字号（≥2 字）+ 主体后缀
- *  - 「广东海田律师事务所律师」→ 广东海田律师事务所
- *  - 「上述公司」「该公司」→ 泛指，跳过
+ * 机构名检测：从主体后缀向左回退取字号（≤14 汉字），遇断点字立即停。
+ *  - 「收受广东雷阳律师事务所」→ 广东雷阳律师事务所
+ *  - 「答：陈阿满是广东雷阳律师事务所」→ 广东雷阳律师事务所
+ *  - 「该公司 / 分公司 / 上述公司」→ 字号不足或泛指，跳过
  */
 function detectOrgs(text) {
   const out = [];
-  RE_ORG.lastIndex = 0;
+  ORG_SUFFIX_RE.lastIndex = 0;
   let m;
-  while ((m = RE_ORG.exec(text)) !== null) {
-    const raw = m[0];
-    const fullSuffix = ORG_SUFFIXES.find((s) => raw.endsWith(s)) || '';
-    if (!fullSuffix) continue;
-
-    // 裁掉前导虚词；裁剪后字号不足 2 字则退回原始匹配
-    let value = raw;
-    let i = 0;
-    while (i < raw.length - fullSuffix.length - 2 && ORG_LEAD_STOP.has(raw[i])) i++;
-    if (i > 0 && (raw.length - i - fullSuffix.length) >= 2) value = raw.slice(i);
-
-    if (value.length - orgSuffixLen(value) < 2) continue;
-    if (ORG_FALSE_PREFIX.some((p) => value.startsWith(p))) continue;
-    // 《公司法》《XX公司条例》书名号里的是法规名，不是具体主体
-    const prev = text[m.index - 1] || '';
+  while ((m = ORG_SUFFIX_RE.exec(text)) !== null) {
+    const suffix = m[0];
+    const brandEnd = m.index;
+    let i = brandEnd;
+    const min = Math.max(0, brandEnd - 14);
+    while (i > min) {
+      const ch = text[i - 1];
+      if (!/[\u4e00-\u9fa5]/.test(ch)) break;
+      if (ORG_BREAK.has(ch)) break;
+      i--;
+    }
+    const brand = text.slice(i, brandEnd);
+    if (brand.length < 2) continue;
+    if (ORG_FALSE_PREFIX.some((p) => brand.startsWith(p))) continue;
+    const prev = text[i - 1] || '';
     if (prev === '《' || prev === '〈') continue;
-
-    const start = m.index + (m[0].length - value.length);
-    out.push({ type: 'org', start, end: start + value.length, value });
+    const end = brandEnd + suffix.length;
+    out.push({ type: 'org', start: i, end, value: text.slice(i, end) });
   }
   return out;
 }
@@ -374,10 +531,12 @@ function clauseStop(text, start, end) {
 }
 
 /**
- * 候选其实是不是机构名 / 地名？
- *  - 「广东省雷州市」：以「市」结尾、或后接「市」
- *  - 「雷阳律师事务所」：后接机构词
- *  - 「雷州市北和镇石牌垌村村民委员会」：所在分句含机构词
+ * 候选本身是不是地名 / 机构名的一部分？只做**紧邻的局部判断**。
+ *
+ * 旧实现会扫描「所在分句里是否出现任何机构词」，结果法律文书里
+ * 「被告人陈阿满在先后担任雷阳中学主任」「负责人李四…有限公司」
+ * 整句含「中学/公司」，人名被整片否掉 —— 这正是大量漏检的主因。
+ * 姓名是否成立由语境证据把关，这里只排除「候选自己就是地名/机构名」的情形。
  */
 function looksLikeOrgOrPlace(text, start, end) {
   const value = text.slice(start, end);
@@ -385,12 +544,9 @@ function looksLikeOrgOrPlace(text, start, end) {
   if (PLACE_TAIL.has(value[value.length - 1])) return true;
   const next = text[end] || '';
   if (next && PLACE_TAIL.has(next)) return true;
-  if (ORG_WORDS.some((w) => text.startsWith(w, end))) return true;
-  const stop = clauseStop(text, start, end);
-  if (stop > end) {
-    const clause = text.slice(start, stop);
-    if (ORG_WORDS.some((w) => clause.includes(w))) return true;
-  }
+  // 只有「候选 + 真正的机构后缀」才说明候选是字号（广东海田律师事务所）。
+  // 用泛机构词会把「王芳银行转账」的「银行」当成机构名，把姓名切成两字。
+  if (ORG_SUFFIXES.some((s) => text.startsWith(s, end))) return true;
   return false;
 }
 
@@ -410,6 +566,11 @@ function detectNames(text, strongItems, knownNames) {
     const value = text.slice(start, end);
     if (!/^[\u4e00-\u9fa5]{2,4}$/.test(value)) return false;
     if (NAME_BLACKLIST.has(value)) return false;
+    // 统一兜底：机构/职务泛称字结尾、或 3 字以上候选以谓语字收尾的都不是人名
+    const last = value[value.length - 1];
+    if (NAME_ORG_TAIL.has(last)) return false;
+    if (value.length >= 3 && NAME_TAIL_BAD.has(last)) return false;
+    if ([...value].some((ch) => NAME_FUNC_CHARS.has(ch))) return false;
     const key = start + ':' + value;
     if (seen.has(key)) return false;
     seen.add(key);
@@ -432,7 +593,7 @@ function detectNames(text, strongItems, knownNames) {
     }
     const { value, end } = hit;
     const flat = m[0].replace(/\s+/g, '');
-    const label = PARTY_LABELS.find((l) => flat.startsWith(l)) || '';
+    const label = PARTY_LABELS_SORTED.find((l) => flat.startsWith(l)) || '';
     // 「被告方」「各方当事人」：指代而非姓名
     if (label && '方各双本该其此全另'.includes(value[0])) continue;
     push(start, end, true);
@@ -452,8 +613,11 @@ function detectNames(text, strongItems, knownNames) {
         const cand = text.slice(q, q + len);
         if (cand.length < len || !/^[\u4e00-\u9fa5]+$/.test(cand)) continue;
         if (NAME_BLACKLIST.has(cand) || ROLE_FALSE_NAMES.has(cand)) continue;
+        const last = cand[cand.length - 1];
+        if (NAME_ORG_TAIL.has(last)) continue;
+        if (cand.length >= 3 && NAME_TAIL_BAD.has(last)) continue;
+        if ([...cand].some((ch) => NAME_FUNC_CHARS.has(ch))) continue;
         if (!hasSurname(cand) && !looseNameOk(cand)) continue;
-        if (q + len < text.length && !AFTER_NAME_RE.test(text[q + len])) continue;
         if (looksLikeOrgOrPlace(text, q, q + len)) continue;
         next = len;
         break;
@@ -468,8 +632,12 @@ function detectNames(text, strongItems, knownNames) {
   const evidence = (start, end) => {
     const value = text.slice(start, end);
     if (knownNames && knownNames.has(value)) return true;
-    // 称呼后缀：张三先生 / 王芳女士（后面若接「事务所」等则是机构名，交由 looksLikeOrgOrPlace 排除）
-    if (TITLES_SET.has(text.substr(end, 2))) return true;
+    // 称呼后缀：张三先生 / 王芳女士
+    // 「该公司总经理」的「司总 / 司副总」也紧邻称呼词，用前文机构泛称字排除
+    if (TITLES_SET.has(text.substr(end, 2))) {
+      const prev = text[start - 1] || '';
+      if (!ORG_GENERIC_TAIL.has(prev)) return true;
+    }
     // 「陈德寿，男，1962年…」法律文书固定结构
     if (isPunct(text[end]) && (text[end + 1] === '男' || text[end + 1] === '女')
       && (end + 2 >= text.length || isPunct(text[end + 2]) || text[end + 2] === '\n')) return true;
@@ -479,6 +647,11 @@ function detectNames(text, strongItems, knownNames) {
     // 职业/身份前缀：村医周济世 / 米婆梁月娇 / 村民吴阿琴
     const before = text.slice(Math.max(0, start - 4), start);
     if (OCCUPATIONS.some((o) => before.endsWith(o))) return true;
+    // 前有分隔符（或句首）、后接明确谓语：「与李四商议」「李四同意」
+    const prevCh = text[start - 1] || '';
+    if (!prevCh || /[，,、；;：:。\s（(与和及]/.test(prevCh)) {
+      if (NAME_ACTION_WORDS.some((w) => text.startsWith(w, end))) return true;
+    }
     return false;
   };
 
@@ -497,8 +670,9 @@ function detectNames(text, strongItems, knownNames) {
       if (len === 3 && TITLES_SET.has(value[value.length - 1] + (text[end] || ''))) continue;
       if (!evidence(i, end)) continue;
       if (looksLikeOrgOrPlace(text, i, end)) continue;
-      push(i, end, true);
-      break;
+      // push 可能因功能字 / 机构泛称字拒绝候选；此时必须继续试更短的长度，
+      // 否则「李四也同意」的 3 字候选被拒后，2 字真名「李四」也会被跳过。
+      if (push(i, end, true)) break;
     }
   }
 
@@ -529,8 +703,11 @@ function detectStrong(text, opts) {
     }
   };
   if (opts.idCard !== false) {
-    scan(RE.idCard, 'idCard', isValidIdCard);
-    scanGrouped(RE_IDCARD_LOOSE, 'idCard'); // 有语境 → 免校验码
+    // 法律文书里的身份证号常是虚构/演示值，校验码未必合法
+    //（如 330106199001015670）。正则已限制地区码 + 合法出生日期 + 顺序码，
+    // 结构足够判定，不再强制校验和；否则整类号码会被静默漏掉。
+    scan(RE.idCard, 'idCard');
+    scanGrouped(RE_IDCARD_LOOSE, 'idCard'); // 有语境 → 同样免校验和
   }
   if (opts.license !== false) scanGrouped(RE_LICENSE, 'license'); // 执业证号：有「执业证号」语境即可
   if (opts.caseNo !== false) scan(RE.caseNo, 'caseNo');
@@ -577,7 +754,7 @@ const isContained = (item, ranges) =>
 
 const PRIORITY = {
   caseNo: 0, idCard: 1, license: 2, bank: 3, phone: 4,
-  passport: 5, email: 6, plate: 7, address: 8, org: 9, name: 10,
+  passport: 5, email: 6, plate: 7, org: 8, address: 9, name: 10,
   landline: 4, im: 6, hkmt: 5, uscc: 2,
 };
 
