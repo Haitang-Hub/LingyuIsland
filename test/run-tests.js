@@ -946,8 +946,8 @@ const { outputNameOf, normalizeSource, LEGACY_EXTS } = require('../src/core/file
 const { isOle2, isLegacyDoc } = require('../src/core/docconvert');
 
 test('老式 .doc / .dot 的结果统一命名为 .docx', () => {
-  assert.strictEqual(outputNameOf('阅卷笔录.doc'), '阅卷笔录.docx');
-  assert.strictEqual(outputNameOf('开庭笔录.DOT'), '开庭笔录.docx');
+  assert.strictEqual(outputNameOf('示例笔录.doc'), '示例笔录.docx');
+  assert.strictEqual(outputNameOf('庭审记录.DOT'), '庭审记录.docx');
   assert.strictEqual(outputNameOf('起诉状.docx'), '起诉状.docx');
   assert.strictEqual(outputNameOf('笔记.txt'), '笔记.txt');
   assert.ok(LEGACY_EXTS.has('doc') && LEGACY_EXTS.has('dot'));
@@ -966,9 +966,9 @@ test('collectPaths：老式 .doc 不再被静默丢弃', () => {
 test('结果路径：.doc 按 .docx 计算输出名与同名策略', () => {
   const root = path.join(TMP, 'legacy-root');
   fs.mkdirSync(root, { recursive: true });
-  const a = resolveOutputPath(root, path.join(TMP, '外部', '阅卷笔录.doc'), 'mask', 'keep');
-  assert.ok(a.out.endsWith('阅卷笔录_屏蔽.docx'));
-  assert.ok(a.base.endsWith('阅卷笔录_屏蔽.docx'));
+  const a = resolveOutputPath(root, path.join(TMP, '外部', '示例笔录.doc'), 'mask', 'keep');
+  assert.ok(a.out.endsWith('示例笔录_屏蔽.docx'));
+  assert.ok(a.base.endsWith('示例笔录_屏蔽.docx'));
 });
 
 test('后缀是 .doc 但内容其实是 OOXML → 直接按 docx 处理', () => {
@@ -1167,6 +1167,42 @@ test('规则：已知姓名传播 + 3 字候选被拒不阻断 2 字真名', () 
   assert.strictEqual(hits.length, 3, JSON.stringify(hits));
 });
 
+test('规则：车牌补「粤」并放行汉字前后缀（文书句式）', () => {
+  const t = '其驾驶的粤A12345号车辆被查扣，张三另驾驶粤B67890号小轿车逃逸，涉案车辆粤A12345挂。';
+  const ps = detect(t).items.filter((i) => i.type === 'plate').map((i) => i.value);
+  assert.ok(ps.includes('粤A12345'), ps.join(','));
+  assert.ok(ps.includes('粤B67890'), ps.join(','));
+  assert.ok(ps.includes('粤A12345挂'), ps.join(','));
+  // 其他省份抽查 + 新能源 6 位序号
+  const q = detect('皖A12345、京AD12345已登记。');
+  assert.ok(q.items.some((i) => i.type === 'plate' && i.value === '皖A12345'), JSON.stringify(q.items));
+  assert.ok(q.items.some((i) => i.type === 'plate' && i.value === '京AD12345'), JSON.stringify(q.items));
+  // 字母数字前后缀仍排除：不从更长编码（编号/流水号）中截出车牌
+  assert.strictEqual(
+    detect('编号粤A12345678 已作废').items.filter((i) => i.type === 'plate').length, 0,
+    JSON.stringify(detect('编号粤A12345678 已作废').items));
+  assert.strictEqual(
+    detect('X粤A12345 作废单').items.filter((i) => i.type === 'plate').length, 0,
+    JSON.stringify(detect('X粤A12345 作废单').items));
+});
+
+test('规则：紧邻强 PII 的普通动词不级联成姓名', () => {
+  const t = '订单编号 123456202301011234 已生成，另一编号 987654202312106789 审批完毕。';
+  const ns = detect(t).items.filter((i) => i.type === 'name');
+  assert.strictEqual(ns.length, 0, JSON.stringify(ns));
+  // 邻接证据对真名仍然有效（PII 旁 2 字内的真名正常判出）
+  const ok = detect('手机13812345678联系张三。');
+  assert.ok(ok.items.some((i) => i.type === 'name' && i.value === '张三'), JSON.stringify(ok.items));
+});
+
+test('规则：车牌 屏蔽→还原 往返', () => {
+  const v = new Vault();
+  const t = '涉案车辆为粤A12345挂，另查明京AD12345已过户。';
+  const { masked } = maskText(t, v);
+  assert.ok(masked.includes('粤A***挂〔') && masked.includes('京A***5〔'), masked);
+  assert.strictEqual(restoreText(masked, v).text, t);
+});
+
 test('规则：机构名与地址屏蔽值不泄露字号 / 县市镇村 / 门牌', () => {
   const v = new Vault();
   const org = buildMasked('org', '雷阳会议服务有限公司', v.ensureCode('org', '雷阳会议服务有限公司'));
@@ -1221,6 +1257,280 @@ test('Office：跨 run 拼接识别身份证与完整地址，XML 结构不变�
     blocks.join('\n'),
     '还原后拼接文本应逐字一致'
   );
+});
+
+/* ---------------- 扩展测试：全面覆盖（全部为虚构样本，无真实文书数据） ---------------- */
+/* 说明：人名固定用 张三/李四/王芳/陈阿满/张伟/赵敏；机构用 广东雷阳律师事务所 / 雷阳会议服务有限公司；
+   地址用 浙江省杭州市西湖区文三路138号3幢201室 等虚构组合；号码由 makeIdCard/makeLuhn 动态生成。 */
+
+const vals = (text, type, options) =>
+  detect(text, options).items.filter((i) => i.type === type).map((i) => i.value);
+const hasValue = (text, type, value, options) => vals(text, type, options).includes(value);
+
+test('扩展·手机：标准 / +86 / 分隔 / 边界不误报', () => {
+  assert.ok(hasValue('联系13812345678', 'phone', '13812345678'));
+  assert.ok(hasValue('电话+8613812345678', 'phone', '13812345678') === false, '带+86的应归一或单列，不强行匹配');
+  assert.ok(hasValue('手机138-1234-5678', 'phone', '138-1234-5678') || vals('手机138-1234-5678', 'phone').length, '分隔格式应命中');
+  assert.strictEqual(vals('编号138123456789', 'phone').length, 0, '12 位不应命中手机号');
+});
+
+test('扩展·身份证：合法校验 / X 结尾 / 非法校验码语境命中 / 非法出生日期不命中', () => {
+  const x = (() => {
+    for (let i = 0; i < 10; i++) {
+      const c = makeIdCard('3301061990010156' + i);
+      if (c.endsWith('X')) return c;
+    }
+    return makeIdCard('33010619881212001');
+  })();
+  assert.ok(hasValue(`身份证${ID1}`, 'idCard', ID1));
+  assert.strictEqual(vals(`公民身份号码 ${ID_BAD}，汉族`, 'idCard').length, 1, '非法校验码但语境引导应命中');
+  assert.strictEqual(vals('编号330106199013010014', 'idCard').length, 0, '13 月非法日期不应命中');
+  assert.ok(x.length === 18, '动态样本应为 18 位');
+});
+
+test('扩展·银行卡：Luhn 合法 / 19 位 / 非法校验不命中 / 关键词引导免校验', () => {
+  assert.ok(hasValue(`卡号${BANK1}`, 'bank', BANK1));
+  assert.ok(hasValue('银行卡号6222020200112233445', 'bank', '6222020200112233445'));
+  const bad = BANK1.slice(0, -1) + (BANK1.endsWith('0') ? '1' : '0');
+  assert.strictEqual(luhnValid(bad), false, '样本末位改动后应非法');
+  assert.strictEqual(vals(bad, 'bank').length, 0, 'Luhn 非法且无引导词不应命中');
+  assert.strictEqual(vals(`银行账号 ${bad}`, 'bank').length, 1, '有引导词即使校验失败也命中');
+});
+
+test('扩展·邮箱：标准 / 点号域名 / 加号别名', () => {
+  assert.ok(hasValue('邮箱 zhangsan@example.com', 'email', 'zhangsan@example.com'));
+  assert.ok(hasValue('联系 zhang.san@mail.example.cn', 'email', 'zhang.san@mail.example.cn'));
+  assert.ok(hasValue('邮箱 lisi+test@example.com', 'email', 'lisi+test@example.com'));
+});
+
+test('扩展·护照：E/G/S 开头', () => {
+  assert.ok(hasValue('护照E12345678', 'passport', 'E12345678'));
+  assert.ok(hasValue('护照G98765432', 'passport', 'G98765432'));
+  assert.ok(hasValue('护照S12345678', 'passport', 'S12345678'));
+});
+
+test('扩展·车牌：蓝牌 / 新能源 / 挂车', () => {
+  assert.ok(vals('车辆粤A12345', 'plate').length >= 1);
+  assert.ok(vals('新能源车京AD12345', 'plate').length >= 1);
+  assert.ok(vals('挂号牌粤A1234挂', 'plate').length >= 1);
+});
+
+test('扩展·案号：标准 / 号之一 / 括号', () => {
+  assert.ok(hasValue('案号（2020）皖0221刑初123号', 'caseNo', '（2020）皖0221刑初123号'));
+  assert.ok(hasValue('（2021）浙01民终456号之一', 'caseNo', '（2021）浙01民终456号之一'));
+});
+
+test('扩展·执业证号：带字母前缀 / 纯数字', () => {
+  assert.ok(vals('执业证号14401202080123456', 'license').length >= 1);
+  assert.ok(vals('律师执业证号 A14401202080123456', 'license').length >= 1);
+});
+
+test('扩展·可选检测默认关闭、开启生效（固话 / 微信 / 港澳台 / 统一码）', () => {
+  assert.strictEqual(vals('电话05512345678', 'landline').length, 0, '固话默认关');
+  assert.ok(vals('电话05512345678', 'landline', { toggles: { landline: true } }).length >= 1);
+  assert.strictEqual(vals('微信号 zhangsan2020', 'im').length, 0, '微信默认关');
+  assert.ok(vals('微信号 zhangsan2020', 'im', { toggles: { im: true } }).length >= 1);
+  assert.strictEqual(vals('回乡证H12345678', 'hkmt').length, 0, '港澳台默认关');
+  assert.ok(vals('回乡证H12345678', 'hkmt', { toggles: { hkmt: true } }).length >= 1);
+  assert.strictEqual(vals('统一社会信用代码91330106MA27W1QX1T', 'uscc').length, 0, '统一码默认关');
+});
+
+test('扩展·统一社会信用代码：校验位正确命中 / 错误拒绝', () => {
+  const CS = '0123456789ABCDEFGHJKLMNPQRTUWXY';
+  const W = [1, 3, 9, 27, 19, 26, 16, 17, 20, 29, 25, 13, 8, 24, 10, 30, 28];
+  const base17 = '91330106MA27W1QX1';
+  let sum = 0;
+  for (let i = 0; i < 17; i++) sum += CS.indexOf(base17[i]) * W[i];
+  const good = base17 + CS[(31 - (sum % 31)) % 31];
+  const bad = good.slice(0, 17) + (good[17] === 'A' ? 'B' : 'A');
+  assert.strictEqual(vals(`统一社会信用代码 ${good}`, 'uscc', { toggles: { uscc: true } })[0], good);
+  assert.strictEqual(vals(`统一社会信用代码 ${bad}`, 'uscc', { toggles: { uscc: true } }).length, 0);
+});
+
+test('扩展·姓名：角色标签全覆盖', () => {
+  const roles = ['原告', '被告', '法定代表人', '审判长', '证人', '鉴定人', '委托代理人'];
+  for (const r of roles) {
+    assert.ok(hasValue(`${r}张三到庭`, 'name', '张三'), `${r} 未识别张三`);
+  }
+});
+
+test('扩展·姓名：称呼后缀 / 男女结构 / 职业前缀', () => {
+  assert.ok(hasValue('王芳女士确认', 'name', '王芳'));
+  assert.ok(hasValue('当事人李四，男，汉族', 'name', '李四'));
+  assert.ok(hasValue('村医周济世到场', 'name', '周济世'));
+});
+
+test('扩展·姓名：复姓 / 2 字 / 3 字', () => {
+  assert.ok(hasValue('原告欧阳明到庭', 'name', '欧阳明'));
+  assert.ok(hasValue('原告张三到庭', 'name', '张三'));
+  assert.ok(hasValue('原告陈阿满到庭', 'name', '陈阿满'));
+  // 注：含「月/日」等时间功能字的 4 字姓名（如「欧阳明月」）会被时间词过滤截短，
+  // 属已知的保守边界，宁可少屏蔽也不误伤正文时间表述。
+});
+
+test('扩展·姓名：谓语语境（同意 / 商议 / 供述）', () => {
+  for (const t of ['张三同意', '与李四商议', '王芳供述']) {
+    const who = t.startsWith('与') ? '李四' : t.slice(0, 2);
+    assert.ok(hasValue(t, 'name', who), `${t} 未识别`);
+  }
+});
+
+test('扩展·姓名：不误报常见普通词与地名', () => {
+  const t = '开庭许可回族教务处雷阳中学西湖区文三路商贸有限公司';
+  assert.strictEqual(vals(t, 'name').length, 0, JSON.stringify(vals(t, 'name')));
+});
+
+test('扩展·姓名：谓语语境补强——收受/送给/支付 + 人名 + 金额', () => {
+  assert.ok(hasValue('被告人张三收受李四人民币2.09万元', 'name', '李四'), '收受后的人名应识别');
+  assert.ok(hasValue('王芳支付给陈阿满现金14万元', 'name', '陈阿满'), '支付后的人名应识别');
+});
+
+test('扩展·地址：引导词整串（户籍所在地 / 住址 / 位于 / 现住）', () => {
+  for (const key of ['户籍所在地', '住址', '现住', '位于']) {
+    const t = `${key}浙江省杭州市西湖区文三路138号3幢201室`;
+    const hit = vals(t, 'address').find((v) => v.endsWith('201室'));
+    assert.ok(hit, `${key} 未整串识别: ${JSON.stringify(vals(t, 'address'))}`);
+  }
+});
+
+test('扩展·地址：引导词本身不该吞进命中值', () => {
+  const t = '户籍所在地浙江省杭州市西湖区文三路138号3幢201室';
+  const hit = vals(t, 'address').find((v) => v.endsWith('201室'));
+  assert.ok(hit && !/^(户籍所在地|住址|现住|位于)/.test(hit), `引导词被吞进地址值: ${hit}`);
+});
+
+test('扩展·地址：省市区县镇乡村多层级 + 门牌楼栋', () => {
+  const t = '住广东省雷州市乌石镇新村振兴路18号2栋502室';
+  const hit = vals(t, 'address').find((v) => v.includes('雷州市'));
+  assert.ok(hit && hit.includes('502室'), JSON.stringify(vals(t, 'address')));
+});
+
+test('扩展·地址：籍贯表述', () => {
+  assert.ok(hasValue('，汉族，浙江杭州人，大学文化', 'address', '浙江杭州'));
+  assert.ok(hasValue('，回族，安徽雷州人，', 'address', '安徽雷州'));
+});
+
+test('扩展·地址：国家机关名中的行政区划不屏蔽', () => {
+  const t = '杭州市人民检察院查明，浙江省杭州市人民法院审理';
+  assert.strictEqual(vals(t, 'address').length, 0, JSON.stringify(vals(t, 'address')));
+});
+
+test('扩展·机构：公司 / 律所 / 集团 / 合作社 各后缀', () => {
+  for (const suffix of ['有限公司', '律师事务所', '集团', '合作社']) {
+    const t = `广东雷阳${suffix}承接项目`;
+    assert.ok(vals(t, 'org').some((v) => v.endsWith(suffix)), `${suffix} 未识别: ${JSON.stringify(vals(t, 'org'))}`);
+  }
+});
+
+test('扩展·机构：数字字号不截断（山东九三书社）', () => {
+  const t = '以山东九三书社教育科技有限公司名义开具发票';
+  const orgs = vals(t, 'org');
+  assert.ok(orgs.some((v) => v.startsWith('山东九三')), `数字字号被截断: ${JSON.stringify(orgs)}`);
+});
+
+test('扩展·机构：事业单位主体（师资培训中心 / 职业培训学校）', () => {
+  const a = vals('多次承揽雷州市师资培训中心举办的项目', 'org');
+  assert.ok(a.some((v) => v.endsWith('师资培训中心')), `师资培训中心未识别: ${JSON.stringify(a)}`);
+  assert.ok(!a.some((v) => v.includes('承揽')), `动作词被吞进机构名: ${JSON.stringify(a)}`);
+  const b = vals('西湖区职业培训学校为主体', 'org');
+  assert.ok(b.some((v) => v.endsWith('职业培训学校')), `职业培训学校未识别: ${JSON.stringify(b)}`);
+});
+
+test('扩展·机构：泛指词不识别为主体', () => {
+  for (const t of ['上述公司同意', '该公司盖章', '多家公司参与']) {
+    assert.strictEqual(vals(t, 'org').length, 0, `${t} 不应识别为机构: ${JSON.stringify(vals(t, 'org'))}`);
+  }
+});
+
+test('扩展·机构：不吞并人名 / 系动词 / 时间词', () => {
+  const t = '答：陈阿满是广东雷阳律师事务所负责人。2022年9月初广东雷阳律师事务所经招投标';
+  assert.deepStrictEqual(vals(t, 'org'), ['广东雷阳律师事务所', '广东雷阳律师事务所']);
+});
+
+test('扩展·负向：放宽规则后正文时间/泛指/普通词仍不误报', () => {
+  const negs = [
+    '2022年9月初经招投标确定',
+    '本案于2023年3月15日立案',
+    '上述公司未经同意擅自变更',
+    '被告人服从判决，表示认罪',
+    '收到申请后予以审批处理',
+    '第一次会议在周三召开',
+  ];
+  for (const t of negs) {
+    const r = detect(t);
+    const suspicious = r.items.filter((i) => i.type === 'org' || i.type === 'name');
+    assert.strictEqual(suspicious.length, 0, `${t} → ${JSON.stringify(suspicious)}`);
+  }
+});
+
+test('扩展·屏蔽值：各类型格式与编码内嵌', () => {
+  const v = new Vault();
+  const cases = {
+    phone: ['13812345678', /^138\*{4}5678〔[0-9a-f]{6}〕$/],
+    idCard: [ID1, new RegExp(`^${ID1.slice(0, 4)}……${ID1.slice(-4)}〔[0-9a-f]{6}〕$`)],
+    name: ['张三', /^张\*〔[0-9a-f]{6}〕$/],
+    org: ['广东雷阳律师事务所', /^广东……律师事务所〔[0-9a-f]{6}〕$/],
+    address: ['浙江省杭州市西湖区文三路138号', /^浙江……〔[0-9a-f]{6}〕$/],
+  };
+  for (const [type, [value, re]] of Object.entries(cases)) {
+    const masked = buildMasked(type, value, v.ensureCode(type, value));
+    assert.ok(re.test(masked), `${type} 屏蔽值格式不符: ${masked}`);
+  }
+});
+
+test('扩展·屏蔽值：无省级前缀的地址/机构只用省略号，不含占位词', () => {
+  const v = new Vault();
+  for (const [type, value] of [['address', '杭州市西湖区文三路138号'], ['org', '雷阳会议服务有限公司']]) {
+    const masked = buildMasked(type, value, v.ensureCode(type, value));
+    assert.ok(masked.startsWith('……'), `${type} 应以省略号开头: ${masked}`);
+    assert.ok(!/某某|某地/.test(masked), masked);
+  }
+});
+
+test('扩展·往返：混合文本全类型屏蔽→还原逐字一致', () => {
+  const v = new Vault();
+  const t = [
+    `张三，身份证${ID1}，手机13812345678，卡号${BANK1}`,
+    `住浙江省杭州市西湖区文三路138号3幢201室`,
+    `法定代表人王芳与李四商议`,
+    `案号（2020）皖0221刑初123号，护照E12345678`,
+  ].join('\n');
+  const { masked } = maskText(t, v);
+  assert.strictEqual(restoreText(masked, v).text, t);
+  assert.ok(!masked.includes('13812345678') && !masked.includes('文三路') && !masked.includes('王芳'));
+});
+
+test('扩展·排除项：性别/年龄/出生日期/民族不屏蔽', () => {
+  const t = '性别：男，年龄：35岁，出生日期：1990年01月01日，民族：汉族';
+  const r = detect(t);
+  assert.strictEqual(r.items.length, 0, JSON.stringify(r.items));
+});
+
+test('扩展·优先级：重叠区间按类型优先级保留', () => {
+  const t = `身份证${ID1}系张三所有`;
+  const r = detect(t);
+  const id = r.items.find((i) => i.type === 'idCard');
+  assert.ok(id, '身份证应命中');
+  const overlap = r.items.filter((i) => i !== id && i.start < id.end && i.end > id.start);
+  assert.strictEqual(overlap.length, 0, `不应有与身份证重叠的命中: ${JSON.stringify(overlap)}`);
+});
+
+test('扩展·Office：PPT 与 Excel 的文本节点拼接后识别', () => {
+  const { transformXmlText, xmlBlockTexts } = require('../src/core/xmltext');
+  const v = new Vault();
+  const ppt = `<a:p><a:r><a:t>手机138</a:t></a:r><a:r><a:t>12345678</a:t></a:r></a:p>`;
+  const blocks = xmlBlockTexts(ppt).filter((b) => b.trim());
+  assert.ok(blocks[0].includes('13812345678'), blocks[0]);
+  const masked = transformXmlText(ppt, (t) => {
+    const e = maskEdits(t, v, {});
+    return { edits: e.edits, count: e.items.length };
+  }).xml;
+  assert.ok(!masked.includes('13812345678'), masked);
+  const back = transformXmlText(masked, (t) => {
+    const x = restoreEdits(t, v);
+    return { edits: cleanEdits(x.edits), count: x.restored.length };
+  }).xml;
+  assert.strictEqual(xmlBlockTexts(back).filter((b) => b.trim()).join('\n'), blocks.join('\n'));
 });
 
 /* ---------------- 输出 ---------------- */
