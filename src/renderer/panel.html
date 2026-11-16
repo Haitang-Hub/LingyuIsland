@@ -136,6 +136,17 @@
         <p class="setting-desc">结果文件与根目录中已有结果<b>同名</b>时：「保留两份」会自动加序号（如「_屏蔽_02」），旧结果不动；「覆盖同名」会直接更新那份结果文件。还原产物再次屏蔽会归回原名（「A_还原」→「A_屏蔽」），不会堆成「A_还原_屏蔽」。原位置的文件不受影响。</p>
       </div>
 
+      <div class="sec">
+        <h2>界面大小</h2>
+        <div class="seg-group seg-group-4" id="uiScaleSeg" role="radiogroup" aria-label="界面大小">
+          <button class="seg is-active" data-v="auto" role="radio" aria-checked="true">自动</button>
+          <button class="seg" data-v="compact" role="radio" aria-checked="false">紧凑</button>
+          <button class="seg" data-v="standard" role="radio" aria-checked="false">标准</button>
+          <button class="seg" data-v="large" role="radio" aria-checked="false">放大</button>
+        </div>
+        <p class="setting-desc">「自动」按显示器可用区域与系统缩放等比调整胶囊和面板，保证窗口完整落在屏幕内、始终位于胶囊下方；低分辨率会自动收小，高分屏会放大。切换后立即生效，也可手动指定固定大小。</p>
+      </div>
+
       <div class="sec" id="detectSec">
         <div class="detect-head" id="detectHead" role="button" tabindex="0" aria-expanded="false">
           <h2>检测项</h2>

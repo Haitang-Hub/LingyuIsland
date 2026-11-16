@@ -12,11 +12,11 @@ const INVOKE_CHANNELS = new Set([
   'app:open-path', 'app:reveal-path', 'app:version', 'app:quit',
   'app:open-vault-folder',
   'update:check', 'update:status', 'update:install', 'update:apply', 'update:open-page',
-  'panel:hide', 'panel:show-tab', 'pill:expand', 'pill:collapse', 'pill:peek',
+  'panel:hide', 'panel:show-tab', 'pill:expand', 'pill:collapse', 'pill:peek', 'pill:hide',
 ]);
 
 const SEND_CHANNELS = new Set([
-  'clip:found', 'clip:cleared', 'mask:progress', 'mask:done',
+  'clip:found', 'clip:cleared', 'mask:progress', 'mask:converting', 'mask:done',
   'index:updated', 'settings:changed', 'panel:show-tab', 'history:changed',
   'pill:state', 'panel:state',
   'update:found', 'update:progress', 'update:staged', 'update:error',

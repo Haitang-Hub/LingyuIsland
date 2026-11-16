@@ -18,6 +18,7 @@ const els = {
   histClearBtn: $('#histClearBtn'),
   searchInput: $('#searchInput'), rescanBtn: $('#rescanBtn'),
   catChips: $('#catChips'), importSeg: $('#importSeg'), conflictSeg: $('#conflictSeg'),
+  uiScaleSeg: $('#uiScaleSeg'),
   searchList: $('#searchList'), searchEmpty: $('#searchEmpty'),
   searchMeta: $('#searchMeta'), searchHint: $('#searchHint'),
   restoreInput: $('#restoreInput'), restoreOut: $('#restoreOut'),
@@ -262,9 +263,14 @@ function showMaskResult(done) {
   if (done.restoreMissing > 0) problems.push(`${done.restoreMissing} 个编码无法识别，可能已被修改`);
   if (done.alreadyMasked > 0) problems.push(`${done.alreadyMasked} 份已是屏蔽文件且未找到可还原编码`);
   if (done.noPii > 0) problems.push(`未检出敏感信息（${done.noPii} 份）`);
-  if (done.skipped > 0) problems.push(`${done.skipped} 份文件无法处理（格式不支持或过大）`);
+  const convertFailed = done.convertFailed || 0;
+  if (convertFailed > 0) {
+    problems.push(`${convertFailed} 份 .doc 未能自动转换${done.convertReason ? `：${done.convertReason}` : '，请在 Word 中另存为 .docx 后重试'}`);
+  }
+  const otherSkipped = (done.skipped || 0) - convertFailed;
+  if (otherSkipped > 0) problems.push(`${otherSkipped} 份文件无法处理（格式不支持或过大）`);
 
-  const hasError = done.restoreMissing > 0 || done.alreadyMasked > 0 || done.skipped > 0;
+  const hasError = done.restoreMissing > 0 || done.alreadyMasked > 0 || (done.skipped || 0) > 0;
   if (okParts.length) {
     toast(okParts.join('，'), 'ok');
     loadHistory();
@@ -617,10 +623,20 @@ function renderConflictSeg(s) {
   }
 }
 
+function renderUiScaleSeg(s) {
+  const v = s.uiScale || 'auto';
+  for (const b of els.uiScaleSeg.children) {
+    const active = b.dataset.v === v;
+    b.classList.toggle('is-active', active);
+    b.setAttribute('aria-checked', String(active));
+  }
+}
+
 function renderSettings(st) {
   const s = st.settings;
   renderImportSeg(s);
   renderConflictSeg(s);
+  renderUiScaleSeg(s);
   // 检测项（紧凑网格，勾选框在前，折叠在 .detect-head，摘要实时更新）
   els.toggleList.innerHTML = '';
   for (const [key, label] of DETECT_ITEMS) {
@@ -714,6 +730,15 @@ for (const b of els.conflictSeg.children) {
     const s = await window.island.invoke('settings:set', { conflictPolicy: b.dataset.v });
     settingsCache = s;
     renderConflictSeg(s);
+  });
+}
+
+for (const b of els.uiScaleSeg.children) {
+  b.addEventListener('click', async () => {
+    if (b.dataset.v === ((settingsCache && settingsCache.uiScale) || 'auto')) return;
+    const s = await window.island.invoke('settings:set', { uiScale: b.dataset.v });
+    settingsCache = s;
+    renderUiScaleSeg(s);
   });
 }
 

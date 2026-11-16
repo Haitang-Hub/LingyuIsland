@@ -3,6 +3,8 @@
  * 文件屏蔽管道
  *  - 文本类：txt/md/csv/json/代码等，自动识别 UTF-8 / GBK，保留原编码写回
  *  - Office 类：docx/xlsx/pptx（zip 内 XML 仅替换文本节点，原文跨排版 run 时跳过，绝不破坏结构）
+ *  - 老式 .doc/.dot（OLE2 二进制）：先本地转换为临时 .docx 再走 Office 管道，
+ *    结果统一以 .docx 落地（变长屏蔽值无法无损回写老二进制格式）
  *  - 原文件永不被覆盖：屏蔽结果写为 「xxx_屏蔽.ext」，还原结果写为 「xxx_还原.ext」
  */
 
@@ -12,6 +14,11 @@ const iconv = require('iconv-lite');
 const AdmZip = require('adm-zip');
 const { maskText, restoreText, countCodes } = require('./masker');
 const { detect } = require('./detector');
+const {
+  LEGACY_EXTS, getConverted, converterHint,
+} = require('./docconvert');
+
+const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
 
 const MAX_SIZE = 20 * 1024 * 1024; // 20MB
 
@@ -81,6 +88,50 @@ function encodeText(text, encoding, bom) {
   if (encoding === 'gbk') return iconv.encode(text, 'gbk');
   const head = bom ? Buffer.from([0xef, 0xbb, 0xbf]) : Buffer.alloc(0);
   return Buffer.concat([head, Buffer.from(text, 'utf8')]);
+}
+
+/* ---------------- 老式 .doc 入口归一化 ---------------- */
+
+/**
+ * 老格式文件的结果统一使用 .docx 后缀：
+ * 屏蔽值比原文长，无法在不重建 piece table 的前提下写回 OLE2 二进制。
+ * @param {string} name 文件名或完整路径
+ */
+function outputNameOf(name) {
+  const s = String(name || '');
+  const ext = path.extname(s).slice(1).toLowerCase();
+  return LEGACY_EXTS.has(ext) ? s.slice(0, -ext.length) + 'docx' : s;
+}
+
+/** 文件头是否为 zip（OOXML）——用于识别「后缀是 .doc、内容其实是 docx」的情况 */
+function isZipFile(p) {
+  try {
+    const fd = fs.openSync(p, 'r');
+    try {
+      const buf = Buffer.alloc(4);
+      return fs.readSync(fd, buf, 0, 4, 0) === 4 && buf.equals(ZIP_MAGIC);
+    } finally { fs.closeSync(fd); }
+  } catch { return false; }
+}
+
+/**
+ * 把「待读源文件」归一化为管道能处理的形式：
+ *  - 普通文件 → 原样
+ *  - 真 .doc/.dot（OLE2）→ 转换后的临时 .docx；转换不可用时 ext='legacy'
+ *  - 后缀是 .doc 但其实是 OOXML zip → 直接按 docx 处理
+ * @returns {{src:string, ext:string, legacy:boolean}}
+ */
+function normalizeSource(filePath) {
+  const ext = path.extname(filePath).slice(1).toLowerCase();
+  if (!LEGACY_EXTS.has(ext)) return { src: filePath, ext, legacy: false };
+  if (isZipFile(filePath)) return { src: filePath, ext: 'docx', legacy: true };
+  const converted = getConverted(filePath);
+  if (converted) return { src: converted, ext: 'docx', legacy: true };
+  return { src: filePath, ext: 'legacy', legacy: true };
+}
+
+function legacyUnavailable(filePath) {
+  return { ok: false, path: filePath, skipped: 'legacy-convert', reason: converterHint() };
 }
 
 /* ---------------- 命名 ---------------- */
@@ -186,16 +237,18 @@ function restoreXmlText(xml, vault) {
  * @returns {string|null} 二进制 / 超大 / 不支持格式返回 null
  */
 function readFileText(filePath) {
-  let ext, stat;
+  let n, stat;
   try {
-    ext = path.extname(filePath).slice(1).toLowerCase();
-    stat = fs.statSync(filePath);
+    n = normalizeSource(filePath);
+    if (n.ext === 'legacy') return null;
+    stat = fs.statSync(n.src);
   } catch { return null; }
   if (stat.size > MAX_SIZE) return null;
+  const ext = n.ext;
 
   if (OFFICE_EXTS.has(ext)) {
     try {
-      const zip = new AdmZip(filePath);
+      const zip = new AdmZip(n.src);
       const parts = [];
       for (const entry of zip.getEntries()) {
         if (!OFFICE_PARTS.some((re) => re.test(entry.entryName))) continue;
@@ -209,7 +262,7 @@ function readFileText(filePath) {
   }
   if (TEXT_EXTS.has(ext) || ext === '') {
     try {
-      const dec = decodeBuffer(fs.readFileSync(filePath));
+      const dec = decodeBuffer(fs.readFileSync(n.src));
       return dec ? dec.text : null;
     } catch { return null; }
   }
@@ -234,13 +287,19 @@ function detectFileIntent(filePath) {
  *            counts?:Record, skipped?:string, reason?:string}}
  */
 function maskFile(filePath, vault, toggles, outPath, knownNames) {
-  const ext = path.extname(filePath).slice(1).toLowerCase();
-  const stat = fs.statSync(filePath);
+  const n = normalizeSource(filePath);
+  if (n.ext === 'legacy') return legacyUnavailable(filePath);
+  const stat = fs.statSync(n.src);
   if (stat.size > MAX_SIZE) return { ok: false, path: filePath, skipped: 'too-large' };
+  const out = outPath || maskedPathOf(outputNameOf(filePath));
 
-  if (OFFICE_EXTS.has(ext)) return maskOffice(filePath, vault, toggles, outPath, knownNames);
-  if (TEXT_EXTS.has(ext) || ext === '') {
-    const buf = fs.readFileSync(filePath);
+  if (OFFICE_EXTS.has(n.ext)) {
+    const r = maskOffice(n.src, vault, toggles, out, knownNames);
+    r.path = filePath; // 报告里始终是用户拖入的原文件
+    return r;
+  }
+  if (TEXT_EXTS.has(n.ext) || n.ext === '') {
+    const buf = fs.readFileSync(n.src);
     const dec = decodeBuffer(buf);
     if (!dec) return { ok: false, path: filePath, skipped: 'binary' };
     if (countCodes(dec.text) > 0 && /_(屏蔽|脱敏)/.test(path.basename(filePath))) {
@@ -249,11 +308,10 @@ function maskFile(filePath, vault, toggles, outPath, knownNames) {
     const known = mergeKnown(collectKnownNames([dec.text], toggles), knownNames);
     const r = maskText(dec.text, vault, { toggles, knownNames: known });
     if (r.items.length === 0) return { ok: true, path: filePath, count: 0, counts: {}, skipped: 'no-pii' };
-    const out = outPath || maskedPathOf(filePath);
     fs.writeFileSync(out, encodeText(r.masked, dec.encoding, dec.bom));
     return { ok: true, path: filePath, maskedPath: out, count: r.items.length, counts: r.counts };
   }
-  return { ok: false, path: filePath, skipped: 'unsupported', reason: ext };
+  return { ok: false, path: filePath, skipped: 'unsupported', reason: n.ext };
 }
 
 /**
@@ -262,19 +320,24 @@ function maskFile(filePath, vault, toggles, outPath, knownNames) {
  * @returns {{ok:boolean, path:string, restoredPath?:string, resolved?:number, missing?:string[]}}
  */
 function restoreFile(filePath, vault, outPath) {
-  const ext = path.extname(filePath).slice(1).toLowerCase();
-  const stat = fs.statSync(filePath);
+  const n = normalizeSource(filePath);
+  if (n.ext === 'legacy') return legacyUnavailable(filePath);
+  const stat = fs.statSync(n.src);
   if (stat.size > MAX_SIZE) return { ok: false, path: filePath, skipped: 'too-large' };
 
-  if (OFFICE_EXTS.has(ext)) return restoreOffice(filePath, vault, outPath);
-  const buf = fs.readFileSync(filePath);
+  if (OFFICE_EXTS.has(n.ext)) {
+    const r = restoreOffice(n.src, vault, outPath || restoredPathOf(outputNameOf(filePath)));
+    r.path = filePath;
+    return r;
+  }
+  const buf = fs.readFileSync(n.src);
   const dec = decodeBuffer(buf);
   if (!dec) return { ok: false, path: filePath, skipped: 'binary' };
   const r = restoreText(dec.text, vault);
   if (r.resolved === 0 && r.missing.length === 0) {
     return { ok: false, path: filePath, skipped: 'no-codes' };
   }
-  const out = outPath || restoredPathOf(filePath);
+  const out = outPath || restoredPathOf(outputNameOf(filePath));
   fs.writeFileSync(out, encodeText(r.text, dec.encoding, dec.bom));
   return { ok: true, path: filePath, restoredPath: out, resolved: r.resolved, missing: r.missing };
 }
@@ -360,7 +423,7 @@ function collectPaths(inputPaths) {
     } else {
       if (isJunkFile(path.basename(p))) return;
       const ext = path.extname(p).slice(1).toLowerCase();
-      if (TEXT_EXTS.has(ext) || OFFICE_EXTS.has(ext) || ext === '') out.push(p);
+      if (TEXT_EXTS.has(ext) || OFFICE_EXTS.has(ext) || LEGACY_EXTS.has(ext) || ext === '') out.push(p);
     }
   };
   for (const p of inputPaths || []) walk(p, 0);
@@ -369,6 +432,6 @@ function collectPaths(inputPaths) {
 
 module.exports = {
   maskFile, restoreFile, collectPaths, decodeBuffer, encodeText,
-  maskedPathOf, restoredPathOf, isJunkFile, TEXT_EXTS, OFFICE_EXTS,
-  readFileText, detectFileIntent,
+  maskedPathOf, restoredPathOf, isJunkFile, TEXT_EXTS, OFFICE_EXTS, LEGACY_EXTS,
+  outputNameOf, normalizeSource, readFileText, detectFileIntent,
 };

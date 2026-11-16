@@ -42,6 +42,7 @@ if (!window.island) {
     clipboardWatch: true,
     autoCollapse: true,
     autoCollapseDelay: 20,
+    uiScale: 'auto',
     launchOnBoot: false,
   };
 
@@ -84,7 +85,7 @@ if (!window.island) {
   const mockDone = (n) => ({
     results: [], total: n,
     masked: n, restored: 0, restoredTotal: 0, restoreMissing: 0,
-    alreadyMasked: 0, noPii: 0, skipped: 0,
+    alreadyMasked: 0, noPii: 0, skipped: 0, convertFailed: 0, convertReason: '',
     totalPII: n * 3, trashed: 0, importedCount: 0, overwritten: 0,
   });
 
@@ -164,6 +165,13 @@ if (!window.island) {
         case 'mask:restore-file':
           return { ok: true, restoredPath: 'D:\\工作文档\\人事\\员工花名册_还原.xlsx', resolved: 24 };
         case 'app:open-path': case 'app:reveal-path': case 'app:quit':
+        // 浏览器预览也演示右键隐藏 / 线段唤回 / 空闲收起
+        case 'pill:hide': case 'pill:collapse':
+          emit('pill:state', 'collapsed');
+          return true;
+        case 'pill:peek':
+          emit('pill:state', 'expanded');
+          return true;
         case 'panel:hide': case 'pill:expand': case 'panel:show-tab':
         case 'index:rescan':
         case 'update:open-page':

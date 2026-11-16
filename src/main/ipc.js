@@ -48,6 +48,9 @@ function register(ctx) {
     if (patch && 'launchOnBoot' in patch) {
       try { app_ref().setLoginItemSettings({ openAtLogin: !!next.launchOnBoot }); } catch { /* ignore */ }
     }
+    if (patch && 'uiScale' in patch) {
+      island.setUiScale(next.uiScale); // 界面大小立即生效：重算窗口尺寸、缩放与位置
+    }
     island.broadcast('settings:changed', next);
     return next;
   });
@@ -173,6 +176,8 @@ function register(ctx) {
   // 灵动岛收起（渲染端空闲计时到期）/ 展开（鼠标悬停顶部线段）
   ipc_handle('pill:collapse', () => { island.collapsePill(); return true; });
   ipc_handle('pill:peek', () => { island.expandPill(); return true; });
+  // 右键胶囊隐藏：与托盘「隐藏灵动岛」同一入口，收起为顶部线段并刷新托盘文案
+  ipc_handle('pill:hide', () => { island.setPillVisible(false); return true; });
 }
 
 function app_ref() { return electronApp; }

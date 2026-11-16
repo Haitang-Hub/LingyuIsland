@@ -11,9 +11,11 @@
 
 const { BrowserWindow, screen } = require('electron');
 const path = require('path');
+const { computeIslandLayout, normalizeUiScale, BASE } = require('../core/layout');
 
-const PILL_W = 372, PILL_H = 52;
-const PANEL_W = 560, PANEL_H = 700;
+// 设计基准尺寸（实际窗口尺寸由 computeIslandLayout 按当前工作区动态计算）
+const PILL_W = BASE.pillW, PILL_H = BASE.pillH;
+const PANEL_W = BASE.panelW, PANEL_H = BASE.panelH;
 
 class Island {
   constructor() {
@@ -24,16 +26,25 @@ class Island {
     this.pillCollapsed = false;   // 当前是否处于线段收起态
     // 托盘菜单重建钩子（createTray 注入），状态切换后同步「隐藏/显示灵动岛」文案
     this.onPillStateChange = null;
+    this.uiScalePref = 'auto';    // 'auto' | 'compact' | 'standard' | 'large'
+  }
+
+  /** 按当前主显示器工作区算出胶囊/面板的尺寸、位置与 UI 缩放 */
+  _plan() {
+    const display = screen.getPrimaryDisplay();
+    return computeIslandLayout(display.workArea, {
+      uiScale: this.uiScalePref,
+      collapsed: this.pillCollapsed,
+    });
   }
 
   create() {
-    const { workArea } = screen.getPrimaryDisplay();
+    const plan = this._plan();
     const appIcon = path.join(__dirname, '..', '..', 'assets', 'icon.png');
 
     this.pill = new BrowserWindow({
-      width: PILL_W, height: PILL_H,
-      x: Math.round(workArea.x + (workArea.width - PILL_W) / 2),
-      y: workArea.y + 6,
+      width: plan.pill.width, height: plan.pill.height,
+      x: plan.pill.x, y: plan.pill.y,
       frame: false, transparent: true, resizable: false,
       alwaysOnTop: true, skipTaskbar: true, focusable: false,
       hasShadow: false, show: false,
@@ -48,9 +59,8 @@ class Island {
     this.pill.loadFile(path.join(__dirname, '..', 'renderer', 'pill.html'));
 
     this.panel = new BrowserWindow({
-      width: PANEL_W, height: PANEL_H,
-      x: Math.round(workArea.x + (workArea.width - PANEL_W) / 2),
-      y: workArea.y + 6 + PILL_H + 4,
+      width: plan.panel.width, height: plan.panel.height,
+      x: plan.panel.x, y: plan.panel.y,
       frame: false, transparent: true, resizable: false,
       alwaysOnTop: true, skipTaskbar: true,
       hasShadow: false, show: false,
@@ -81,10 +91,18 @@ class Island {
           console.error(`[renderer:${w === this.panel ? 'panel' : 'pill'}] ${message} (${sourceId}:${line})`);
         }
       });
+      // loadFile 会重置 zoomFactor，加载完成后强制刷新一次缩放与布局
+      w.webContents.on('did-finish-load', () => {
+        if (w.isDestroyed()) return;
+        w._islandZoom = null;
+        this.layout();
+      });
     }
 
-    // 显示器/任务栏变化时重新布局
-    screen.on('display-metrics-changed', () => this.layout());
+    // 分辨率 / 系统缩放 / 外接显示器 / 主屏切换 → 重算尺寸、位置与缩放
+    for (const ev of ['display-metrics-changed', 'display-added', 'display-removed']) {
+      screen.on(ev, () => this.layout());
+    }
     // macOS：灵动岛跨所有桌面空间与全屏应用可见
     if (process.platform === 'darwin') {
       for (const w of [this.pill, this.panel]) {
@@ -93,27 +111,34 @@ class Island {
     }
   }
 
-  /** 胶囊窗口的 y 坐标：展开态留 6px 给阴影；收起态线段贴住屏幕顶边 */
-  _pillY() {
-    const { workArea } = screen.getPrimaryDisplay();
-    return this.pillCollapsed ? workArea.y : workArea.y + 6;
+  /** 用户设置的界面大小变化 → 立即重新布局（含等比缩放） */
+  setUiScale(value) {
+    this.uiScalePref = normalizeUiScale(value);
+    this.layout();
+  }
+
+  /** 应用尺寸、缩放与位置；只有真正变化时才动窗口，避免透明窗重绘闪烁 */
+  _apply(win, bounds, scale) {
+    if (!win || win.isDestroyed()) return;
+    const b = win.getBounds();
+    if (b.width !== bounds.width || b.height !== bounds.height) {
+      win.setSize(bounds.width, bounds.height);
+    }
+    // 窗口 DIP 尺寸 = 设计尺寸 × scale，渲染层同步缩放 → CSS 视口恒为设计尺寸
+    if (win._islandZoom !== scale) {
+      try {
+        win.webContents.setZoomFactor(scale);
+        win._islandZoom = scale;
+      } catch { /* ignore */ }
+    }
+    if (b.x !== bounds.x || b.y !== bounds.y) win.setPosition(bounds.x, bounds.y);
   }
 
   layout() {
-    const { workArea } = screen.getPrimaryDisplay();
-    if (this.pill && !this.pill.isDestroyed()) {
-      const px = Math.round(workArea.x + (workArea.width - PILL_W) / 2);
-      const py = this._pillY();
-      const b = this.pill.getBounds();
-      // 位置没变就不要动窗口：透明窗口 setPosition 会触发一次重绘，肉眼可见地「闪」
-      if (b.x !== px || b.y !== py) this.pill.setPosition(px, py);
-    }
-    if (this.panel && !this.panel.isDestroyed()) {
-      const px = Math.round(workArea.x + (workArea.width - PANEL_W) / 2);
-      const py = Math.min(workArea.y + 6 + PILL_H + 4, workArea.y + workArea.height - PANEL_H);
-      const b = this.panel.getBounds();
-      if (b.x !== px || b.y !== py) this.panel.setPosition(px, py);
-    }
+    if (!this.pill || !this.panel) return;
+    const plan = this._plan();
+    this._apply(this.pill, plan.pill, plan.uiScale);
+    this._apply(this.panel, plan.panel, plan.uiScale);
   }
 
   showPanel(tab) {

@@ -54,6 +54,7 @@ app.whenReady().then(() => {
   store.init();
 
   island = new Island();
+  island.setUiScale(store.settings.uiScale);
   island.create();
   island.pill.webContents.on('did-finish-load', () => island.pill.showInactive());
 

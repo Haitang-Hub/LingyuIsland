@@ -9,6 +9,7 @@ const path = require('path');
 const { app, safeStorage } = require('electron');
 const { Vault } = require('../core/masker');
 const { normalizeConflictPolicy } = require('../core/imports');
+const { normalizeUiScale } = require('../core/layout');
 
 /** 面板自动收起时长（秒）的合法范围与默认值 */
 const COLLAPSE_MIN_SEC = 5;
@@ -46,6 +47,7 @@ const DEFAULT_SETTINGS = {
   clipboardWatch: true,           // 剪贴板自动识别可恢复内容
   autoCollapse: true,             // 灵动岛无操作自动收起为顶部线段
   autoCollapseDelay: DEFAULT_COLLAPSE_SEC, // 自动收起时长（秒），可在设置中自定义
+  uiScale: 'auto',                // 界面大小：auto=按分辨率/DPI 自适应 | compact/standard/large=手动
   launchOnBoot: false,            // 开机自启
 };
 
@@ -119,6 +121,7 @@ class Store {
     // 兼容旧配置文件（无此字段）或被外部改写的非法值
     this.settings.autoCollapseDelay = normalizeCollapseDelay(this.settings.autoCollapseDelay);
     this.settings.conflictPolicy = normalizeConflictPolicy(this.settings.conflictPolicy);
+    this.settings.uiScale = normalizeUiScale(this.settings.uiScale);
   }
 
   saveSettings(patch) {
@@ -133,6 +136,9 @@ class Store {
     }
     if ('conflictPolicy' in patch) {
       next.conflictPolicy = normalizeConflictPolicy(patch.conflictPolicy);
+    }
+    if ('uiScale' in patch) {
+      next.uiScale = normalizeUiScale(patch.uiScale);
     }
     this.settings = next;
     fs.writeFileSync(this.paths.settings, JSON.stringify(this.settings, null, 2), 'utf8');
@@ -212,6 +218,6 @@ class Store {
 }
 
 module.exports = {
-  Store, DEFAULT_SETTINGS, normalizeCollapseDelay,
+  Store, DEFAULT_SETTINGS, normalizeCollapseDelay, normalizeUiScale,
   COLLAPSE_MIN_SEC, COLLAPSE_MAX_SEC, DEFAULT_COLLAPSE_SEC,
 };

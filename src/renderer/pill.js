@@ -277,6 +277,22 @@ pill.addEventListener('click', () => {
   window.island.invoke('pill:expand');
 });
 
+/* ---------------- 右键隐藏 ---------------- */
+
+// 右键 = 收起为顶部线段（与托盘「隐藏灵动岛」一致），并阻止 Chromium 原生右键菜单。
+// 隐藏瞬间指针往往还停在胶囊原位置，收起后可能恰好落在线段命中区；设一个短暂
+// 保护期，避免刚隐藏就被「悬停唤回」逻辑立刻展开。指针移出线段区即提前解除。
+const HIDE_GUARD_MS = 1200;
+let hideGuardUntil = 0;
+
+window.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  if (document.body.classList.contains('collapsed')) return; // 已隐藏，不重复请求
+  hideGuardUntil = Date.now() + HIDE_GUARD_MS;
+  window.island.invoke('pill:hide');
+});
+
 function leaveClip() {
   clipChip.hidden = true;
   clipChip.disabled = false;
@@ -388,6 +404,10 @@ window.island.on('clip:cleared', () => {
 
 /* ---------------- 屏蔽进度 ---------------- */
 
+window.island.on('mask:converting', ({ count }) => {
+  setState('busy');
+  labelIdle.textContent = `正在转换 ${count} 份 .doc…`;
+});
 window.island.on('mask:progress', ({ i, total }) => {
   setState('busy');
   labelIdle.textContent = `正在屏蔽 ${i}/${total}…`;
@@ -471,10 +491,15 @@ window.island.on('panel:state', (open) => {
 });
 
 // 收起后窗口已点击穿透，mousemove 由系统转发进来；移入线段命中区 → 请求展开
+const inPeekZone = (e) =>
+  Math.abs(e.clientX - window.innerWidth / 2) <= 100 && e.clientY <= 18;
+
 window.addEventListener('mousemove', (e) => {
+  const zone = inPeekZone(e);
+  // 指针离开线段区即解除右键保护；把鼠标挪开后随时可以重新唤回
+  if (hideGuardUntil && !zone) hideGuardUntil = 0;
   if (!document.body.classList.contains('collapsed') || peekSent) return;
-  const inX = Math.abs(e.clientX - window.innerWidth / 2) <= 100;
-  if (inX && e.clientY <= 18) {
+  if (zone && Date.now() >= hideGuardUntil) {
     peekSent = true;
     window.island.invoke('pill:peek');
   }

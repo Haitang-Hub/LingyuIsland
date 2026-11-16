@@ -940,6 +940,158 @@ test('applyStaged：拷贝覆盖与跳过列表（临时目录模拟）', () => 
   }
 });
 
+/* ---------------- 老式 .doc 接入（不启动 Word，纯逻辑测试） ---------------- */
+
+const { outputNameOf, normalizeSource, LEGACY_EXTS } = require('../src/core/fileproc');
+const { isOle2, isLegacyDoc } = require('../src/core/docconvert');
+
+test('老式 .doc / .dot 的结果统一命名为 .docx', () => {
+  assert.strictEqual(outputNameOf('阅卷笔录.doc'), '阅卷笔录.docx');
+  assert.strictEqual(outputNameOf('开庭笔录.DOT'), '开庭笔录.docx');
+  assert.strictEqual(outputNameOf('起诉状.docx'), '起诉状.docx');
+  assert.strictEqual(outputNameOf('笔记.txt'), '笔记.txt');
+  assert.ok(LEGACY_EXTS.has('doc') && LEGACY_EXTS.has('dot'));
+});
+
+test('collectPaths：老式 .doc 不再被静默丢弃', () => {
+  const dir = path.join(TMP, 'legacy-doc');
+  fs.mkdirSync(dir, { recursive: true });
+  const p = path.join(dir, '笔录.doc');
+  fs.writeFileSync(p, Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]));
+  assert.ok(collectPaths([dir]).some((x) => x === p));
+  assert.strictEqual(isOle2(p), true);
+  assert.strictEqual(isLegacyDoc(p), true);
+});
+
+test('结果路径：.doc 按 .docx 计算输出名与同名策略', () => {
+  const root = path.join(TMP, 'legacy-root');
+  fs.mkdirSync(root, { recursive: true });
+  const a = resolveOutputPath(root, path.join(TMP, '外部', '阅卷笔录.doc'), 'mask', 'keep');
+  assert.ok(a.out.endsWith('阅卷笔录_屏蔽.docx'));
+  assert.ok(a.base.endsWith('阅卷笔录_屏蔽.docx'));
+});
+
+test('后缀是 .doc 但内容其实是 OOXML → 直接按 docx 处理', () => {
+  const p = path.join(TMP, '改后缀.doc');
+  const zip = new AdmZip();
+  zip.addFile('word/document.xml', Buffer.from(
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>手机13812345678</w:t></w:r></w:p></w:body></w:document>', 'utf8'));
+  zip.writeZip(p);
+  const n = normalizeSource(p);
+  assert.strictEqual(n.ext, 'docx');
+  assert.strictEqual(n.src, p);
+  const r = maskFile(p, new Vault(), {});
+  assert.strictEqual(r.ok, true);
+  assert.ok(r.count > 0);
+  assert.ok(r.maskedPath.endsWith('改后缀_屏蔽.docx'));
+});
+
+test('无法转换的 .doc 明确失败，不静默丢弃也不改写原件', () => {
+  const p = path.join(TMP, '非OLE2.doc');
+  fs.writeFileSync(p, '纯文本，不是 Word 二进制');
+  const r = maskFile(p, new Vault(), {});
+  assert.strictEqual(r.skipped, 'legacy-convert');
+  assert.ok(r.reason && r.reason.length > 0);
+  assert.strictEqual(fs.readFileSync(p, 'utf8'), '纯文本，不是 Word 二进制');
+});
+
+/* ---------------- 多分辨率 / DPI 自适应布局 ---------------- */
+
+const {
+  computeIslandLayout, normalizeUiScale, autoUiScale, BASE,
+} = require('../src/core/layout');
+
+const wa = (width, height, x = 0, y = 0) => ({ x, y, width, height });
+
+/** 窗口必须完整落在工作区内，且面板始终在胶囊下方（不与胶囊重叠） */
+function assertFits(area, plan, label) {
+  const { pill, panel } = plan;
+  for (const [name, w] of [['胶囊', pill], ['面板', panel]]) {
+    assert.ok(w.x >= area.x, `${label}: ${name}左侧越界`);
+    assert.ok(w.y >= area.y, `${label}: ${name}顶部越界`);
+    assert.ok(w.x + w.width <= area.x + area.width, `${label}: ${name}右侧越界`);
+    assert.ok(w.y + w.height <= area.y + area.height, `${label}: ${name}底部越界`);
+  }
+  assert.ok(panel.y >= pill.y + pill.height, `${label}: 面板与胶囊重叠`);
+}
+
+const SCREENS = [
+  ['1080p @100%', wa(1920, 1040)],
+  ['1366×768', wa(1366, 728)],
+  ['1440p @100%', wa(2560, 1400)],
+  ['4K @100%', wa(3840, 2100)],
+  ['4K @150%（DIP 工作区）', wa(2560, 1400)],
+  ['主屏带偏移（外接副屏为主）', wa(1920, 1040, 1920, 100)],
+  ['小工作区 800×400', wa(800, 400)],
+  ['窄竖屏 600×900', wa(600, 900)],
+  ['超宽屏 3440×1440', wa(3440, 1400)],
+];
+
+test('自适应布局：常见分辨率下窗口都完整可见且不与胶囊重叠', () => {
+  for (const [label, area] of SCREENS) {
+    const plan = computeIslandLayout(area);
+    assertFits(area, plan, label);
+    assert.ok(plan.uiScale >= 0.85 && plan.uiScale <= 1.3, `${label}: 缩放超出范围`);
+  }
+});
+
+test('自适应布局：1080p 基准保持设计尺寸，缩放为 1', () => {
+  const p = computeIslandLayout(wa(1920, 1040));
+  assert.strictEqual(p.uiScale, 1);
+  assert.deepStrictEqual(p.pill, { x: 774, y: 6, width: BASE.pillW, height: BASE.pillH });
+  assert.strictEqual(p.panel.y, 62);
+  assert.strictEqual(p.panel.width, BASE.panelW);
+  assert.strictEqual(p.panel.height, BASE.panelH);
+});
+
+test('自适应布局：高分屏放大、低分屏缩小，切换分辨率会改变窗口尺寸', () => {
+  const small = computeIslandLayout(wa(1366, 728));
+  const big = computeIslandLayout(wa(3840, 2100));
+  assert.ok(big.uiScale > small.uiScale, '4K 应比 768p 更大');
+  assert.ok(small.panel.height < big.panel.height, '小屏面板应被压缩/缩小');
+  assert.ok(small.panel.y >= small.pill.y + small.pill.height, '旧公式会把面板上移与胶囊重叠');
+});
+
+test('自适应布局：面板高度按可用空间裁剪，绝不靠上移窗口硬塞', () => {
+  const area = wa(1024, 500);
+  const p = computeIslandLayout(area);
+  assertFits(area, p, '1024×500');
+  assert.ok(p.panel.y > area.y, '面板顶部必须留在胶囊下方');
+  assert.ok(p.panel.height < BASE.panelH, '可用高度不足时应压缩面板');
+});
+
+test('自适应布局：手动界面大小覆盖自动值，放大也不越界', () => {
+  for (const v of ['compact', 'standard', 'large']) {
+    const p = computeIslandLayout(wa(1366, 728), { uiScale: v });
+    assertFits(wa(1366, 728), p, `手动 ${v}`);
+  }
+  assert.strictEqual(computeIslandLayout(wa(3840, 2100), { uiScale: 'compact' }).uiScale, 0.85);
+  assert.strictEqual(computeIslandLayout(wa(1366, 728), { uiScale: 'large' }).uiScale, 1.2);
+  assert.strictEqual(normalizeUiScale('bogus'), 'auto');
+  assert.strictEqual(normalizeUiScale('auto'), 'auto');
+  assert.strictEqual(autoUiScale(1920, 1040), 1);
+});
+
+test('自适应布局：收起态胶囊贴顶，面板位置不受影响', () => {
+  const area = wa(1920, 1040, 100, 30);
+  const expanded = computeIslandLayout(area, { collapsed: false });
+  const collapsed = computeIslandLayout(area, { collapsed: true });
+  assert.strictEqual(collapsed.pill.y, 30);
+  assert.strictEqual(expanded.pill.y, 36);
+  assert.strictEqual(collapsed.panel.y, expanded.panel.y);
+  assertFits(area, collapsed, '收起态');
+});
+
+test('自适应布局：非法工作区不抛错且结果仍为有限整数', () => {
+  const p = computeIslandLayout({ x: NaN, y: NaN, width: 0, height: 0 });
+  for (const w of [p.pill, p.panel]) {
+    for (const k of ['x', 'y', 'width', 'height']) {
+      assert.ok(Number.isFinite(w[k]) && Number.isInteger(w[k]));
+    }
+  }
+  assert.ok(p.panel.height >= 1);
+});
+
 /* ---------------- 输出 ---------------- */
 
 let failed = 0;

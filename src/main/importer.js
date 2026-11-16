@@ -14,8 +14,10 @@ const path = require('path');
 const { shell } = require('electron');
 const {
   collectPaths, maskFile, restoreFile,
-  maskedPathOf, restoredPathOf, detectFileIntent, readFileText,
+  maskedPathOf, restoredPathOf, outputNameOf, detectFileIntent, readFileText,
+  LEGACY_EXTS,
 } = require('../core/fileproc');
+const { preconvert } = require('../core/docconvert');
 const { detect } = require('../core/detector');
 const { isInsideRoot, resolveConflictName } = require('../core/imports');
 const { TYPE_LABEL } = require('../core/masker');
@@ -32,7 +34,8 @@ function summarize(counts) {
  * virtual 只是沿用原有命名规则的「虚拟目标」，不会在磁盘上创建工作副本。
  */
 function resolveOutputPath(root, src, intent, policy) {
-  const virtual = path.join(root, path.basename(src));
+  // .doc 的结果以 .docx 落地，冲突检测也必须按 .docx 名字计算
+  const virtual = path.join(root, outputNameOf(path.basename(src)));
   const base = intent === 'restore' ? restoredPathOf(virtual) : maskedPathOf(virtual);
   const dir = path.dirname(base);
   const ext = path.extname(base);
@@ -53,7 +56,7 @@ async function importAndMask(inputPaths, ctx, sender) {
     const done = {
       error: 'no-root', results: [], total: 0,
       masked: 0, restored: 0, restoredTotal: 0, restoreMissing: 0,
-      alreadyMasked: 0, noPii: 0, skipped: 0,
+      alreadyMasked: 0, noPii: 0, skipped: 0, convertFailed: 0, convertReason: '',
       totalPII: 0, trashed: 0, importedCount: 0, overwritten: 0,
     };
     island.broadcast('mask:done', done);
@@ -66,6 +69,12 @@ async function importAndMask(inputPaths, ctx, sender) {
   const files = collectPaths(inputPaths);
   const results = [];
   let totalPII = 0, vaultDirty = false, trashed = 0, overwritten = 0;
+
+  // 老式 .doc（OLE2 二进制）批量预转换：一次启动转换器，结果缓存供后续
+  // 内容读取、姓名预扫、屏蔽/还原共用。失败不中断其它文件，由 maskFile 给出明确提示。
+  const legacyCount = files.filter((f) => LEGACY_EXTS.has(path.extname(f).slice(1).toLowerCase())).length;
+  if (legacyCount > 0) island.broadcast('mask:converting', { count: legacyCount });
+  const conversion = await preconvert(files);
 
   // 卷宗级姓名预扫：同一批文件里「原告：陈X」这类锚定得到的姓名，在只出现名字的
   // 其它文书里同样生效（跨文件传播）；单文件 ≤512KB、总量 ≤8MB，避免拖慢大批量导入
@@ -112,8 +121,9 @@ async function importAndMask(inputPaths, ctx, sender) {
       r.origPath = src;
       r.outputPath = out;
 
-      // 丢弃模式只作用于根目录外的原位置文件；根目录里用户自己的文件绝不动
-      if (discard && !isInsideRoot(src, rootNorm) && r.skipped !== 'already-masked') {
+      // 丢弃模式只作用于根目录外的原位置文件；根目录里用户自己的文件绝不动。
+      // 处理失败（含 .doc 转换失败、格式不支持、读取出错）时绝不移动原文件。
+      if (discard && !isInsideRoot(src, rootNorm) && r.ok === true && r.skipped !== 'already-masked') {
         try {
           await shell.trashItem(src);
           r.trashed = true;
@@ -151,6 +161,8 @@ async function importAndMask(inputPaths, ctx, sender) {
     alreadyMasked: results.filter((r) => r.skipped === 'already-masked').length,
     noPii: results.filter((r) => r.ok && r.skipped === 'no-pii').length,
     skipped: results.filter((r) => r.skipped && !['no-pii', 'already-masked'].includes(r.skipped)).length,
+    convertFailed: results.filter((r) => r.skipped === 'legacy-convert').length,
+    convertReason: (conversion.failed[0] && conversion.failed[0].reason) || '',
     totalPII,
     trashed,
     importedCount: 0, // 不再生成工作副本；保留字段兼容渲染层
