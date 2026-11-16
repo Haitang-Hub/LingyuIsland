@@ -1170,10 +1170,12 @@ test('规则：已知姓名传播 + 3 字候选被拒不阻断 2 字真名', () 
 test('规则：机构名与地址屏蔽值不泄露字号 / 县市镇村 / 门牌', () => {
   const v = new Vault();
   const org = buildMasked('org', '雷阳会议服务有限公司', v.ensureCode('org', '雷阳会议服务有限公司'));
-  assert.ok(org.startsWith('某某……有限公司〔'), org);
+  assert.ok(org.startsWith('……有限公司〔'), org);
   assert.ok(!org.includes('雷阳'), org);
+  assert.ok(!/某某|某地/.test(org), org);
   const addr = buildMasked('address', '杭州市西湖区文三花园19栋701室', v.ensureCode('address', 'addr1'));
-  assert.ok(addr.startsWith('某地……〔'), addr);
+  assert.ok(addr.startsWith('……〔'), addr);
+  assert.ok(!/某某|某地/.test(addr), addr);
   assert.ok(!/文三|西湖|701/.test(addr), addr);
   const prov = buildMasked('address', '浙江省杭州市西湖区文三路138号', v.ensureCode('address', 'addr2'));
   assert.ok(prov.startsWith('浙江……〔'), prov);

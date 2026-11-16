@@ -9,11 +9,13 @@
  *  - 同一真实值在全库中永远对应同一个编码
  *
  * v1.5 规则重构：
- *  - 地址 / 机构名的保留前缀改为**固定 2 个汉字**，且只保留省级行政区，
- *    其余一律用「某地 / 某某」占位。旧实现保留字号前 2 字，导致
+ *  - 地址 / 机构名只保留省级行政区的前 2 字作前缀，其余信息（字号、
+ *    县市镇村、门牌）一个字都不留；没有省级前缀时直接用「……」开头，
+ *    不插入「某地 / 某某」之类的占位词。旧实现保留字号前 2 字，导致
  *    「陈阿满是广东雷阳律师事务所」被屏蔽成「陈阿……律师事务所」——
  *    人名首字反而残留在脱敏产物里。
- *  - 固定长度前缀让 FULL 还原正则能精确对齐屏蔽值起点，不会多吃正文汉字。
+ *  - 因为前缀变成变长（2 字 或 0 字），还原时按 vault 里的原值判断当初
+ *    有没有前缀（见 decorFor），避免泛型 [\u4e00-\u9fa5]{2} 误吞正文汉字。
  *  - 导出 maskEdits / restoreEdits：把「算出编辑区间」与「应用到文本」拆开，
  *    Office XML 段落级拼接管道可以复用同一套判定，再映射回各个 <w:t> 节点。
  */
@@ -36,7 +38,7 @@ const TYPE_LABEL = {
 // 省级行政区 / 直辖市：地址和机构名只保留这一级别，县市镇村一律不出现在脱敏产物里
 const PROVINCE_RE = /^(?:北京|天津|上海|重庆|河北|山西|辽宁|吉林|黑龙江|江苏|浙江|安徽|福建|江西|山东|河南|湖北|湖南|广东|广西|海南|四川|贵州|云南|陕西|甘肃|青海|宁夏|新疆|西藏|内蒙古|香港|澳门|台湾)/;
 
-/** 返回固定 2 字的安全前缀；不含省级行政区时返回占位词 */
+/** 返回省级行政区的前 2 字作安全前缀；不含省级行政区时返回传入的占位词（通常为空串） */
 function safeHead(value, placeholder) {
   const m = PROVINCE_RE.exec(String(value || ''));
   return m ? m[0].slice(0, 2) : placeholder;
@@ -134,8 +136,8 @@ function buildMasked(type, value, code) {
       if (chars.length <= 2) return `${chars[0]}*〔${code}〕`;
       return `${chars[0]}*${chars[chars.length - 1]}〔${code}〕`;
     }
-    case 'address': // 某地……〔..〕 / 浙江……〔..〕：门牌、县市镇村一个字都不留
-      return `${safeHead(value, '某地')}……〔${code}〕`;
+    case 'address': // ……〔..〕 / 浙江……〔..〕：门牌、县市镇村一个字都不留
+      return `${safeHead(value, '')}……〔${code}〕`;
     case 'caseNo': { // （2020）……号〔..〕
       const compact = value.replace(/\s+/g, '');
       const y = /[（(]((?:19|20)\d{2})[）)]/.exec(compact);
@@ -153,10 +155,10 @@ function buildMasked(type, value, code) {
       return `${value[0]}******${value.slice(-1)}〔${code}〕`;
     case 'uscc': // 91……WXYZ〔..〕：统一社会信用代码留首 2 尾 4
       return `${value.slice(0, 2)}……${value.slice(-4)}〔${code}〕`;
-    case 'org': { // 某某……有限公司〔..〕 / 安徽……有限公司〔..〕
+    case 'org': { // ……有限公司〔..〕 / 安徽……有限公司〔..〕：字号一个字都不留
       const suffix = ORG_SUFFIXES.find((s) => value.endsWith(s)) || '';
       const brand = suffix ? value.slice(0, -suffix.length) : value;
-      return `${safeHead(brand, '某某')}……${suffix || brand.slice(-2)}〔${code}〕`;
+      return `${safeHead(brand, '')}……${suffix || brand.slice(-2)}〔${code}〕`;
     }
     default: // 兜底：首尾各 1 字符
       return `${value.slice(0, 1)}**${value.slice(-1)}〔${code}〕`;
@@ -203,11 +205,10 @@ const FULL = {
   passport: '[A-Za-z]\\*{6}[0-9A-Za-z]',
   plate: '[\\u4e00-\\u9fa5][A-HJ-NP-Z]\\*{3}[0-9A-Za-z挂学警港澳]',
   name: '[\\u4e00-\\u9fa5]\\*[\\u4e00-\\u9fa5]?',
-  // 固定 2 字前缀：精确对齐屏蔽值起点，不会把「户籍所在地」这类正文一起替换掉
-  address: '[\\u4e00-\\u9fa5]{2}……',
+  // 地址 / 机构名的前缀是变长的（省级 2 字或无前缀），不能用固定 2 字正则，
+  // 否则会把正文汉字吞进屏蔽值。这两类改由 decorFor() 按原值精确重建。
   caseNo: '[（(]\\d{4}[）)]……号',
   license: '[A-Za-z0-9]{4}……[A-Za-z0-9]{4}',
-  org: `[\\u4e00-\\u9fa5]{2}……(?:${ORG_SUFFIX_ALT})`,
   landline: '\\d{3}\\*{4}\\d{4}',
   im: '.{2}\\*{3}.{2}',
   hkmt: '[A-Za-z]\\*{6}[0-9A-Za-z]',
@@ -215,6 +216,27 @@ const FULL = {
 };
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * 地址 / 机构名的「修饰部分」正则要按原值精确判断前缀有无：
+ * 有省级前缀时匹配「2 字 + ……」，无前缀时只匹配「……」。
+ * 若统一用固定 2 字前缀，无前缀的屏蔽值（如『……有限公司〔code〕』）
+ * 会把正文最后 2 个汉字误当成前缀一起吞掉，导致还原后正文缺字。
+ */
+function decorFor(hit) {
+  const v = String(hit.value || '');
+  if (hit.type === 'address') {
+    return safeHead(v, '') ? '[\\u4e00-\\u9fa5]{2}……' : '……';
+  }
+  if (hit.type === 'org') {
+    const suffix = ORG_SUFFIXES.find((s) => v.endsWith(s));
+    const brand = suffix ? v.slice(0, -suffix.length) : v;
+    const head = safeHead(brand, '') ? '[\\u4e00-\\u9fa5]{2}' : '';
+    const tail = suffix ? `(?:${ORG_SUFFIX_ALT})` : '[\\u4e00-\\u9fa5]{2}';
+    return head + '……' + tail;
+  }
+  return FULL[hit.type] || '';
+}
 
 /**
  * 只计算还原编辑，不改文本。
@@ -236,7 +258,7 @@ function restoreEdits(text, vault) {
     const hit = vault.lookup(code);
     if (!hit) { missing.push(code); continue; }
     const bare = '〔' + code + '〕';
-    const decor = FULL[hit.type] || '';
+    const decor = decorFor(hit);
     let matched = false;
 
     if (decor) {
