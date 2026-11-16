@@ -1,7 +1,7 @@
 {
   "name": "@haitang-hub/lingyu-island",
   "productName": "灵屿岛",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "灵动岛式文件屏蔽与恢复工具：拖入文件即可屏蔽个人敏感信息，随时还原",
   "main": "src/main/main.js",
   "author": "Haitang-Hub",
@@ -26,7 +26,8 @@
     "start": "electron .",
     "test": "node test/run-tests.js",
     "e2e": "cross-env-shell ISLAND_E2E=1 electron . || ISLAND_E2E=1 electron .",
-    "dist": "electron-builder --win"
+    "dist": "node scripts/dist.js",
+    "clean:release": "node scripts/dist.js --clean-only"
   },
   "build": {
     "appId": "com.lingyu.privacy-island",

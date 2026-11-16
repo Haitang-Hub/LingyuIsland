@@ -17,8 +17,7 @@ const els = {
   histList: $('#histList'), histEmpty: $('#histEmpty'), histTotal: $('#histTotal'),
   histClearBtn: $('#histClearBtn'),
   searchInput: $('#searchInput'), rescanBtn: $('#rescanBtn'),
-  catChips: $('#catChips'), importSeg: $('#importSeg'), conflictSeg: $('#conflictSeg'),
-  uiScaleSeg: $('#uiScaleSeg'),
+  catChips: $('#catChips'),   importSeg: $('#importSeg'), conflictSeg: $('#conflictSeg'),
   searchList: $('#searchList'), searchEmpty: $('#searchEmpty'),
   searchMeta: $('#searchMeta'), searchHint: $('#searchHint'),
   restoreInput: $('#restoreInput'), restoreOut: $('#restoreOut'),
@@ -623,20 +622,10 @@ function renderConflictSeg(s) {
   }
 }
 
-function renderUiScaleSeg(s) {
-  const v = s.uiScale || 'auto';
-  for (const b of els.uiScaleSeg.children) {
-    const active = b.dataset.v === v;
-    b.classList.toggle('is-active', active);
-    b.setAttribute('aria-checked', String(active));
-  }
-}
-
 function renderSettings(st) {
   const s = st.settings;
   renderImportSeg(s);
   renderConflictSeg(s);
-  renderUiScaleSeg(s);
   // 检测项（紧凑网格，勾选框在前，折叠在 .detect-head，摘要实时更新）
   els.toggleList.innerHTML = '';
   for (const [key, label] of DETECT_ITEMS) {
@@ -730,15 +719,6 @@ for (const b of els.conflictSeg.children) {
     const s = await window.island.invoke('settings:set', { conflictPolicy: b.dataset.v });
     settingsCache = s;
     renderConflictSeg(s);
-  });
-}
-
-for (const b of els.uiScaleSeg.children) {
-  b.addEventListener('click', async () => {
-    if (b.dataset.v === ((settingsCache && settingsCache.uiScale) || 'auto')) return;
-    const s = await window.island.invoke('settings:set', { uiScale: b.dataset.v });
-    settingsCache = s;
-    renderUiScaleSeg(s);
   });
 }
 
@@ -875,12 +855,19 @@ els.updateInstallBtn.addEventListener('click', async () => {
 
 els.updatePageBtn.addEventListener('click', () => window.island.invoke('update:open-page'));
 
-window.island.on('update:found', (info) => {
-  // 启动时自动检查命中 → 提示 + 展开关于区块状态
+// 同一版本只提示一次：启动自动检查（main.js 延迟 5s）与用户手动点「检查更新」
+// 都会调用 checkNow() 并广播 update:found。若不去重，两次检查落在 toast 的
+// 3.2s 存活窗口内，就会叠加出两条一模一样的「发现新版本」提示。
+// 关于区块的 UI 状态每次照常刷新（renderUpdateUI 不受去重影响）。
+let lastAnnouncedVersion = null;
+function announceUpdateFound(info) {
   updateState = { state: 'idle', latest: info.latest, depsChanged: false, hasUpdate: true, packaged: !!info.packaged };
   renderUpdateUI();
+  if (!info.latest || info.latest === lastAnnouncedVersion) return;
+  lastAnnouncedVersion = info.latest;
   toast(`发现新版本 v${info.latest}，可在「设置 → 关于」中更新`, 'ok');
-});
+}
+window.island.on('update:found', announceUpdateFound);
 
 window.island.on('update:progress', (p) => {
   updateState.state = p.phase === 'extract' ? 'extract' : 'downloading';

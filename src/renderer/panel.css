@@ -694,10 +694,6 @@ kbd {
 .seg.is-active { background: var(--surface-2); color: var(--ink); }
 .seg.danger-active { background: var(--red-soft); color: var(--red); }
 
-/* 界面大小：四档等宽，窄面板下也不会挤成两行 */
-.seg-group-4 { display: flex; }
-.seg-group-4 .seg { flex: 1; min-width: 0; padding: 0 6px; }
-
 /* 概览列表头清空按钮 */
 .ghost-btn {
   border: none;

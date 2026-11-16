@@ -15,7 +15,7 @@
 | 编码防篡改 | 编码被改动时明确提示无法还原，绝不输出错误内容 |
 | 快速查找 | 配置根目录后自动建索引、监听变更，秒搜根目录下所有文件；可按「全部/文档/表格/文本/代码/其他」筛选（按钮上的数字为该类别命中数），结果可打开或在文件夹中定位 |
 | 全类型支持 | 文本类（txt/md/csv/json/代码等，UTF-8/GBK 自动识别）+ Office（docx/xlsx/pptx）+ 老式 `.doc/.dot`（本地自动转换为 .docx 后处理，结果以 .docx 落地） |
-| 多分辨率适配 | 按显示器工作区与系统缩放等比调整胶囊/面板，窗口始终完整落在屏幕内；设置里可手动选「自动 / 紧凑 / 标准 / 放大」 |
+| 多分辨率适配 | 按显示器工作区与系统缩放自动等比调整胶囊/面板，窗口始终完整落在屏幕内（恒为自适应，无需手动选择） |
 
 ## 敏感信息检测范围
 
@@ -35,13 +35,24 @@
 ```bash
 npm install
 npm start        # 启动灵动岛
-npm test         # 核心引擎单元测试（22 项）
+npm test         # 核心引擎单元测试
 ```
 
 - **Windows**：双击 [启动灵屿岛.bat](启动灵屿岛.bat)
 - **macOS**：首次执行 `chmod +x 启动灵屿岛.command`，之后双击即可（或 `npm start`）
 
 **启动脚本**直接调用 Electron 运行时，不经过 npm。首次使用前需 `npm install`（Electron 下载慢可设镜像：`ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm install`）。
+
+## 打包与目录约定
+
+```bash
+npm run dist            # 打包当前版本，产物统一放进 release/v<version>/
+npm run clean:release   # 只整理 release：删除历史产物，保留当前版本目录
+```
+
+- `scripts/dist.js` 按 `package.json` 的版本号生成 `release/v<version>/`，复用本地 Electron 并走国内镜像；安装包、zip、blockmap、`latest.yml`、`win-unpacked` 全部留在该目录内，**`release` 根目录不再散落文件**。
+- 每次打包前会清理历史产物，只保留当前版本；被进程占用而删不掉的文件会跳过并打印路径，重启后执行 `npm run clean:release` 即可清掉。
+- 不要直接运行 `npx electron-builder --win`，否则会按 `build.directories.output` 把产物倒进 `release` 根目录。
 
 ## 平台适配说明
 
@@ -55,7 +66,7 @@ npm test         # 核心引擎单元测试（22 项）
 | 根目录监听 | fs.watch 递归 | 同左（Node ≥19 支持；异常时自动降级为手动重建索引） |
 | 开机自启 | 登录项直接生效 | 开发模式下可能需在「系统设置 → 登录项」确认 |
 
-**多分辨率 / 高 DPI**：窗口尺寸不再写死。以 1920×1080 @100% 为基准（缩放系数 1），按主显示器工作区的逻辑尺寸在 0.85~1.3 之间温和等比缩放；窗口 DIP 尺寸与渲染层缩放同步，CSS 视口恒为设计尺寸，布局不会走样。面板高度按剩余可用空间裁剪，始终完整落在工作区内且位于胶囊下方——低分辨率或高系统缩放时不会把面板顶出屏幕，也不会与胶囊重叠。系统缩放变化、外接/移除显示器、主屏切换都会自动重算（`display-metrics-changed` / `display-added` / `display-removed`）。设置页可手动指定「自动 / 紧凑 / 标准 / 放大」，切换后立即生效。胶囊与面板始终居中显示在主显示器。
+**多分辨率 / 高 DPI**：窗口尺寸不再写死。以 1920×1080 @100% 为基准（缩放系数 1），按主显示器工作区的逻辑尺寸在 0.85~1.3 之间温和等比缩放；窗口 DIP 尺寸与渲染层缩放同步，CSS 视口恒为设计尺寸，布局不会走样。面板高度按剩余可用空间裁剪，始终完整落在工作区内且位于胶囊下方——低分辨率或高系统缩放时不会把面板顶出屏幕，也不会与胶囊重叠。系统缩放变化、外接/移除显示器、主屏切换都会自动重算（`display-metrics-changed` / `display-added` / `display-removed`）。界面缩放恒为自适应，设置页不再提供手动档位；旧配置里保存的固定档位会自动回归自适应。胶囊与面板始终居中显示在主显示器。
 
 **真实文书测试**：`node test/real-files.test.js` —— 自动从样本目录同步文件到 `test/realtest` 做全量校验：原件 SHA-256 不变、屏蔽无泄露、还原逐字节一致、性别/年龄/出生日期保留（161 项检查）。样本目录默认为 `F:\Law\output\Chuanjianling`（Windows），macOS 用环境变量指定：`LINGYU_SAMPLES=/path/to/docs node test/real-files.test.js`。测试产物（`_屏蔽`/`_还原` 副本）保留在 `test/realtest` 供查看效果。
 

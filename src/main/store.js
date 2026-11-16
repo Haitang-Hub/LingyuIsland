@@ -47,7 +47,7 @@ const DEFAULT_SETTINGS = {
   clipboardWatch: true,           // 剪贴板自动识别可恢复内容
   autoCollapse: true,             // 灵动岛无操作自动收起为顶部线段
   autoCollapseDelay: DEFAULT_COLLAPSE_SEC, // 自动收起时长（秒），可在设置中自定义
-  uiScale: 'auto',                // 界面大小：auto=按分辨率/DPI 自适应 | compact/standard/large=手动
+  uiScale: 'auto',                // 界面缩放恒为自适应：手动档位入口已移除，见 _loadSettings / saveSettings
   launchOnBoot: false,            // 开机自启
 };
 
@@ -121,7 +121,9 @@ class Store {
     // 兼容旧配置文件（无此字段）或被外部改写的非法值
     this.settings.autoCollapseDelay = normalizeCollapseDelay(this.settings.autoCollapseDelay);
     this.settings.conflictPolicy = normalizeConflictPolicy(this.settings.conflictPolicy);
-    this.settings.uiScale = normalizeUiScale(this.settings.uiScale);
+    // 界面大小手动档位入口已移除：旧存档里的 compact/standard/large 一律回到自适应，
+    // 保证窗口始终按分辨率/DPI 完整落在屏幕内。
+    this.settings.uiScale = 'auto';
   }
 
   saveSettings(patch) {
@@ -137,9 +139,8 @@ class Store {
     if ('conflictPolicy' in patch) {
       next.conflictPolicy = normalizeConflictPolicy(patch.conflictPolicy);
     }
-    if ('uiScale' in patch) {
-      next.uiScale = normalizeUiScale(patch.uiScale);
-    }
+    // 界面大小不再接受手动档位：即使外部传入也强制回到自适应
+    next.uiScale = 'auto';
     this.settings = next;
     fs.writeFileSync(this.paths.settings, JSON.stringify(this.settings, null, 2), 'utf8');
     return this.settings;
