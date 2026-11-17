@@ -359,16 +359,15 @@ window.addEventListener('mouseup', () => {
 /* ---------------- 右键隐藏 ---------------- */
 
 // 右键 = 收起为顶部线段（与托盘「隐藏灵动岛」一致），并阻止 Chromium 原生右键菜单。
-// 隐藏瞬间指针往往还停在胶囊原位置，收起后可能恰好落在线段命中区；设一个短暂
-// 保护期，避免刚隐藏就被「悬停唤回」逻辑立刻展开。指针移出线段区即提前解除。
-const HIDE_GUARD_MS = 1200;
-let hideGuardUntil = 0;
+// 隐藏瞬间指针往往还停在胶囊原位置（可能落在线段命中区）；设右键隐藏保护：
+// 指针离开线段命中区一次后才允许「悬停唤回」，避免隐藏后原地又弹开。
+let hideGuard = false;
 
 window.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   e.stopPropagation();
   if (document.body.classList.contains('collapsed')) return; // 已隐藏，不重复请求
-  hideGuardUntil = Date.now() + HIDE_GUARD_MS;
+  hideGuard = true;
   window.island.invoke('pill:hide');
 });
 
@@ -556,6 +555,7 @@ function applyPillState(state) {
     clearHover(); // 收起前若悬停态因丢事件残留，随收起一并清除
     clearTimeout(idleTimer);
     peekSent = false;
+    peekEnterAt = 0;
   } else {
     peekSent = false;
     resetIdleTimer();
@@ -575,16 +575,26 @@ window.island.on('panel:state', (open) => {
   resetIdleTimer();
 });
 
-// 收起后窗口已点击穿透，mousemove 由系统转发进来；移入线段命中区 → 请求展开
+// 收起后窗口已点击穿透，mousemove 由系统转发进来；移入线段命中区 → 请求展开。
+// 命中区与可见线段对齐：中心 ±60（线段半宽 60）、y≤6（线段高 4px + 2px 余量），
+// 已是「不超出线段」的最窄可用范围；且需连续停留 ≥50ms 才请求展开，
+// 快速扫过顶边不会触发，移出即重新计时。
 const inPeekZone = (e) =>
-  Math.abs(e.clientX - window.innerWidth / 2) <= 100 && e.clientY <= 18;
+  Math.abs(e.clientX - window.innerWidth / 2) <= 60 && e.clientY <= 6;
+
+let peekEnterAt = 0; // 进入命中区的时刻；移出即清零，重新进入重新计时
 
 window.addEventListener('mousemove', (e) => {
   const zone = inPeekZone(e);
-  // 指针离开线段区即解除右键保护；把鼠标挪开后随时可以重新唤回
-  if (hideGuardUntil && !zone) hideGuardUntil = 0;
-  if (!document.body.classList.contains('collapsed') || peekSent) return;
-  if (zone && Date.now() >= hideGuardUntil) {
+  // 指针离开线段区 → 解除右键隐藏保护，此后移入即可正常唤回
+  if (hideGuard && !zone) hideGuard = false;
+  if (!document.body.classList.contains('collapsed') || peekSent) {
+    peekEnterAt = 0;
+    return;
+  }
+  if (!zone) { peekEnterAt = 0; return; }
+  if (!peekEnterAt) { peekEnterAt = Date.now(); return; }
+  if (!hideGuard && Date.now() - peekEnterAt >= 50) {
     peekSent = true;
     window.island.invoke('pill:peek');
   }

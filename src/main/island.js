@@ -35,6 +35,13 @@ class Island {
     this.onPillStateChange = null;
     // 灵动岛水平位置（中心相对工作区宽度的比例）；main.js 启动时从外观设置注入
     this.pillX = 0.5;
+    // 收起态兜底唤回：光标进入命中区的停留计时起点（离开命中区即清零）
+    this._peekEnterAt = 0;
+    // 收起瞬间光标就停在命中区（自动收起/右键隐藏时光标未动）→ 抑制兜底展开，
+    // 直到光标离开命中区才解除；否则会形成「原地开合」循环
+    this._peekHold = false;
+    // 最近一次 layout() 算出的胶囊缩放（DIP/CSS px），供命中区判定免重复布局计算
+    this._pillScale = null;
     // 拖动换位结束后的持久化钩子（main.js 注入：写设置 + 广播）
     this.onPillOffsetChange = null;
     this.panelSize = { w: BASE.panelW, h: BASE.panelH }; // 面板 CSS 视口尺寸（宽高独立，可细长 / 宽扁）
@@ -168,6 +175,7 @@ class Island {
   layout() {
     if (!this.pill || !this.panel) return;
     const plan = this._plan();
+    this._pillScale = plan.pillScale;
     this._apply(this.pill, plan.pill, plan.pillScale);
     this._apply(this.panel, plan.panel, plan.panelScale);
   }
@@ -282,6 +290,9 @@ class Island {
     this.layout();    // 窗口贴到屏幕顶边
     try { this.pill.setIgnoreMouseEvents(true, { forward: true }); } catch { /* ignore */ }
     this.pill.webContents.send('pill:state', 'collapsed');
+    // 收起瞬间光标若就停在命中区（自动收起/右键隐藏时光标未动）→ 抑制兜底展开，
+    // 防止「光标停在原地 → 自动收起 → 立刻自动展开」的原地开合循环
+    this._peekHold = this._cursorInPeekZone();
     this._notify();
   }
 
@@ -290,6 +301,8 @@ class Island {
     if (!this.pill || this.pill.isDestroyed() || !this.pillCollapsed) return;
     this.pillCollapsed = false;
     this._pillVisible = true;
+    this._peekEnterAt = 0;
+    this._peekHold = false;
     try { this.pill.setIgnoreMouseEvents(false); } catch { /* ignore */ }
     this.layout();
     if (!this.pill.isVisible()) this.pill.showInactive();
@@ -323,15 +336,42 @@ class Island {
   /* 悬停纠偏看门狗：Windows 上透明无边框窗口指针快速移出时 WM_MOUSELEAVE 偶发丢失，
      渲染端拿不到 mouseleave，:hover 悬停效果会一直挂着。
      这里轮询光标位置，发现光标从胶囊窗口内→外就发 pill:hover-sync(false)，
-     由渲染端强制清除悬停态（仅在跳变瞬间发一次，不重复刷 IPC）。 */
+     由渲染端强制清除悬停态（仅在跳变瞬间发一次，不重复刷 IPC）。
+
+     收起态兜底：setIgnoreMouseEvents(forward:true) 的鼠标转发对前台窗口敏感
+     （官方文档：前台窗口完整性级别更高时临时停发；实测点选桌面、焦点切换也会断），
+     转发一断渲染端收不到 mousemove，线段永远唤不回。因此收起时改为光标轮询
+     （30ms 间隔）：光标进入命中区停留约 50ms 才展开，快速扫过不触发；收起瞬间
+     指针就停在命中区（自动收起/右键隐藏）则先离开再回来才允许展开，避免原地开合
+     循环；右键隐藏后光标不离开线段区就绝不重新打开，与渲染端 hideGuard 同语义。 */
   startPillHoverWatch() {
     if (this._hoverWatch) return;
     this._cursorInPill = false;
+    // 30ms 轮询：收起态兜底唤回按 50ms 停留判定，轮询间隔必须明显小于停留阈值
     this._hoverWatch = setInterval(() => {
       const w = this.pill;
-      if (!w || w.isDestroyed() || this.pillCollapsed || !w.isVisible()) return;
-      const c = screen.getCursorScreenPoint();
-      const b = w.getContentBounds();
+      if (!w || w.isDestroyed() || !w.isVisible()) return;
+      if (this.pillCollapsed) {
+        const inZone = this._cursorInPeekZone();
+        if (!inZone) {
+          this._peekEnterAt = 0;      // 离开命中区 → 停留计时清零，重新进入重新计时
+          this._peekHold = false;     // 指针离开命中区 → 「收起时指针就在区内」保护解除
+        } else if (this._peekHold) {
+          // 收起瞬间指针就停在区内（自动收起/右键隐藏时光标未动）：必须先离开
+          // 再回来才允许兜底展开，否则光标停在原地会形成「收起→展开→收起」循环
+        } else if (!this._cursorInPill) {
+          this._peekEnterAt = Date.now(); // 刚进入命中区，开始停留计时
+        } else if (this._peekEnterAt && Date.now() - this._peekEnterAt >= 28) {
+          this.expandPill();
+        }
+        this._cursorInPill = inZone;
+        return;
+      }
+      let c, b;
+      try {
+        c = screen.getCursorScreenPoint();
+        b = w.getContentBounds();
+      } catch { return; }
       const inside = c.x >= b.x && c.x < b.x + b.width && c.y >= b.y && c.y < b.y + b.height;
       if (inside !== this._cursorInPill) {
         this._cursorInPill = inside;
@@ -339,7 +379,21 @@ class Island {
           try { w.webContents.send('pill:hover-sync', false); } catch { /* ignore */ }
         }
       }
-    }, 300);
+    }, 30);
+  }
+
+  /** 光标是否处于收起态线段命中区（与渲染端 peek 区一致：窗口中心 ±60、y≤6 CSS px，
+   *  即可见线段 120×4 的范围；窗口 DIP 尺寸 = CSS × pillScale） */
+  _cursorInPeekZone() {
+    const w = this.pill;
+    if (!w || w.isDestroyed() || !w.isVisible()) return false;
+    try {
+      const c = screen.getCursorScreenPoint();
+      const b = w.getContentBounds();
+      const s = this._pillScale != null ? this._pillScale : this._plan().pillScale;
+      return Math.abs(c.x - (b.x + b.width / 2)) <= 60 * s
+        && c.y >= b.y && c.y <= b.y + 6 * s;
+    } catch { return false; }
   }
 
   /* ---------------- 灵动岛拖动换位 ----------------
