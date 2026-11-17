@@ -1,7 +1,7 @@
 {
   "name": "@haitang-hub/lingyu-island",
   "productName": "灵屿岛",
-  "version": "1.8.2",
+  "version": "1.9.0",
   "description": "灵动岛式文件屏蔽与恢复工具：拖入文件即可屏蔽个人敏感信息，随时还原",
   "main": "src/main/main.js",
   "author": "Haitang-Hub",
@@ -24,8 +24,12 @@
   ],
   "scripts": {
     "start": "electron .",
-    "test": "node test/run-tests.js",
+    "test": "node test/run-tests.js && node test/regression.test.js",
+    "test:core": "node test/run-tests.js",
+    "test:regress": "node test/regression.test.js",
+    "test:real": "node test/real-files.test.js",
     "e2e": "cross-env-shell ISLAND_E2E=1 electron . || ISLAND_E2E=1 electron .",
+    "test:e2e": "cross-env-shell ISLAND_E2E=1 electron . || ISLAND_E2E=1 electron .",
     "dist": "node scripts/dist.js",
     "clean:release": "node scripts/dist.js --clean-only"
   },
@@ -40,6 +44,9 @@
       "assets/**/*",
       "package.json",
       "!test/**"
+    ],
+    "asarUnpack": [
+      "node_modules/pdfjs-dist/legacy/build/**/*"
     ],
     "win": {
       "icon": "assets/icon.png",
@@ -68,9 +75,12 @@
     }
   },
   "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
     "adm-zip": "^0.5.16",
     "electron-updater": "^6.8.11",
-    "iconv-lite": "^0.6.3"
+    "iconv-lite": "^0.6.3",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.10.38"
   },
   "devDependencies": {
     "electron": "^33.2.0",

@@ -42,8 +42,9 @@ const DEFAULT_SETTINGS = {
     phone: true, idCard: true, bank: true, email: true,
     name: true, address: true, passport: true, plate: true,
     caseNo: true, license: true, org: true,
-    // 可选检测项：默认关闭，用户在设置中勾选开启
-    landline: false, im: false, hkmt: false, uscc: false,
+    // 固定电话、统一社会信用代码默认开启；社交账号、港澳台证件仍默认关闭
+    // （im 仅在聊天记录场景按需开启，避免误报普通数字串）
+    landline: true, im: false, hkmt: false, uscc: true,
   },
   clipboardWatch: true,           // 剪贴板自动识别可恢复内容
   autoCollapse: true,             // 灵动岛无操作自动收起为顶部线段
@@ -120,6 +121,8 @@ class Store {
       vaultPlain: path.join(this.dir, 'vault.json'),
       history: path.join(this.dir, 'history.json'),
       appearanceDir: path.join(this.dir, 'appearance'), // 自定义背景文件（islandbg:// 协议映射到这里）
+      // 跨文件已知姓名缓存（只存哈希，按案卷目录区分条目；不放案卷目录内）
+      knownNames: path.join(this.dir, 'mask-names.json'),
     };
   }
 

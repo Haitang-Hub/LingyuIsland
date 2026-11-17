@@ -6,7 +6,7 @@
 const { dialog, shell, clipboard, BrowserWindow, ipcMain, app: electronApp } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const { restoreFile } = require('../core/fileproc');
+const { restoreFile, isPdf, restorePdfFile } = require('../core/fileproc');
 const { restoreText } = require('../core/masker');
 const { BG_IMAGE_MAX, BG_VIDEO_MAX, BG_IMAGE_EXTS, BG_VIDEO_EXTS } = require('../core/appearance');
 const importer = require('./importer');
@@ -165,8 +165,12 @@ function register(ctx) {
     return importer.importAndMask(paths, ctx, e.sender);
   });
 
-  ipc_handle('mask:restore-file', (_e, maskedPath) => {
-    try { return restoreFile(maskedPath, store.vault); }
+  ipc_handle('mask:restore-file', async (_e, maskedPath) => {
+    try {
+      return isPdf(maskedPath)
+        ? await restorePdfFile(maskedPath, store.vault)
+        : restoreFile(maskedPath, store.vault);
+    }
     catch (err) { return { ok: false, path: maskedPath, skipped: 'error', reason: String(err && err.message || err) }; }
   });
 

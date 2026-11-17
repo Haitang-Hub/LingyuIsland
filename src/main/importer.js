@@ -15,7 +15,7 @@ const { shell } = require('electron');
 const {
   collectPaths, maskFile, restoreFile,
   maskedPathOf, restoredPathOf, outputNameOf, detectFileIntent, readFileText,
-  LEGACY_EXTS,
+  LEGACY_EXTS, PDF_EXTS, isPdf, detectPdfIntent, maskPdfFile, restorePdfFile,
 } = require('../core/fileproc');
 const { preconvert } = require('../core/docconvert');
 const { detect } = require('../core/detector');
@@ -76,9 +76,11 @@ async function importAndMask(inputPaths, ctx, sender) {
   if (legacyCount > 0) island.broadcast('mask:converting', { count: legacyCount });
   const conversion = await preconvert(files);
 
-  // 卷宗级姓名预扫：同一批文件里「原告：陈X」这类锚定得到的姓名，在只出现名字的
-  // 其它文书里同样生效（跨文件传播）；单文件 ≤512KB、总量 ≤8MB，避免拖慢大批量导入
+  // 卷宗级姓名/地名预扫：同一批文件里「原告：陈X」这类锚定得到的姓名，在只出现名字的
+  // 其它文书里同样生效（跨文件传播）；已确认地址值同样传播（「石牌垌下房亲邻群」）。
+  // 单文件 ≤512KB、总量 ≤8MB，避免拖慢大批量导入
   const knownNames = new Set();
+  const knownPlaces = new Set();
   let scanBudget = 8 * 1024 * 1024;
   for (const f of files) {
     if (scanBudget <= 0) break;
@@ -90,6 +92,7 @@ async function importAndMask(inputPaths, ctx, sender) {
       scanBudget -= size;
       for (const it of detect(text, { toggles: store.settings.toggles }).items) {
         if (it.type === 'name' && it.confident) knownNames.add(it.value);
+        else if (it.type === 'address' && it.value.length >= 3) knownPlaces.add(it.value);
       }
     } catch { /* 读不出就跳过，不影响主流程 */ }
   }
@@ -101,7 +104,8 @@ async function importAndMask(inputPaths, ctx, sender) {
     }
     let r;
     try {
-      const intent = detectFileIntent(src);
+      const pdf = isPdf(src);
+      const intent = pdf ? await detectPdfIntent(src) : detectFileIntent(src);
       const { out, base, action } = resolveOutputPath(rootNorm, src, intent, conflictPolicy);
 
       // 结果路径恰好等于源文件（如根目录里名为 xxx_屏蔽 却无编码的文件）：
@@ -110,13 +114,18 @@ async function importAndMask(inputPaths, ctx, sender) {
         r = { ok: false, path: src, action: intent, skipped: 'already-masked' };
       } else {
         if (action === 'overwrite') overwritten++;
-        if (intent === 'restore') {
+        if (pdf) {
+          r = intent === 'restore'
+            ? await restorePdfFile(src, store.vault, out)
+            : await maskPdfFile(src, store.vault, store.settings.toggles, out,
+              { knownNames, knownPlaces, namesFile: store.paths.knownNames });
+        } else if (intent === 'restore') {
           r = restoreFile(src, store.vault, out);
-          r.action = 'restore';
         } else {
-          r = maskFile(src, store.vault, store.settings.toggles, out, knownNames);
-          r.action = 'mask';
+          r = maskFile(src, store.vault, store.settings.toggles, out, knownNames,
+            { knownPlaces, namesFile: store.paths.knownNames });
         }
+        r.action = intent;
       }
       r.origPath = src;
       r.outputPath = out;

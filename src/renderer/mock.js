@@ -77,7 +77,7 @@ if (!window.island) {
     { n: '会议录音.mp3', p: '行政/会议录音.mp3', e: 'mp3', s: 2401000, m: now - 13 * 24 * 60 * MIN },
   ];
 
-  const SAMPLE_MASKED = '联系人：张*〔9dbf93〕，手机 138****5678〔6903db〕，身份证 3301……567X〔c81e72〕。性别：男 年龄：35岁。';
+  const SAMPLE_MASKED = '联系人：张*〔姓名·9dbf93〕，手机 138****5678〔手机号·6903db〕，身份证 ……567X〔身份证·c81e72〕。性别：男 年龄：35岁。';
 
   // 浏览器演示用的极简事件总线：让 mask:done 等广播也能触发 UI 反馈
   const listeners = new Map();
@@ -150,10 +150,10 @@ if (!window.island) {
           const text = args[0] || '';
           return {
             text: text
-              .replace(/〔9dbf93〕/g, '张伟')
-              .replace(/〔6903db〕/g, '13812345678')
-              .replace(/〔c81e72〕/g, '330106199001015672'),
-            resolved: (text.match(/〔[0-9a-f]{6,12}〕/g) || []).length,
+              .replace(/〔(?:姓名·)?9dbf93〕/g, '张伟')
+              .replace(/〔(?:手机号·)?6903db〕/g, '13812345678')
+              .replace(/〔(?:身份证·)?c81e72〕/g, '330106199001015672'),
+            resolved: (text.match(/〔(?:[\u4e00-\u9fa5]{1,6}·)?[0-9a-f]{6,12}〕/g) || []).length,
             restored: [], missing: [],
           };
         }

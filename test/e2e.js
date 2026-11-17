@@ -131,7 +131,7 @@ async function run({ store, island, indexer, updater }) {
   });
   check('复制片段还原', () => {
     const t = fs.readFileSync(masked1.maskedPath, 'utf8');
-    const frag = t.match(/138\*\*\*\*5678〔[0-9a-f]+〕/)[0];
+    const frag = t.match(/138\*\*\*\*5678〔(?:[\u4e00-\u9fa5]{1,6}·)?[0-9a-f]+〕/)[0];
     const r = restoreText(frag, store.vault);
     assert.strictEqual(r.text, '13812345678');
   });
@@ -334,7 +334,7 @@ async function run({ store, island, indexer, updater }) {
     const phoneCode = store.vault.ensureCode('phone', '13812345678');
     await wc.executeJavaScript(`(function(){
       switchTab('restore');
-      document.getElementById('restoreInput').value = '138****5678〔${phoneCode}〕';
+      document.getElementById('restoreInput').value = '138****5678〔手机号·${phoneCode}〕';
       runRestore();
     })()`);
     await sleep(500);
@@ -629,7 +629,7 @@ async function run({ store, island, indexer, updater }) {
     // 剪贴板链路：只对「当前复制的那段文本」有效，且只有按钮能触发还原
     const pillWc = island.pill.webContents;
     const clipCode = store.vault.ensureCode('phone', '13812345678');
-    const clipMasked = '联系人手机：138****5678〔' + clipCode + '〕';
+    const clipMasked = '联系人手机：138****5678〔手机号·' + clipCode + '〕';
     const clipPlain = '联系人手机：13812345678';
 
     clipboard.writeText(clipMasked);
@@ -749,7 +749,7 @@ async function run({ store, island, indexer, updater }) {
     const s2 = new Store();
     s2.init();
     assert.ok(s2.vault.size > 0, '重载后映射库应有内容: ' + s2.vault.size);
-    const r = restoreText('138****5678〔' + store.vault.ensureCode('phone', '13812345678') + '〕', s2.vault);
+    const r = restoreText('138****5678〔手机号·' + store.vault.ensureCode('phone', '13812345678') + '〕', s2.vault);
     assert.strictEqual(r.text, '13812345678');
   });
 

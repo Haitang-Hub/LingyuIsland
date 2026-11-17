@@ -8,9 +8,9 @@
  * 在节点边界处断裂 —— 这正是身份证号、住址、人名整片漏检的根因。
  *
  * 本模块把**同一段落（w:p / a:p / si / c / row）内**的文本节点无缝拼成一段逻辑文本，
- * 让检测看到完整原文；再把「原文区间 → 屏蔽值」的编辑映射回各节点：
- * 跨节点的实体，屏蔽值整体落在第一个被覆盖的节点，其余节点清空，
- * 拼接后的可见文本与直接对整段做 maskText 完全一致，且绝不改动标签结构。
+ * 让检测看到完整原文；再把「原文区间 → 屏蔽值」的编辑映射回各节点。
+ * 跨节点实体的拆分由回调层负责（见 masker.maskEdits 的 boundaries 参数）：
+ * 每个节点保留自己那份屏蔽值，Office 往返才能逐字节一致。
  */
 
 /** 只匹配 >文本< 之间的内容（标签属性里的 > 不会被误判） */
@@ -108,7 +108,9 @@ function renderNode(n) {
  * 对 XML 的每个逻辑块执行 transform，再把编辑写回原 XML。
  *
  * @param {string} xml
- * @param {(blockText:string) => Array<{start,end,replacement}> | {edits:Array,count?:number}} transform
+ * @param {(blockText:string, boundaries?:number[]) => Array<{start,end,replacement}> | {edits:Array,count?:number}} transform
+ *   第二个参数为块内各文本节点的起始偏移（首个恒为 0），
+ *   屏蔽回调可据此把跨节点实体拆成每节点一份独立编码（见 masker.maskEdits）。
  * @returns {{xml:string, count:number}} count 为编辑项数（屏蔽项 / 还原项）
  */
 function transformXmlText(xml, transform) {
@@ -119,7 +121,7 @@ function transformXmlText(xml, transform) {
 
   for (const b of blocks) {
     if (!b.text) continue;
-    const r = transform(b.text);
+    const r = transform(b.text, b.nodes.map((n) => n.off));
     const edits = Array.isArray(r) ? r : (r && r.edits) || [];
     count += (r && Number.isFinite(r.count)) ? r.count : edits.length;
     for (const e of edits) {

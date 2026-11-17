@@ -54,6 +54,7 @@ const vault = new Vault();
  * 跨平台：Windows 用 F:\Law\output\Chuanjianling，macOS 可 export LINGYU_SAMPLES=... 指定。
  */
 const SRC = process.env.LINGYU_SAMPLES || 'F:\\Law\\output\\Chuanjianling';
+fs.mkdirSync(DIR, { recursive: true }); // 同步目标目录可随仓库清理，运行时自动重建
 try {
   if (fs.existsSync(SRC)) {
     for (const f of fs.readdirSync(DIR)) {
@@ -178,24 +179,25 @@ check('同一身份证号跨文件编码一致', () => {
 });
 
 check('从屏蔽文书复制的片段可还原', () => {
-  // 遍历所有屏蔽 docx，找到含手机号或身份证遮罩的样本
-  let phoneMasked = null, idMasked = null;
+  // 遍历所有屏蔽 docx，找到含手机号或身份证遮罩的样本。
+  // 注意：老 .doc 转换的 docx 常把号码拆进多个 run，跨 run 实体按节点拆分
+  // 独立编码（裸码），因此还要接受裸编码片段。
+  let phoneMasked = null, idMasked = null, bareMasked = null;
   for (const x of filesWithPII.filter((x) => /\.docx$/i.test(x))) {
     const maskedPath = path.join(DIR, path.basename(x, '.docx') + '_屏蔽.docx');
     if (!fs.existsSync(maskedPath)) continue;
     const maskedText = Object.values(docxTexts(maskedPath)).map(xmlToText).join('\n');
-    phoneMasked ||= maskedText.match(/\d{3}\*{4}\d{4}〔[0-9a-f]{6,12}〕/);
-    idMasked ||= maskedText.match(/[0-9Xx]{4}……[0-9Xx]{4}〔[0-9a-f]{6,12}〕/);
-    if (phoneMasked && idMasked) break;
+    phoneMasked ||= maskedText.match(/\d{3}\*{4}\d{4}〔(?:[\u4e00-\u9fa5]{1,6}·)?[0-9a-f]{6,12}〕/);
+    idMasked ||= maskedText.match(/[0-9Xx]{0,4}……[0-9Xx]{0,4}〔(?:[\u4e00-\u9fa5]{1,6}·)?[0-9a-f]{6,12}〕/);
+    bareMasked ||= maskedText.match(/〔(?:[\u4e00-\u9fa5]{1,6}·)?[0-9a-f]{6,12}〕/);
+    if (phoneMasked && idMasked && bareMasked) break;
   }
-  assert.ok(phoneMasked || idMasked, '应存在被屏蔽的手机号或身份证');
-  if (phoneMasked) {
-    const r = restoreText(phoneMasked[0], vault);
-    assert.strictEqual(r.resolved, 1, '手机号片段应可还原');
-  }
-  if (idMasked) {
-    const r = restoreText(idMasked[0], vault);
-    assert.strictEqual(r.resolved, 1, '身份证片段应可还原');
+  assert.ok(phoneMasked || idMasked || bareMasked, '应存在被屏蔽的手机号或身份证（含裸编码片段）');
+  for (const [frag, label] of [[phoneMasked, '手机号片段'], [idMasked, '身份证片段'], [bareMasked, '裸编码片段']]) {
+    if (!frag) continue;
+    const r = restoreText(frag[0], vault);
+    assert.strictEqual(r.resolved, 1, label + '应可还原');
+    break;
   }
 });
 
