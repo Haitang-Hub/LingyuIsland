@@ -6,22 +6,21 @@
  *  - 前后保留部分原文 + 类型标签，让用户「能判断出是什么内容」
  *  - 〔〕内 6~12 位十六进制编码（可带「类型·」前缀）是找回原文的钥匙：
  *    只要编码未被改动（哪怕从文件里复制到别处），都能还原出真实内容
- *  - 同一真实值在同一映射库中永远对应同一个编码
+ *  - 同一真实值在同一映射库中对应同一编码；跨文本节点实体因还原需要
+ *    按原始分段回填，分段长度参与编码键（见 maskEdits 的 boundaries）。
  *
- * 可读性约定（v1.9）：
+ * 可读性约定：
  *  - 编码括号内嵌「类型·」标签（〔姓名·ab12cd〕），脱敏产物一眼可读；
  *    还原时标签随编码一并剥除。旧格式（无标签）的屏蔽文件照常解析。
- *  - 跨排版 run 的实体片段（见 maskEdits 的 boundaries）无法呈现完整
- *    修饰形态，输出「〔类型·编码〕」占位，同样可读、可还原。
+ *  - 跨排版 run 的实体也按完整屏蔽形态输出（「江苏****507室〔地址·编码〕」），
+ *    屏蔽值落在首节点、其余节点清空；vault 记录原文分段长度，还原时逐段回填。
  *
- * v1.5 规则重构：
- *  - 地址 / 机构名只保留省级行政区的前 2 字作前缀，其余信息（字号、
- *    县市镇村、门牌）一个字都不留；没有省级前缀时直接用「……」开头，
- *    不插入「某地 / 某某」之类的占位词。旧实现保留字号前 2 字，导致
- *    「陈阿满是广东雷阳律师事务所」被屏蔽成「陈阿……律师事务所」——
- *    人名首字反而残留在脱敏产物里。
- *  - 因为前缀变成变长（2 字 或 0 字），还原时按 vault 里的原值判断当初
- *    有没有前缀（见 decorFor），避免泛型 [\u4e00-\u9fa5]{2} 误吞正文汉字。
+ * 屏蔽形态（统一按类型区分）：
+ *  - 身份证：前 6 位 + ****
+ *  - 银行卡 / 执业证号 / 统一社会信用代码：**** + 尾 4 位
+ *  - 地址：前 2 字 + **** + 尾 4 字（短值无尾段）
+ *  - 机构名：按长度分档——6字 前2+**+尾2 / 7字 前2+***+尾2 / 8字 前2+****+尾2 / 9字+ 前2+****+尾4
+ *  - 案号：前 2 字 + **** + 号
  *  - 导出 maskEdits / restoreEdits：把「算出编辑区间」与「应用到文本」拆开，
  *    Office XML 段落级拼接管道可以复用同一套判定，再映射回各个 <w:t> 节点。
  */
@@ -62,16 +61,8 @@ function findOrgSuffix(value) {
   return ORG_SUFFIXES.slice().sort((a, b) => b.length - a.length).find((s) => value.endsWith(s)) || '';
 }
 
-// 身份证 / 银行卡保留位数：默认收紧为「只保留末尾 2 位」。
-// 首尾同时可见（旧的各 4 位）会让身份证前 6 位行政区划 + 出生年段
-// 与银行卡 BIN 段进入脱敏产物，配合其他文档可拼合还原；改为只留尾段后
-// 「首尾同时可见」不再出现。还原正则仍兼容 0~4 位（历史屏蔽文件可还原）。
-const KEEP_DEFAULT = 2;
-function normalizeKeep(keep) {
-  if (!keep || typeof keep !== 'object') return { idCard: KEEP_DEFAULT, bank: KEEP_DEFAULT };
-  const one = (v) => Number.isInteger(v) ? Math.max(0, Math.min(4, v)) : KEEP_DEFAULT;
-  return { idCard: one(keep.idCard), bank: one(keep.bank) };
-}
+// 「保留位数」已统一写入 buildMasked 各类型分支（见 switch），
+// 不再暴露 keep 参数，也不再做前后段同时可见的配置选项。
 
 // 省级行政区 / 直辖市：地址和机构名只保留这一级别，县市镇村一律不出现在脱敏产物里
 const PROVINCE_RE = /^(?:北京|天津|上海|重庆|河北|山西|辽宁|吉林|黑龙江|江苏|浙江|安徽|福建|江西|山东|河南|湖北|湖南|广东|广西|海南|四川|贵州|云南|陕西|甘肃|青海|宁夏|新疆|西藏|内蒙古|香港|澳门|台湾)/;
@@ -128,9 +119,17 @@ class Vault {
     this.salt = typeof salt === 'string' ? salt : crypto.randomBytes(8).toString('hex');
   }
 
-  /** 为 (type,value) 取得稳定编码；碰撞时自动加长 */
-  ensureCode(type, value) {
-    const key = type + '\x00' + value;
+  /**
+   * 为 (type,value) 取得稳定编码；碰撞时自动加长。
+   * @param {number[]} [splitLens] 跨文本节点实体的原始分段长度。
+   *   同一值被 Word 拆成不同 run 数量时，还原必须按各自的分段把原文放回
+   *   原来的节点，否则 Office 往返无法逐字节一致；因此分段长度参与编码键。
+   */
+  ensureCode(type, value, splitLens = null) {
+    const lens = Array.isArray(splitLens) && splitLens.length > 1
+      ? splitLens.map((n) => Math.max(0, n | 0))
+      : null;
+    const key = type + '\x00' + value + (lens ? '\x00#' + lens.join(',') : '');
     const exist = this.valueMap.get(key);
     if (exist) return exist;
 
@@ -140,7 +139,7 @@ class Vault {
       const code = digest.slice(0, len);
       const holder = this.codeMap.get(code);
       if (!holder) {
-        this.codeMap.set(code, { v: value, t: type });
+        this.codeMap.set(code, lens ? { v: value, t: type, l: lens } : { v: value, t: type });
         this.valueMap.set(key, code);
         return code;
       }
@@ -151,14 +150,14 @@ class Vault {
     }
     // 兜底：12 位仍碰撞（不可能发生）→ 追加随机段
     const code = digest.slice(0, 12) + crypto.randomBytes(2).toString('hex');
-    this.codeMap.set(code, { v: value, t: type });
+    this.codeMap.set(code, lens ? { v: value, t: type, l: lens } : { v: value, t: type });
     this.valueMap.set(key, code);
     return code;
   }
 
   lookup(code) {
     const hit = this.codeMap.get(code.toLowerCase());
-    return hit ? { value: hit.v, type: hit.t } : null;
+    return hit ? { value: hit.v, type: hit.t, lens: hit.l || null } : null;
   }
 
   get size() { return this.codeMap.size; }
@@ -173,8 +172,12 @@ class Vault {
     if (data && data.codes) {
       for (const [code, meta] of Object.entries(data.codes)) {
         if (meta && typeof meta.v === 'string' && typeof meta.t === 'string') {
-          vault.codeMap.set(code, { v: meta.v, t: meta.t });
-          vault.valueMap.set(meta.t + '\x00' + meta.v, code);
+          const lens = Array.isArray(meta.l) && meta.l.length > 1
+            ? meta.l.map((n) => Math.max(0, n | 0)) : null;
+          vault.codeMap.set(code, lens
+            ? { v: meta.v, t: meta.t, l: lens } : { v: meta.v, t: meta.t });
+          const key = meta.t + '\x00' + meta.v + (lens ? '\x00#' + lens.join(',') : '');
+          vault.valueMap.set(key, code);
         }
       }
     }
@@ -186,8 +189,7 @@ class Vault {
 /* 屏蔽值构造：保留首尾特征 + 内嵌编码                                   */
 /* ------------------------------------------------------------------ */
 
-function buildMasked(type, value, code, keep = null) {
-  const keepCfg = normalizeKeep(keep);
+function buildMasked(type, value, code) {
   let body;
   switch (type) {
     case 'phone': { // 138****5678
@@ -195,12 +197,14 @@ function buildMasked(type, value, code, keep = null) {
       body = `${digits.slice(0, 3)}****${digits.slice(-4)}`;
       break;
     }
-    case 'idCard': { // ……67X：默认只保留末尾 2 位（首段行政区划/出生日期不外泄）
-      body = `……${keepCfg.idCard ? value.slice(-keepCfg.idCard) : ''}`;
+    case 'idCard': { // 330106****：前6位 + ****（行政区划 / 出生日期段不外泄）
+      const digits = value.replace(/\D/g, '');
+      body = `${digits.slice(0, 6)}****`;
       break;
     }
-    case 'bank': { // ******34：默认只保留末尾 2 位（BIN 段不外泄）
-      body = `******${keepCfg.bank ? value.slice(-keepCfg.bank) : ''}`;
+    case 'bank': { // ****3349：**** + 尾4（BIN 段不外泄）
+      const digits = value.replace(/\D/g, '');
+      body = `****${digits.slice(-4)}`;
       break;
     }
     case 'email': { // z***@example.com
@@ -211,8 +215,8 @@ function buildMasked(type, value, code, keep = null) {
       body = `${head}***${domain}`;
       break;
     }
-    case 'passport': // E******5
-      body = `${value[0]}******${value.slice(-1)}`;
+    case 'passport': // E****5
+      body = `${value[0]}****${value.slice(-1)}`;
       break;
     case 'plate': // 京A***5
       body = `${value.slice(0, 2)}***${value.slice(-1)}`;
@@ -222,20 +226,36 @@ function buildMasked(type, value, code, keep = null) {
       body = chars.length <= 2 ? `${chars[0]}*` : `${chars[0]}*${chars[chars.length - 1]}`;
       break;
     }
-    case 'address': { // 某村 / 浙江……某区：留末级层级词提示类型，具体名称与门牌全隐去
-      const level = addressLevel(value);
-      const head = safeHead(value, '');
-      body = `${head ? head + '……' : ''}某${level}`;
+    case 'address': { // 前2 + **** + 尾4（短值退化为前2 + ****）
+      const chars = [...value];
+      if (chars.length <= 6) {
+        body = chars.slice(0, 2).join('') + '****';
+      } else {
+        body = chars.slice(0, 2).join('') + '****' + chars.slice(-4).join('');
+      }
       break;
     }
-    case 'caseNo': { // （2020）……号：年份括号统一输出圆括号，保证还原 decor（FULL.caseNo）可匹配
+    case 'caseNo': { // 前2 + **** + 号（前2取自年份括号前的前缀，否则取括号后首个中文词的前2字）
       const compact = value.replace(/\s+/g, '');
       const y = /[（(\[【［]((?:19|20)\d{2})[）)\]】］]/.exec(compact);
-      body = `${y ? `（${y[1]}）` : ''}……号`;
+      let head = '';
+      if (y) {
+        const beforeYear = compact.slice(0, y.index);
+        if (beforeYear.length > 0) {
+          head = beforeYear.slice(0, 2);
+        } else {
+          const afterBracket = compact.slice(y.index + y[0].length);
+          const m = /^[\u4e00-\u9fa5]{1,2}/.exec(afterBracket);
+          head = m ? m[0].slice(0, 2) : afterBracket.slice(0, 2);
+        }
+      } else {
+        head = compact.slice(0, 2);
+      }
+      body = `${head}****号`;
       break;
     }
-    case 'license': // ……7921：只保留末 4 位（首段执业地区码不外泄，与身份证同一「首段不可见」原则）
-      body = `……${value.slice(-4)}`;
+    case 'license': // ****3456：**** + 尾4（执业地区码不外泄）
+      body = `****${value.slice(-4)}`;
       break;
     case 'landline': { // 075****5678：按数字位对齐手机号风格
       const digits = value.replace(/\D/g, '');
@@ -245,19 +265,25 @@ function buildMasked(type, value, code, keep = null) {
     case 'im': // we***89：社交账号保留首尾各 2 字符
       body = `${value.slice(0, 2)}***${value.slice(-2)}`;
       break;
-    case 'hkmt': // H******8：同护照风格
-      body = `${value[0]}******${value.slice(-1)}`;
+    case 'hkmt': // H****8：同护照风格
+      body = `${value[0]}****${value.slice(-1)}`;
       break;
-    case 'uscc': // ……WXYZ：只保留末 4 位（首段登记部门码不外泄）
-      body = `……${value.slice(-4)}`;
+    case 'uscc': // ****QX1T：**** + 尾4（登记部门码不外泄）
+      body = `****${value.slice(-4)}`;
       break;
-    case 'org': { // ……有限公司 / 安徽……有限公司 / 某镇……卫生院：字号一个字都不留
-      const suffix = findOrgSuffix(value);
-      const brand = suffix ? value.slice(0, -suffix.length) : value;
-      const level = orgLevelWord(brand);
-      body = level
-        ? `某${level}……${suffix || brand.slice(-2)}`
-        : `${safeHead(brand, '')}……${suffix || brand.slice(-2)}`;
+    case 'org': { // 6字：前2+**+尾2；7字：前2+***+尾2；8字：前2+****+尾2；9字+：前2+****+尾4（不足6字走旧兜底）
+      const chars = [...value];
+      if (chars.length === 6) {
+        body = chars.slice(0, 2).join('') + '**' + chars.slice(-2).join('');
+      } else if (chars.length === 7) {
+        body = chars.slice(0, 2).join('') + '***' + chars.slice(-2).join('');
+      } else if (chars.length === 8) {
+        body = chars.slice(0, 2).join('') + '****' + chars.slice(-2).join('');
+      } else if (chars.length >= 9) {
+        body = chars.slice(0, 2).join('') + '****' + chars.slice(-4).join('');
+      } else {
+        body = chars.slice(0, 2).join('') + '****';
+      }
       break;
     }
     default: // 兜底：首尾各 1 字符
@@ -289,8 +315,8 @@ function applyEdits(text, edits) {
  * 只计算屏蔽编辑，不改文本。Office XML 管道据此把编辑映射回各文本节点。
  *
  * options.boundaries：块内各文本节点的起始偏移（由 xmltext.transformXmlText 传入）。
- * 实体跨节点时必须按边界拆成多段、各自独立编码：屏蔽值整体塞进首节点会让
- * 其余节点的原文在屏蔽时被清空、还原时无法逐字节复原（跨 run 往返不一致）。
+ * 实体跨节点时仍按完整屏蔽形态输出，把原始分段长度记入编码；还原时
+ * xmltext 依据这些长度把原文逐段回填到原节点，保证跨 run 往返逐字节一致。
  * @returns {{edits:Array, items:Array, counts:Object}}
  */
 function maskEdits(text, vault, options = {}) {
@@ -304,23 +330,23 @@ function maskEdits(text, vault, options = {}) {
       ? bounds.filter((b) => b > it.start && b < it.end).sort((a, b) => a - b)
       : null;
     if (inner && inner.length) {
-      // 跨节点实体：按节点边界拆成片段，各自独立编码。
-      // 片段用「类型标签 + 编码」占位：buildMasked 的修饰形态按「完整值」
-      // 设计（如案号的「（2026）……号」），片段缺头少尾时修饰部分要么凭空
-      // 捏造、要么还原后残留；标签占位走还原的括号整段兜底，可读且可
-      // 逐字节精确复原。
+      // 跨文本节点实体：整条按正常屏蔽形态输出（如「江苏****507室〔地址·xxx〕」），
+      // 屏蔽值整体落在首个节点，其余节点清空；同时把原始分段长度记进编码，
+      // 还原时再按这些长度把原文逐段放回原节点，保证 Office 往返逐字节一致。
       const cuts = [it.start, ...inner, it.end];
-      for (let k = 0; k < cuts.length - 1; k++) {
-        const s = cuts[k];
-        const e = cuts[k + 1];
-        const piece = text.slice(s, e);
-        edits.push({ start: s, end: e, replacement: codeBracket(it.type, vault.ensureCode(it.type, piece)) });
-      }
+      const lens = [];
+      for (let k = 0; k < cuts.length - 1; k++) lens.push(cuts[k + 1] - cuts[k]);
+      const code = vault.ensureCode(it.type, it.value, lens);
+      edits.push({
+        start: it.start,
+        end: it.end,
+        replacement: buildMasked(it.type, it.value, code),
+      });
     } else {
       edits.push({
         start: it.start,
         end: it.end,
-        replacement: buildMasked(it.type, it.value, vault.ensureCode(it.type, it.value), options.keep),
+        replacement: buildMasked(it.type, it.value, vault.ensureCode(it.type, it.value)),
       });
     }
   }
@@ -330,22 +356,23 @@ function maskEdits(text, vault, options = {}) {
 /** 各类型屏蔽值「修饰部分」的形状（用于连同修饰一起整体还原） */
 const FULL = {
   phone: '\\d{3}\\*{4}\\d{4}',
-  // 位数可配置（0~4）：省略号 / 星号锚点固定，两侧数字放宽到 0~4 位
-  idCard: '[0-9Xx]{0,4}……[0-9Xx]{0,4}',
-  bank: '\\d{0,4}\\*{6}\\d{0,4}',
+  // idCard 新形态: 前6位数字 + 4 个 *；旧格式(兼容): 6 个 * 或 ……[尾0-4位]
+  idCard: '(?:[0-9Xx]{6}\\*{4,6}|[0-9Xx]{0,4}……[0-9Xx]{0,4})',
+  // bank 新形态: 4 个 * + 尾4位；旧格式(兼容): 6 个 * + 尾0-4位
+  bank: '\\*{4,6}[0-9Xx]{2,4}',
   email: '.\\*{3}@[^〔〕\\s]{1,80}',
-  passport: '[A-Za-z]\\*{6}[0-9A-Za-z]',
+  passport: '[A-Za-z]\\*{4,6}[0-9A-Za-z]',
   plate: '[\\u4e00-\\u9fa5][A-HJ-NP-Z]\\*{3}[0-9A-Za-z挂学警港澳]',
   name: '[\\u4e00-\\u9fa5]\\*[\\u4e00-\\u9fa5]?',
-  // 地址 / 机构名的前缀是变长的（省级 2 字或无前缀），不能用固定 2 字正则，
-  // 否则会把正文汉字吞进屏蔽值。这两类改由 decorFor() 按原值精确重建。
-  caseNo: '[（(]\\d{4}[）)]……号',
-  // 证号 / 信用代码现为仅尾段（{0,4}），同时兼容旧版「首尾各 4 位」屏蔽文件
-  license: '[A-Za-z0-9]{0,4}……[A-Za-z0-9]{0,4}',
+  // caseNo 新形态: 0-2字符前缀 + 4 个 * + 号；旧格式(兼容): 6 个 * 或 (年份)……号
+  caseNo: '(?:[\\u4e00-\\u9fa5]{0,2}\\*{4,6}号|[（(]\\d{4}[）)]……号)',
+  // license 新形态: 4 个 * + 尾4；旧格式(兼容): 6 个 * 或 头0-4……尾0-4
+  license: '(?:\\*{4,6}[A-Za-z0-9]{4}|[A-Za-z0-9]{0,4}……[A-Za-z0-9]{0,4})',
   landline: '\\d{3}\\*{4}\\d{4}',
   im: '.{2}\\*{3}.{2}',
-  hkmt: '[A-Za-z]\\*{6}[0-9A-Za-z]',
-  uscc: '[0-9A-HJ-NPQRTUWXY]{0,2}……[0-9A-HJ-NPQRTUWXY]{0,4}',
+  hkmt: '[A-Za-z]\\*{4,6}[0-9A-Za-z]',
+  // uscc 新形态: 4 个 * + 尾4；旧格式(兼容): 6 个 * 或 ……尾4
+  uscc: '(?:\\*{4,6}|……)[0-9A-HJ-NPQRTUWXY]{4}',
 };
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -359,25 +386,73 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 function decorFor(hit) {
   const v = String(hit.value || '');
   if (hit.type === 'address') {
-    // 新形态带层级提示（某村/某区/某路…），旧形态无提示（……）。两种都匹配，
-    // 保证历史文件（v1.5.2 之前用旧形态屏蔽）仍能被新版本正确还原。
+    // 新形态：前2 + **** + 尾4（短值退化为前2 + ****）
+    // 前缀按原值精确生成：首字可能是字母/数字（如「A市B镇C村」），
+    // 用泛型汉字类会匹配失败，导致还原时前缀残留在正文里。
+    const chars = [...v];
+    const headRe = escapeRe(chars.slice(0, Math.min(2, chars.length)).join(''));
+    const newSimple = chars.length <= 6
+      ? `${headRe}\\*{4,6}`
+      : `${headRe}\\*{4,6}.{4}`;
+    // 旧形态：层级提示（某村/某区…）或纯省略号，均保留兼容
     const level = addressLevel(v);
-    const head = safeHead(v, '');
-    const newDecor = (head ? '[\\u4e00-\\u9fa5]{2}……' : '') + `某${level}`;
-    const oldDecor = head ? '[\\u4e00-\\u9fa5]{2}……' : '……';
-    return `(?:${newDecor}|${oldDecor})`;
+    const head = safeHead(v, '');    const oldLevelDecor = (head ? '[\\u4e00-\\u9fa5]{2}……' : '') + `某${level}`;
+    const oldPlainDecor = head ? '[\\u4e00-\\u9fa5]{2}……' : '……';
+    return `(?:${newSimple}|${oldLevelDecor}|${oldPlainDecor})`;
   }
   if (hit.type === 'org') {
+    // 新形态按原值长度分档：6字 前2+**+尾2；7字 前2+***+尾2；8字 前2+****+尾2；
+    // 9字+ 前2+****+尾4（前缀同样按原值精确生成，兼容字母/数字开头）
+    const chars = [...v];
+    const head = escapeRe(chars.slice(0, Math.min(2, chars.length)).join(''));
+    const n = chars.length;
+    const newDecor = n === 6 ? `${head}\\*{2}.{2}`
+      : n === 7 ? `${head}\\*{3}.{2}`
+      : n === 8 ? `${head}\\*{4}.{2}`
+      : n >= 9 ? `${head}\\*{4}.{4}`
+      : `${head}\\*{4,6}`;
+    // 旧形态（兼容）：≤6字 前2+****；>6字 前2+****+尾4；省级前缀/层级词 + …… + 后缀
+    const oldShort = `${head}\\*{4,6}`;
+    const oldLong = `${head}\\*{4,6}.{4}`;
     const suffix = findOrgSuffix(v);
     const brand = suffix ? v.slice(0, -suffix.length) : v;
     const level = orgLevelWord(brand);
-    // 新形态「某镇……卫生院」与旧形态「广东……有限公司」都接受：
-    // 历史文件（旧版本用省级前缀屏蔽）仍能按原样还原。
-    const head = level
+    const oldHead = level
       ? '(?:某[\\u4e00-\\u9fa5]|[\\u4e00-\\u9fa5]{2})?'
       : (safeHead(brand, '') ? '[\\u4e00-\\u9fa5]{2}' : '');
-    const tail = suffix ? `(?:${ORG_SUFFIX_ALT})` : '[\\u4e00-\\u9fa5]{2}';
-    return head + '……' + tail;
+    const oldTail = suffix ? `(?:${ORG_SUFFIX_ALT})` : '[\\u4e00-\\u9fa5]{2}';
+    const oldDecor = oldHead + '……' + oldTail;
+    return `(?:${newDecor}|${oldShort}|${oldLong}|${oldDecor})`;
+  }
+  if (hit.type === 'caseNo') {
+    // 新形态：头 N 字符 + **** + 号（N 精确来自 buildMasked 的 head 长度）
+    const compact = v.replace(/\s+/g, '');
+    const y = /[（(\[【［]((?:19|20)\d{2})[）)\]】］]/.exec(compact);
+    let head = '';
+    if (y) {
+      const beforeYear = compact.slice(0, y.index);
+      if (beforeYear.length > 0) {
+        head = beforeYear.slice(0, 2);
+      } else {
+        const afterBracket = compact.slice(y.index + y[0].length);
+        const m = /^[\u4e00-\u9fa5]{1,2}/.exec(afterBracket);
+        head = m ? m[0].slice(0, 2) : afterBracket.slice(0, 2);
+      }
+    } else {
+      head = compact.slice(0, 2);
+    }
+    // head 里含中文时用精确位数，否则用 [^〔〕\s]{N} 匹配
+    const chineseCount = [...head].filter((c) => /[\u4e00-\u9fa5]/.test(c)).length;
+    const escapedHead = escapeRe(head);
+    const headRe = head
+      ? (chineseCount === [...head].length
+          ? `[\\u4e00-\\u9fa5]{${head.length}}`
+          : escapedHead)
+      : '';
+    const newDecor = `${headRe}\\*{4,6}号`;
+    // 旧形态（兼容）：(年份)……号
+    const oldDecor = '[（(]\\d{4}[）)]……号';
+    return `(?:${newDecor}|${oldDecor})`;
   }
   return FULL[hit.type] || '';
 }
@@ -413,7 +488,10 @@ function restoreEdits(text, vault) {
       if (decor) {
         const fullRe = new RegExp(decor + escapeRe(full), 'g');
         while ((m = fullRe.exec(text)) !== null) {
-          edits.push({ start: m.index, end: m.index + m[0].length, replacement: hit.value });
+          edits.push({
+            start: m.index, end: m.index + m[0].length,
+            replacement: hit.value, partLens: hit.lens,
+          });
           matched = true;
           if (m.index === fullRe.lastIndex) fullRe.lastIndex++;
         }
@@ -421,7 +499,10 @@ function restoreEdits(text, vault) {
       if (!matched) {
         let p = 0;
         while ((p = text.indexOf(full, p)) !== -1) {
-          edits.push({ start: p, end: p + full.length, replacement: hit.value });
+          edits.push({
+            start: p, end: p + full.length,
+            replacement: hit.value, partLens: hit.lens,
+          });
           p += full.length;
         }
       }
@@ -485,5 +566,5 @@ function countCodes(text) {
 module.exports = {
   Vault, buildMasked, maskText, restoreText, hasCodes, countCodes,
   maskEdits, restoreEdits, applyEdits, cleanEdits, safeHead,
-  normalizeKeep, KEEP_DEFAULT, CODE_RE, CODE_LABEL, TYPE_LABEL, codeBracket,
+  CODE_RE, CODE_LABEL, TYPE_LABEL, codeBracket,
 };

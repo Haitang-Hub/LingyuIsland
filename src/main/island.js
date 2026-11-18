@@ -35,6 +35,8 @@ class Island {
     this.onPillStateChange = null;
     // 灵动岛水平位置（中心相对工作区宽度的比例）；main.js 启动时从外观设置注入
     this.pillX = 0.5;
+    // 字体档位（0.85~1.3）：胶囊宽度按其等比伸缩；ipc.js 设置变更时同步
+    this.fontScale = 1;
     // 收起态兜底唤回：光标进入命中区的停留计时起点（离开命中区即清零）
     this._peekEnterAt = 0;
     // 收起瞬间光标就停在命中区（自动收起/右键隐藏时光标未动）→ 抑制兜底展开，
@@ -55,6 +57,7 @@ class Island {
       panelH: this.panelSize.h,
       collapsed: this.pillCollapsed,
       pillX: this.pillX,
+      fontScale: this.fontScale,
     });
   }
 
@@ -140,6 +143,13 @@ class Island {
 
   setPanelSize(size) {
     this.panelSize = normalizePanelSize(size, this.panelSize);
+    this.layout();
+  }
+
+  /** 字体档位变化 → 胶囊宽度按档位等比伸缩并立即重排（0.85~1.3，非法值回退 1） */
+  setPillFontScale(v) {
+    const n = Number(v);
+    this.fontScale = Number.isFinite(n) ? Math.min(1.3, Math.max(0.85, n)) : 1;
     this.layout();
   }
 

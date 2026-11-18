@@ -15,10 +15,10 @@ const { shell } = require('electron');
 const {
   collectPaths, maskFile, restoreFile,
   maskedPathOf, restoredPathOf, outputNameOf, detectFileIntent, readFileText,
-  LEGACY_EXTS, PDF_EXTS, isPdf, detectPdfIntent, maskPdfFile, restorePdfFile,
+  LEGACY_EXTS, PDF_EXTS, isPdf, detectPdfIntent, maskPdfFile, restorePdfFile, readPdfText,
 } = require('../core/fileproc');
 const { preconvert } = require('../core/docconvert');
-const { detect } = require('../core/detector');
+const { collectEntities, createEntities } = require('../core/entities');
 const { isInsideRoot, resolveConflictName } = require('../core/imports');
 const { TYPE_LABEL } = require('../core/masker');
 
@@ -76,26 +76,24 @@ async function importAndMask(inputPaths, ctx, sender) {
   if (legacyCount > 0) island.broadcast('mask:converting', { count: legacyCount });
   const conversion = await preconvert(files);
 
-  // 卷宗级姓名/地名预扫：同一批文件里「原告：陈X」这类锚定得到的姓名，在只出现名字的
-  // 其它文书里同样生效（跨文件传播）；已确认地址值同样传播（「石牌垌下房亲邻群」）。
-  // 单文件 ≤512KB、总量 ≤8MB，避免拖慢大批量导入
-  const knownNames = new Set();
-  const knownPlaces = new Set();
+  // 第一遍只看结构并收集实体，第二遍把同一张实体表套用到全案卷。
+  // 文件间放入分隔块，避免上一文件的表头误配下一文件的首个单元格。
+  const scanBlocks = [];
   let scanBudget = 8 * 1024 * 1024;
   for (const f of files) {
     if (scanBudget <= 0) break;
     try {
       const size = fs.statSync(f).size;
       if (size > 512 * 1024) continue;
-      const text = readFileText(f);
+      const text = isPdf(f) ? await readPdfText(f) : readFileText(f);
       if (!text) continue;
       scanBudget -= size;
-      for (const it of detect(text, { toggles: store.settings.toggles }).items) {
-        if (it.type === 'name' && it.confident) knownNames.add(it.value);
-        else if (it.type === 'address' && it.value.length >= 3) knownPlaces.add(it.value);
-      }
+      scanBlocks.push(...text.split(/\r?\n/), '\u0000');
     } catch { /* 读不出就跳过，不影响主流程 */ }
   }
+  const knownEntities = scanBlocks.length
+    ? collectEntities(scanBlocks, { toggles: store.settings.toggles })
+    : createEntities();
 
   for (let i = 0; i < files.length; i++) {
     const src = files[i];
@@ -118,12 +116,12 @@ async function importAndMask(inputPaths, ctx, sender) {
           r = intent === 'restore'
             ? await restorePdfFile(src, store.vault, out)
             : await maskPdfFile(src, store.vault, store.settings.toggles, out,
-              { knownNames, knownPlaces, namesFile: store.paths.knownNames });
+              { knownEntities, namesFile: store.paths.knownNames });
         } else if (intent === 'restore') {
           r = restoreFile(src, store.vault, out);
         } else {
-          r = maskFile(src, store.vault, store.settings.toggles, out, knownNames,
-            { knownPlaces, namesFile: store.paths.knownNames });
+          r = maskFile(src, store.vault, store.settings.toggles, out, undefined,
+            { knownEntities, namesFile: store.paths.knownNames });
         }
         r.action = intent;
       }
@@ -157,7 +155,11 @@ async function importAndMask(inputPaths, ctx, sender) {
     }
     results.push(r);
   }
-  if (vaultDirty) store.persistVault();
+  if (vaultDirty) {
+    store.persistVault();
+    // 本批新增了映射编码 → 通知界面刷新「映射 N 条」，无需重启才能看到
+    island.broadcast('vault:changed', { size: store.vault.size });
+  }
 
   const restoreResults = results.filter((r) => r.action === 'restore');
   const done = {

@@ -762,6 +762,20 @@ function syncRangeFill(input) {
 }
 
 /** 应用外观到当前窗口（面板与胶囊共用同一套变量名） */
+/** 字体大小生效：标准及以上只缩文字（布局与控件尺寸不动）；
+ *  「小」档整面等比压缩——zoom 把文字与间距同步收紧，同样的窗口装下更多内容。
+ *  缩放比钳在 0.85~1.3，非法值回退 1。 */
+function applyFontScale(root, v) {
+  const fs = Math.min(1.3, Math.max(0.85, Number(v) || 1));
+  if (fs < 1) {
+    root.style.zoom = String(fs);
+    root.style.setProperty('--font-scale', '1');
+  } else {
+    root.style.removeProperty('zoom');
+    root.style.setProperty('--font-scale', String(fs));
+  }
+}
+
 function applyAppearance(a) {
   const root = document.documentElement;
   const themeId = T.normalizeTheme(a.theme);
@@ -771,8 +785,7 @@ function applyAppearance(a) {
     const r = Math.round(Math.min(25, Math.max(10, Number(a.radius) || 18)));
     root.style.setProperty('--panel-radius', r + 'px');
     root.style.setProperty('--pill-radius', Math.min(22, r + 4) + 'px');
-    // 字体大小：面板内所有文字统一缩放（0.85~1.3），布局与控件尺寸不动
-    root.style.setProperty('--font-scale', String(Math.min(1.3, Math.max(0.85, Number(a.fontScale) || 1))));
+    applyFontScale(root, a.fontScale);
   // 强调色：自定义色要同步「文字色」——亮色强调配深墨字，避免白字糊在浅蓝/浅绿上
   root.style.setProperty('--accent-on', inkOn(a.accent || themeAccent(themeId)));
   if (a.accent) root.style.setProperty('--accent', a.accent);
@@ -997,7 +1010,7 @@ els.radiusSlider.addEventListener('change', () =>
 for (const b of els.fontSeg.children) {
   b.addEventListener('click', () => {
     const v = Number(b.dataset.v);
-    document.documentElement.style.setProperty('--font-scale', String(v));
+    applyFontScale(document.documentElement, v);
     window.island.invoke('settings:set', { appearance: { fontScale: v } });
   });
 }
@@ -1345,6 +1358,12 @@ window.island.on('update:error', (info) => {
 /* ---------------- 事件同步 ---------------- */
 
 window.island.on('history:changed', () => loadHistory());
+
+// 本批屏蔽新增了映射编码：立即刷新顶部「映射 N 条」，与历史记录同步更新
+window.island.on('vault:changed', async () => {
+  const st = await window.island.invoke('settings:get');
+  renderVaultChip(st);
+});
 
 window.island.on('settings:changed', async () => {
   const st = await window.island.invoke('settings:get');

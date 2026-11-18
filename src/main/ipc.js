@@ -68,6 +68,7 @@ function register(ctx) {
       const app2 = next.appearance;
       // 密度变化 → 重算窗口尺寸与缩放（档位最终仍由工作区钳制）
       island.setPanelSize(app2.panel); // 面板宽高立即生效
+      island.setPillFontScale(app2.fontScale); // 字体档位 → 胶囊宽度等比伸缩
     }
     island.broadcast('settings:changed', next);
     return next;

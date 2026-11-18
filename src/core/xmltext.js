@@ -9,8 +9,8 @@
  *
  * 本模块把**同一段落（w:p / a:p / si / c / row）内**的文本节点无缝拼成一段逻辑文本，
  * 让检测看到完整原文；再把「原文区间 → 屏蔽值」的编辑映射回各节点。
- * 跨节点实体的拆分由回调层负责（见 masker.maskEdits 的 boundaries 参数）：
- * 每个节点保留自己那份屏蔽值，Office 往返才能逐字节一致。
+ * 跨节点实体由 maskEdits 按完整形态输出（屏蔽值落首节点），并在编码里记下
+ * 原文分段长度；还原时 addEdit 依此把原文逐段回填，Office 往返逐字节一致。
  */
 
 /** 只匹配 >文本< 之间的内容（标签属性里的 > 不会被误判） */
@@ -71,13 +71,39 @@ function xmlBlockTexts(xml) {
 /**
  * 把一条 [start,end) 的编辑分摊到块内的各个文本节点。
  * 跨节点时 replacement 放在第一个节点，其余节点清空。
+ *
+ * partLens：还原跨节点实体时使用。屏蔽时整条实体的屏蔽值只落在首个节点，
+ * 但 vault 里记下了原文的原始分段长度；还原时按这些长度把原文逐段写回
+ * 各自节点（首段替换屏蔽值，其余段插入到已清空/仅剩尾文的节点开头），
+ * 从而让 Office 往返逐字节一致。
  */
-function addEdit(block, start, end, replacement) {
+function addEdit(block, start, end, replacement, partLens) {
   const ns = block.nodes;
   if (!ns.length || end <= start) return;
   const ends = ns.map((n) => n.off + n.text.length);
   let a = ends.findIndex((e) => e > start);
   if (a < 0) a = ns.length - 1;
+
+  if (Array.isArray(partLens) && partLens.length > 1) {
+    const total = partLens.reduce((s, n) => s + n, 0);
+    if (total === String(replacement).length && a + partLens.length <= ns.length) {
+      let cursor = 0;
+      for (let k = 0; k < partLens.length; k++) {
+        const n = ns[a + k];
+        const part = String(replacement).slice(cursor, cursor + partLens[k]);
+        cursor += partLens[k];
+        if (k === 0) {
+          const s = Math.max(0, Math.min(n.text.length, start - n.off));
+          const e = Math.max(s, Math.min(n.text.length, end - n.off));
+          n.edits.push({ s, e, rep: part });
+        } else {
+          n.edits.push({ s: 0, e: 0, rep: part });
+        }
+      }
+      return;
+    }
+  }
+
   let b = ends.findIndex((e) => e >= end);
   if (b < 0) b = ns.length - 1;
   if (b < a) b = a;
@@ -126,7 +152,7 @@ function transformXmlText(xml, transform) {
     count += (r && Number.isFinite(r.count)) ? r.count : edits.length;
     for (const e of edits) {
       if (e && Number.isFinite(e.start) && Number.isFinite(e.end)) {
-        addEdit(b, e.start, e.end, e.replacement);
+        addEdit(b, e.start, e.end, e.replacement, e.partLens);
       }
     }
     for (const n of b.nodes) {

@@ -87,6 +87,8 @@ app.whenReady().then(() => {
   island.setPanelSize(store.settings.appearance.panel);
   // 灵动岛位置：启动时恢复上次拖动换位保存的比例
   island.pillX = Number(store.settings.appearance.pillX) || 0.5;
+  // 字体档位：启动时恢复（胶囊宽度按档位伸缩）
+  island.fontScale = Number(store.settings.appearance.fontScale) || 1;
   // 拖动换位结束 → 写回外观设置并广播（面板/胶囊同步）
   island.onPillOffsetChange = (ratio) => {
     const next = store.saveSettings({ appearance: { pillX: ratio } });

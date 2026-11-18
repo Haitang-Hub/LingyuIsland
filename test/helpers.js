@@ -139,7 +139,21 @@ function truncValue(v) {
 
 /** 原值泄漏断言：消息只回显截断值，不泄隐私 */
 function assertNoLeak(masked, value, label) {
-  assert.ok(!masked.includes(value),
+  // 地址/机构采用「前2 + **** + 尾4」形态，尾 4 字会原样保留；
+  // 当尾 4 恰好等于另一个检出实体的完整值时，不能用裸 includes 判泄漏。
+  // 规则：出现在 4 个（或旧格式 6 个）* 之后的原值属于可见尾段，不算泄漏。
+  const s = String(masked || '');
+  let from = 0;
+  let leaked = false;
+  while (from <= s.length) {
+    const idx = s.indexOf(value, from);
+    if (idx < 0) break;
+    let stars = 0;
+    while (idx - stars - 1 >= 0 && s[idx - stars - 1] === '*') stars++;
+    if (stars !== 4 && stars !== 6) { leaked = true; break; }
+    from = idx + value.length;
+  }
+  assert.ok(!leaked,
     `${label} 原值泄漏: ${truncValue(value)} 不应出现在屏蔽产物中`);
 }
 

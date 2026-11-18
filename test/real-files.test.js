@@ -46,6 +46,15 @@ function check(name, fn) {
   catch (e) { results.push(['FAIL', name, e.message]); }
 }
 
+/**
+ * 泄露判定必须带数字边界：样品里刻意保留的「订单号 138123456789012」
+ * 天然包含手机号 13812345678 的子串，裸 includes 会把负例误判成泄露。
+ */
+function leaks(haystack, value) {
+  const re = new RegExp(`(?<!\\d)${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?!\\d)`);
+  return re.test(haystack);
+}
+
 const vault = new Vault();
 
 /**
@@ -109,7 +118,7 @@ for (const f of files) {
       const phones = origText.match(/(?<!\d)1[3-9]\d{9}(?!\d)/g) || [];
       for (const v of [...ids, ...phones]) {
         (piiSamples[ids.includes(v) ? 'idCard' : 'phone'] ||= new Set()).add(v);
-        assert.ok(!maskedText.includes(v), `敏感值仍残留: ${v.slice(0, 4)}****`);
+        assert.ok(!leaks(maskedText, v), `敏感值仍残留: ${v.slice(0, 4)}****`);
       }
       for (const t of ['性别', '岁']) { /* 占位：保留断言在下方单独做 */ }
     });
@@ -130,7 +139,7 @@ for (const f of files) {
       const orig = fs.readFileSync(p, 'utf8');
       const masked = fs.readFileSync(m.maskedPath, 'utf8');
       const phones = orig.match(/(?<!\d)1[3-9]\d{9}(?!\d)/g) || [];
-      for (const v of phones) assert.ok(!masked.includes(v));
+      for (const v of phones) assert.ok(!leaks(masked, v));
     });
     check(`还原一致: ${f}`, () => {
       const r = restoreFile(m.maskedPath, vault);

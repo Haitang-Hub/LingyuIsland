@@ -4,6 +4,8 @@
  *
  * 套件划分：
  *  - test/detector.test.js   检测规则（强 PII / 姓名语境 / 地址-机构 / 负例成对）
+ *  - test/entities.test.js   中文实体结构规则与负例
+ *  - test/two-pass.test.js   案卷级实体确认、传播与文件往返
  *  - test/masker.test.js     屏蔽引擎（编码格式 / 保留位 / 还原兼容 / Office XML 映射）
  *  - test/fileproc.test.js   文件管道（编码识别 / txt-docx / 老式 .doc / PDF）
  *  - test/app-units.test.js  应用单元（导入 / 索引 / 设置 / 剪贴板 / 灵动岛 / 布局 / 更新）
@@ -18,6 +20,8 @@ const helpers = require('./helpers');
 const { runAll, report } = helpers;
 
 require('./detector.test.js');
+require('./entities.test.js');
+require('./two-pass.test.js');
 require('./masker.test.js');
 const registerPdfTests = require('./fileproc.test.js');
 require('./app-units.test.js');

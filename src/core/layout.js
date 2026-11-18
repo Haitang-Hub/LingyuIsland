@@ -40,6 +40,9 @@ const LEGACY_DENSITY = { auto: 'standard', compact: 'narrow', standard: 'standar
 
 const AUTO_MIN = 0.85, AUTO_MAX = 1.3;
 
+/** 胶囊宽度跟随字体档位的系数范围（与外观页 fontScale 档位一致：0.9/1/1.15/1.3） */
+const PILL_FONT_MIN = 0.85, PILL_FONT_MAX = 1.3;
+
 function clamp(v, lo, hi) {
   return Math.min(hi, Math.max(lo, v));
 }
@@ -87,9 +90,10 @@ function autoUiScale(width, height) {
 
 /**
  * @param {{x:number,y:number,width:number,height:number}} workArea 主显示器工作区（DIP）
- * @param {{panelW?:number, panelH?:number, uiScale?:string, collapsed?:boolean, pillX?:number}} [opts]
+ * @param {{panelW?:number, panelH?:number, uiScale?:string, collapsed?:boolean, pillX?:number, fontScale?:number}} [opts]
  *   panelW/panelH = 面板 CSS 视口尺寸（宽高独立，可细长可宽扁）；uiScale 为旧档位值，仅迁移兼容用；
- *   pillX = 灵动岛中心相对工作区宽度的比例（0~1，默认 0.5 居中），拖动换位后持久化的值
+ *   pillX = 灵动岛中心相对工作区宽度的比例（0~1，默认 0.5 居中），拖动换位后持久化的值；
+ *   fontScale = 字体档位（0.85~1.3），胶囊宽度按其等比伸缩
  * @returns {{uiScale:number, pillScale:number, panelScale:number, pill:{x,y,width,height}, panel:{x,y,width,height}}}
  */
 function computeIslandLayout(workArea, opts = {}) {
@@ -107,9 +111,14 @@ function computeIslandLayout(workArea, opts = {}) {
 
   const availW = Math.max(1, wa.width - edge * 2);
 
-  // 胶囊固定比例，只跟随系统系数：面板拉宽压扁时胶囊不应跟着变形
-  const pillScale = Math.min(sys, availW / BASE.pillW);
-  const pillW = Math.round(BASE.pillW * pillScale);
+  // 胶囊固定比例，只跟随系统系数与字体档位：面板拉宽压扁时胶囊不应跟着变形；
+  // 字体档位改变胶囊目标宽度——标准档保持基准宽度不变，「小」档按平方收缩（比
+  // 线性更紧凑），「大/特大」按线性放宽；仍按可用空间钳制，窄屏下不会被撑出屏幕
+  const fontScale = clamp(Number(opts.fontScale) || 1, PILL_FONT_MIN, PILL_FONT_MAX);
+  const pillFontFactor = fontScale < 1 ? fontScale * fontScale : fontScale;
+  const pillTargetW = Math.max(1, BASE.pillW * pillFontFactor);
+  const pillScale = Math.min(sys, availW / pillTargetW);
+  const pillW = Math.round(pillTargetW * pillScale);
   const pillH = Math.round(BASE.pillH * pillScale);
 
   // 面板：目标 CSS 视口宽高 × 统一系数（该系数同时作为渲染层 zoom），
@@ -158,6 +167,6 @@ function computeIslandLayout(workArea, opts = {}) {
 }
 
 module.exports = {
-  BASE, PANEL_LIMITS, PANEL_PRESETS, LEGACY_DENSITY, AUTO_MIN, AUTO_MAX,
+  BASE, PANEL_LIMITS, PANEL_PRESETS, LEGACY_DENSITY, AUTO_MIN, AUTO_MAX, PILL_FONT_MIN, PILL_FONT_MAX,
   normalizePanelSize, sizeFromDensity, matchPreset, autoUiScale, computeIslandLayout,
 };

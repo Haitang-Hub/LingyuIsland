@@ -11,11 +11,12 @@ const { test, assert, tempDir, rmDir, makeDocx, truncValue, assertNoLeak, CODE_B
 const fs = require('fs');
 const path = require('path');
 const AdmZip = require('adm-zip');
-const { detect, hashName, CANDIDATE_VERB_BLOCK } = require('../src/core/detector');
+const { detect, hashName } = require('../src/core/detector');
+const { collectEntities } = require('../src/core/entities');
 const { Vault, maskText, restoreText, buildMasked } = require('../src/core/masker');
 const {
   maskFile, restoreFile, residualCheck, loadKnownNameHashes, saveKnownNameHashes,
-  injectOfficeDisclaimer, stripOfficeDisclaimer, DISCLAIMER_MARK, KNOWN_NAMES_FILE, caseDirKey,
+  KNOWN_NAMES_FILE, caseDirKey,
 } = require('../src/core/fileproc');
 const { checkConsistency } = require('../src/core/consistency');
 
@@ -38,11 +39,12 @@ test('R-001 地名漏检：北和镇/石牌垌村（无引导词链路）应检�
     '普通叙述不应被当成地址');
 });
 
-test('R-001 链首叙述不吞入地址值（住/地引导字经 trimPlaceLead 剥离）', () => {
-  const t = '被告住雷州市北和镇。';
+test('R-001 链首叙述不吞入地址值，纯行政区划不屏蔽', () => {
+  assert.strictEqual(vals('被告住雷州市北和镇。', 'address').length, 0);
+  const t = '被告住雷州市北和镇石牌垌村18号。';
   const addrs = vals(t, 'address');
   assert.ok(addrs.every((v) => !/^[告住]/.test(v)), `链首叙述被吞入: ${JSON.stringify(addrs)}`);
-  assert.ok(addrs.some((v) => v === '雷州市北和镇'), JSON.stringify(addrs));
+  assert.ok(addrs.some((v) => v === '雷州市北和镇石牌垌村18号'), JSON.stringify(addrs));
 });
 
 /* ================= R-002 地址-机构复合体（村+村民委员会） ================= */
@@ -54,19 +56,21 @@ test('R-002 复合体：石牌垌村村民委员会整体识别为机构', () =>
   const v = new Vault();
   const m = maskText(t, v);
   assertNoLeak(m.masked, '石牌垌村村民委员会', 'R-002');
-  assert.ok(m.masked.includes('……村民委员会〔机构·'), m.masked);
+  assert.ok(m.masked.includes('石牌****民委员会〔机构·'), m.masked);
   assert.strictEqual(restoreText(m.masked, v).text, t, '复合体往返应逐字一致');
 });
 
 test('R-002 复合体：基层派出所/司法所/法庭应识别为机构', () => {
-  assert.ok(vals('线索移交给北和派出所', 'org').includes('北和派出所'), '北和派出所');
+  assert.ok(vals('线索移交给北和镇派出所', 'org').includes('北和镇派出所'), '北和镇派出所');
   // 「已交」的动词字会并入字号（ORG_BREAK 不能放行「交」，否则交通银行被切坏），
   // 属于可接受的过屏蔽：只要「…司法所」整体被识别、屏蔽值不泄露即可。
   assert.ok(vals('材料已交北和镇司法所备案', 'org').some((v) => v.includes('北和镇司法所')),
     '北和镇司法所: ' + JSON.stringify(vals('材料已交北和镇司法所备案', 'org')));
   assert.ok(vals('临江市清河区人民法院刑事审判法庭', 'org').some((v) => v.endsWith('法庭')), '法庭');
-  // 负例成对：交通银行的「交」不被断点误切（机构名含动词字不受影响）
-  assert.ok(vals('该公司向交通银行申请贷款', 'org').includes('交通银行'), '交通银行');
+  // 众人皆知的大型银行本身不屏蔽；动词字「交」仍不得作为字号断点，
+  // 否则同类字号（交投集团）会被截断。
+  assert.strictEqual(vals('该公司向交通银行申请贷款', 'org').length, 0, '交通银行');
+  assert.ok(vals('武汉交投集团承接项目', 'org').includes('武汉交投集团'), '交投集团');
 });
 
 /* ================= R-003 误屏蔽负例（张贴 / 笔录 / 原告方） ================= */
@@ -83,14 +87,53 @@ test('R-003 负例：「被告二张贴」「调查笔录」「原告方」不�
     const names = vals(t, 'name');
     assert.strictEqual(names.length, 0, `${t} → 误屏蔽: ${JSON.stringify(names)}`);
   }
-  for (const w of ['张贴', '记载']) assert.ok(CANDIDATE_VERB_BLOCK.has(w), w + ' 应在动词否定表');
+});
+
+/* ================= R-003b 误屏蔽负例（知名机构 / 县级地名 / 普通词 / 泛指主体） ================= */
+
+test('R-003b 负例：众人皆知的机构、单级地名、常用词、泛指主体不得屏蔽', () => {
+  for (const t of ['中国建设银行', '中国农业银行', '中国移动']) {
+    assert.strictEqual(vals(t, 'org').length, 0, `${t} 不应作为敏感主体: ${JSON.stringify(vals(t, 'org'))}`);
+  }
+  assert.strictEqual(vals('在涟水县教师培训后勤服务', 'address').length, 0,
+    JSON.stringify(vals('在涟水县教师培训后勤服务', 'address')));
+  assert.strictEqual(vals('在南京市一家宾馆', 'org').length, 0,
+    JSON.stringify(vals('在南京市一家宾馆', 'org')));
+  assert.strictEqual(vals('在南京市一家宾馆', 'address').length, 0,
+    JSON.stringify(vals('在南京市一家宾馆', 'address')));
+  // 纯行政区划籍贯（省 + 县/市）属于公开信息，不按地址屏蔽
+  assert.strictEqual(vals('江苏涟水人', 'address').length, 0,
+    JSON.stringify(vals('江苏涟水人', 'address')));
+  // 「张罗」由明确身份字段确认；单句不猜，传播时只命中姓名，不命中「商议」。
+  assert.strictEqual(vals('食堂负责人张罗商议', 'name').length, 0);
+  const known = collectEntities(['证人：张罗。', '食堂负责人张罗商议', '我跟张罗说', '将张罗微信也删除了']);
+  assert.deepStrictEqual(vals('食堂负责人张罗商议', 'name', { knownEntities: known }), ['张罗']);
+  // 正例成对：具体支行仍按机构处理，具体道路门牌仍识别。
+  assert.ok(vals('该公司向中国工商银行深圳支行贷款', 'org').includes('中国工商银行深圳支行'), '具体支行');
+  assert.strictEqual(vals('案发地合肥市，另一现场在颍上县城关镇', 'address').length, 0, '纯行政区划');
+  assert.ok(vals('案发地合肥市西湖大道138号', 'address').includes('合肥市西湖大道138号'), '具体地址');
+  assert.ok(vals('被告系金源商务宾馆员工', 'org').includes('金源商务宾馆'), '具体宾馆');
+  // 机构简称（<6 字）不单独屏蔽，且不得把前面主体与支付动词一起吞进字号
+  assert.deepStrictEqual(vals('涟水县师资培训中心支付九洲公司', 'org'), ['涟水县师资培训中心'],
+    JSON.stringify(vals('涟水县师资培训中心支付九洲公司', 'org')));
+  assert.deepStrictEqual(
+    vals('江西九洲书社教育科技有限公司（以下简称九洲公司），后面九洲公司继续履约', 'org'),
+    ['江西九洲书社教育科技有限公司'],
+    JSON.stringify(vals('江西九洲书社教育科技有限公司（以下简称九洲公司），后面九洲公司继续履约', 'org')),
+  );
+  assert.strictEqual(vals('九洲公司继续履约', 'org').length, 0, '简称不屏蔽');
+  // 字号含「也」的酒店品牌：不能被机构断点截断成「纳」，也不能只剩地址前缀
+  assert.deepStrictEqual(vals('涟水县经开区维也纳酒店', 'org'), ['涟水县经开区维也纳酒店'],
+    JSON.stringify(vals('涟水县经开区维也纳酒店', 'org')));
+  assert.strictEqual(vals('涟水县经开区维也纳酒店', 'address').length, 0,
+    JSON.stringify(vals('涟水县经开区维也纳酒店', 'address')));
 });
 
 /* ================= R-004 新角色标签与问答体 ================= */
 
 test('R-004 角色标签：主持调解人/记录人/调查人/在场人 命中', () => {
   const cases = [
-    ['主持调解人陈阿满到场。', '陈阿满'],
+    ['主持调解人：陈阿满。', '陈阿满'],
     ['记录人：周济民', '周济民'],
     ['调查人：梁月华', '梁月华'],
     ['在场人：邓小满', '邓小满'],
@@ -102,7 +145,10 @@ test('R-004 角色标签：主持调解人/记录人/调查人/在场人 命中'
 
 test('R-004 问答体：问/答 + 冒号语境命中姓名', () => {
   assert.ok(vals('答：陈阿满，男，2003年出生', 'name').includes('陈阿满'), '答：应提供语境');
-  assert.ok(vals('问：证人张三到庭', 'name').includes('张三'), '问：应提供语境');
+  assert.ok(vals('问：证人：张三。', 'name').includes('张三'), '人称字段应提供语境');
+  // 普通答复不是姓名（「答：明白。」曾被切成「明*」）
+  assert.strictEqual(vals('问：你是否明白？答：明白。', 'name').length, 0, '明白');
+  assert.strictEqual(vals('审：明白吗', 'name').length, 0, '明白吗');
   // 负例成对：无冒号的单字「问/答」不再充当标签
   const negs = ['问卷调查姓名栏', '审问笔录记载', '问答环节结束'];
   for (const t of negs) {
@@ -112,12 +158,12 @@ test('R-004 问答体：问/答 + 冒号语境命中姓名', () => {
 
 /* ================= R-005 后置职业括注 ================= */
 
-test('R-005 后置括注：陈阿满（村医）应命中', () => {
-  assert.ok(vals('陈阿满（村医）赶到现场。', 'name').includes('陈阿满'), '（村医）');
-  assert.ok(vals('周济民（律师）出具意见', 'name').includes('周济民'), '（律师）');
-  assert.ok(vals('村医陈阿满赶到现场。', 'name').includes('陈阿满'), '前置村医');
-  // 负例成对：非职业括注不命中
-  assert.strictEqual(vals('张三（之父）到庭', 'name').length, 0, '（之父）不是职业括注');
+test('R-005 职业词和括注不单独确认，人称字段明确确认', () => {
+  assert.strictEqual(vals('陈阿满（村医）赶到现场。', 'name').length, 0);
+  assert.strictEqual(vals('村医陈阿满赶到现场。', 'name').length, 0);
+  assert.ok(vals('证人：陈阿满。', 'name').includes('陈阿满'));
+  assert.ok(vals('辩护人：周济民。', 'name').includes('周济民'));
+  assert.strictEqual(vals('张三（之父）到庭', 'name').length, 0);
 });
 
 /* ================= R-006 盐值随机化（跨文档不可关联） ================= */
@@ -183,7 +229,8 @@ test('泄漏断言：全类型屏蔽后原值零残留', () => {
     seen.add(it.value);
     assertNoLeak(masked, it.value, `[${it.type}]`);
   }
-  assert.ok(!/3301|622202/.test(masked), '证件/卡 BIN 前段不应出现在屏蔽产物');
+  assert.ok(masked.includes('330106****〔身份证·'), '身份证应为前6位 + ****');
+  assert.ok(!/622202/.test(masked), '银行卡 BIN 前段不应出现在屏蔽产物');
   // 屏蔽值形态：所有编码括号都带类型标签
   for (const b of masked.match(/〔[^〔〕]*〕/g) || []) {
     assert.ok(/^〔[\u4e00-\u9fa5]{1,6}·[0-9a-f]{6,12}〕$/.test(b), `编码应带类型标签: ${b}`);
@@ -257,9 +304,12 @@ test('knownNames：缓存读写幂等且损坏文件安全回退（Windows 路�
     // 损坏存储文件安全回退
     fs.writeFileSync(namesFile, '{broken', 'utf8');
     assert.strictEqual(loadKnownNameHashes(namesFile, caseDir).size, 0, '损坏缓存应回退为空集');
-    // 非法条目被过滤（v2 格式；v1 一律弃用）
+    // v1/v2 均弃用；v3 非法条目被过滤。
     fs.writeFileSync(namesFile,
-      JSON.stringify({ v: 2, dirs: { [caseDirKey(caseDir)]: { hashes: ['bad', hashName('李四')] } } }), 'utf8');
+      JSON.stringify({ v: 2, dirs: { [caseDirKey(caseDir)]: { hashes: [hashName('李四')] } } }), 'utf8');
+    assert.strictEqual(loadKnownNameHashes(namesFile, caseDir).size, 0, 'v2 缓存不得吸收');
+    fs.writeFileSync(namesFile,
+      JSON.stringify({ v: 3, dirs: { [caseDirKey(caseDir)]: { hashes: ['bad', hashName('李四')] } } }), 'utf8');
     const set = loadKnownNameHashes(namesFile, caseDir);
     assert.strictEqual(set.size, 1);
     assert.ok(set.has(hashName('李四')));
@@ -269,7 +319,7 @@ test('knownNames：缓存读写幂等且损坏文件安全回退（Windows 路�
   }
 });
 
-test('knownNames：旧版案卷内 .mask-names.json 直接清除（毒哈希不吸收）+ 缓存 v2', () => {
+test('knownNames：旧版案卷内 .mask-names.json 直接清除（毒哈希不吸收）+ 缓存 v3', () => {
   const caseDir = tempDir('lingyu-regress-case-');
   const storeDir = tempDir('lingyu-regress-store-');
   try {
@@ -285,54 +335,16 @@ test('knownNames：旧版案卷内 .mask-names.json 直接清除（毒哈希不�
     // 旧文件被删除，案卷目录不留任何缓存
     assert.ok(!fs.existsSync(path.join(caseDir, '.mask-names.json')), '案卷目录内旧缓存应被删除');
     const store = JSON.parse(fs.readFileSync(namesFile, 'utf8'));
-    assert.strictEqual(store.v, 2, '存储格式应为 v2');
+    assert.strictEqual(store.v, 3, '存储格式应为 v3');
     const entry = store.dirs[caseDirKey(caseDir)];
     // v1 旧缓存出自旧版检测器（含「执行/文件」等毒哈希），不吸收
-    assert.ok(!entry.hashes.includes(legacyHash), 'v1 旧哈希不得进入 v2 缓存');
+    assert.ok(!entry.hashes.includes(legacyHash), 'v1 旧哈希不得进入 v3 缓存');
     // 本批确认姓名正常入库
     assert.ok(entry.hashes.includes(hashName('张三')), '本批确认姓名应入缓存');
   } finally {
     rmDir(caseDir);
     rmDir(storeDir);
   }
-});
-
-/* ================= 虚构声明注入（docx 幂等 / 还原剥离） ================= */
-
-test('声明注入：docx 屏蔽产物含声明且幂等，还原后剥离干净', () => {
-  const dir = tempDir('lingyu-regress-');
-  try {
-    const src = path.join(dir, '起诉状.docx');
-    makeDocx(src, '原告：陈阿满，手机 13812345678。');
-    const v = new Vault();
-    const m = maskFile(src, v);
-    assert.strictEqual(m.ok, true, JSON.stringify(m));
-
-    const maskedXml = new AdmZip(m.maskedPath).readAsText('word/document.xml');
-    const count = (maskedXml.match(new RegExp(DISCLAIMER_MARK, 'g')) || []).length;
-    assert.strictEqual(count, 1, '声明应恰好出现一次');
-    assert.ok(maskedXml.startsWith('<?xml'), '声明应插在 XML 声明之后');
-    assertNoLeak(maskedXml, '陈阿满', '声明注入用例');
-
-    const twice = injectOfficeDisclaimer(maskedXml);
-    assert.strictEqual((twice.match(new RegExp(DISCLAIMER_MARK, 'g')) || []).length, 1, '重复注入应幂等');
-
-    const r = restoreFile(m.maskedPath, v);
-    assert.strictEqual(r.ok, true, JSON.stringify(r));
-    const backXml = new AdmZip(r.restoredPath).readAsText('word/document.xml');
-    assert.ok(!backXml.includes(DISCLAIMER_MARK), '还原产物不应残留声明');
-    assert.ok(backXml.includes('陈阿满'), '正文应完整还原');
-  } finally {
-    rmDir(dir);
-  }
-});
-
-test('声明注入：注入/剥离互为逆操作（纯字符串层面）', () => {
-  const xml = '<w:document><w:body><w:p><w:r><w:t>正文</w:t></w:r></w:p></w:body></w:document>';
-  const injected = injectOfficeDisclaimer(xml);
-  assert.ok(injected.includes(DISCLAIMER_MARK));
-  assert.strictEqual(stripOfficeDisclaimer(injected), xml, '剥离后应与原文一致');
-  assert.strictEqual(stripOfficeDisclaimer(xml), xml, '无声明时剥离是无操作');
 });
 
 /* ================= 残留自检（质量门禁） ================= */

@@ -39,7 +39,7 @@ function faceMood() {
   // 改文案池时保证每组文案带上本组关键词，且不要撞上更高优先级的词。
   if (/夜深|困|眯一会儿|睡|晚安|放心睡|打盹|熬夜|没睡/.test(t)) return 'sleepy';
   if (hovering) return 'curious'; // 光标来了 → 好奇地歪头看
-  if (/摸摸头|很好|第一顺位|认真生活|自责|尽力|做得够多|偏爱/.test(t)) return 'shy';   // 被夸 / 被偏爱而害羞
+  if (/摸摸头|可爱|夸我|很好|第一顺位|认真生活|自责|尽力|做得够多|偏爱/.test(t)) return 'shy';   // 被夸 / 被偏爱而害羞
   if (/阳光|晒|发呆|安静|晚霞|惬意|有光/.test(t)) return 'content';                        // 惬意眯起
   if (/别急|一件一件|深呼吸|烦恼|想不通|思路|最难|寄存|放一放/.test(t)) return 'think';  // 低头沉思
   if (/辛苦|撑|扛|一个人|不催|歇|关照|安心|明天|机会|喝水|陪/.test(t)) return 'warm';    // 被温柔关照
@@ -125,56 +125,43 @@ function faceShake() {
   }, 7000 + Math.random() * 7000);
 })();
 
-/* 空闲文案池：随机轮换的「情绪价值」文案（多数与功能无关，只负责让人心情好一点）
-   主线是「先接住情绪，再轻轻提议」——不说教、不施压、不贩卖焦虑，像一个懂分寸的朋友。
-   每行末尾是它触发的表情情绪；改文案时留意关键词是否仍匹配 faceMood() 的正则。 */
+/* 空闲文案池：随机轮换的「情绪价值」文案
+   基调是「有梗、有料、贫嘴」——冷知识 / 小吐槽 / 桌宠式互动为主，温柔话只做点缀，
+   不再一味安慰打气。每行末尾是它触发的表情情绪；改文案时留意关键词是否仍匹配
+   faceMood() 的正则（困/睡→sleepy，可爱/夸→shy，晒/发呆→content，别急/烦恼→think，歇/喝水→warm）。 */
 const MOOD_LINES = [
-  // 允许慢下来：先把压力接住，不急着讲道理
-  '慢一点也没关系，你已经很好',      // shy
-  '累了就歇一歇，不赶这一时',        // warm
-  '今天没状态，也完全说得过去',      // idle
-  '偶尔走神，是大脑在给自己放假',    // idle
-  '不必时刻满分，及格也值得高兴',    // idle
-  '你已经很努力了，这事儿我作证',    // idle
-  '做不到就先放着，天不会塌',        // idle
-  // 被夸会害羞：夸得具体一点，才不显得敷衍
-  '今天也有在认真生活呀',            // shy
-  '能坚持到现在，真的很了不起',      // idle
-  '你比自己以为的，要靠谱得多',      // idle
-  '摸摸头，今天也辛苦了',            // shy
-  '你是自己的第一顺位，别忘了',      // shy
-  '悄悄说，你今天状态很好',          // shy
-  // 起身舒展：把命令换成邀请，把"应该"换成"可以"
-  '伸个懒腰吧，肩颈会谢谢你',        // idle
-  '坐久了，起来够一够天花板',        // idle
-  '站起来看看远处，眼睛会感谢你',    // idle
-  '肩膀松一松，别替世界扛着',        // warm
-  // 喝水 / 放松：给理由，但不絮叨
-  '记得喝水，顺便看看远处',          // warm
-  '先喝口水，很多事没那么急',        // idle
-  '杯子空了，顺便给它续一点',        // idle
-  // 沉思：承认卡住很正常，再陪着捋
-  '深呼吸三次，烦恼先放一边',        // think
-  '别急，一件一件来',                // think
-  '先把最难的那件啃掉',              // think
-  '想不通的事，先放一放也没关系',    // think
-  '烦恼先寄存在我这儿吧',            // think
-  '卡住了就歇一歇，思路常在半路来',  // think（"思路"优先于"歇"）
-  // 阳光惬意
-  '窗前有光，就去晒一会儿',          // content
-  '找个阳光位，坐下发会儿呆',        // content
-  '晒晒太阳，比硬撑管用',            // content
-  '世界很吵，这里很安静',            // content
-  // 小憩：把"该睡了"说成"可以放心交给我"
-  '困了就眯一会儿，天不会塌',        // sleepy
-  '打盹五分钟，精神一小时',          // sleepy
-  '放心睡吧，剩下的明天再说',        // sleepy
-  // 安慰：承认情绪的正当性，不给"你要坚强"的压力
-  '做不完的事，明天还有机会',        // warm
-  '今天做得够多了，别自责',          // shy
-  '别跟自己较劲，你已经尽力了',      // shy
-  '不开心也可以，不必急着好起来',    // idle
-  '这事换谁都为难，你不用一个人扛',  // warm
+  // 桌宠式贫嘴：像住在屏幕顶上的小家伙
+  '嘿嘿，摸鱼的手速不错嘛',
+  '嘘，我在记小本本，你今天戳了我三次',
+  '别戳了，再戳我就……更可爱给你看',      // shy（可爱）
+  '今天也很可爱，不接受反驳',              // shy（可爱）
+  '夸我一句，我就把你的小秘密忘掉',        // shy（夸）
+  '点击我不会变有钱，但会有我',
+  // 冷知识：有趣有料，顺带劝睡劝晒
+  '冷知识：章鱼有三个心脏，省着点用',
+  '冷知识：蜂蜜永不过期，困意会过期',      // sleepy（困）
+  '冷知识：猫一天睡16小时，欠的觉快补上',  // sleepy（睡）
+  '冷知识：海獭睡觉会牵手，怕漂散',        // sleepy（睡）
+  '冷知识：香蕉是浆果，草莓不是',
+  '冷知识：晒太阳补维D，比咖啡温柔',       // content（晒）
+  // 小机灵 / 伪哲学
+  '我不内耗，我只耗电',
+  '进度条没动，是它在攒大招',
+  '拖延不是病，是给灵感让路',
+  '摸鱼不是偷懒，是战略性喘气',
+  '我从不焦虑，焦虑只焦虑别人',
+  // 打工人吐槽：扎心但轻
+  '这个会，本可以是一封邮件',
+  '手机说我屏幕时间太长，它管得真宽',
+  '周报文学：稳步推进，持续向好',
+  '元气满满地……先歇十分钟',              // warm（歇）
+  // 温柔点缀：保留少数，配比「有趣为主、偶尔软一下」
+  '摸摸头，今天也辛苦了',                  // shy
+  '记得喝水，顺便看看远处',                // warm（喝水）
+  '窗前有光，就去晒一会儿',                // content（晒）
+  '困了就眯一会儿，天不会塌',              // sleepy
+  '别急，一件一件来',                      // think
+  '烦恼先寄存在我这儿吧',                  // think
 ];
 
 /** 按当前时段挑一句应景的话（每个时段多条，随机取一） */
@@ -182,31 +169,32 @@ function timeMoodLine() {
   const h = new Date().getHours();
   let pool;
   if (h >= 5 && h < 9) {
-    pool = ['早上好，今天也请多关照', '别急着起床，先给自己一个懒腰', '新的一天，慢一点开工也没关系'];
+    pool = ['早安，早起的鸟儿有虫吃，你不吃虫，多躺会儿', '起床成功，今天的难度已调至简单模式', '闹钟已阵亡，你刚从被窝战场凯旋'];
   } else if (h < 11) {
-    pool = ['上午的光最提神，记得开窗', '思路卡住时，先收拾一下桌面', '状态不错的话，就先做那件最重要的'];
+    pool = ['上午适合攻坚，也适合摸鱼，看你悟性', '冷知识：上午的咖啡，下班前才生效', '开机成功，假装努力加载中'];
   } else if (h < 13) {
-    pool = ['午饭时间到，别对着屏幕吃', '饭后晒五分钟太阳，下午不困', '中午了，给胃一点发言权'];
+    pool = ['干饭要紧，KPI 不会跑', '午饭选难吃的，下午就不会恋战', '干饭人干饭魂，先吃再说'];
   } else if (h < 16) {
-    pool = ['下午容易困，起来走两步', '困意上头？先喝口水试试', '三点多了，撑不住就眯一小会儿'];
+    pool = ['下午三点，人体电量不足，请补水', '困意是下午的常驻嘉宾，赶不走就请它眯会儿', '这个点撑住，离下班就剩……嗯，挺久'];
   } else if (h < 19) {
-    pool = ['快下班了，收尾的事慢慢来', '窗外的晚霞，值得抬头看一眼', '傍晚的风，最适合透口气'];
+    pool = ['下班倒计时中，今日摸鱼额度即将清零', '傍晚的风免费，错过再等一天', '收工前的最后一战：假装很忙'];
   } else if (h < 22) {
-    pool = ['忙完这阵，就好好歇一歇吧', '晚上的事，留给晚上的你，不急', '今天已经做得很好了，收工吧'];
+    pool = ['晚上适合复盘，也适合摆烂，二选一', '电视剧和作业，总有一个在骗你「马上就好」', '晚上的你效率惊人——指的是点外卖'];
   } else if (h < 24) {
-    pool = ['夜深了，早点睡，明天见', '屏幕调暗一点，眼睛谢谢你', '别熬了，天亮的事交给天亮的你'];
+    pool = ['熬夜冠军是你，奖品是黑眼圈', '手机该睡了，它比你累', '再刷五分钟——这句话已经刷了五次了'];
   } else {
-    pool = ['这个点了还醒着呀，辛苦了', '天快亮了，先躺一会儿也好'];
+    pool = ['凌晨的你和被窝，总有一个在硬撑', '这个点醒着的人，都是时间的叛逆者'];
   }
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
 /* 周末彩蛋：周六日随机追加一句 */
 const WEEKEND_LINES = [
-  '周末就该理直气壮地慢下来',
-  '今天不赶进度，只赶阳光',
-  '周末快乐，工作的事先放我这儿',
-  '难得两天，允许自己什么都不做',
+  '周末的快乐，从不起床开始',
+  '今天的目标：把沙发坐出包浆',
+  '周末不谈工作，谈饭',
+  '躺平进行时，请勿打扰',
+  '周末最高机密：其实什么也没打算干',
 ];
 
 const IDLE_LINES = () => {
@@ -276,17 +264,44 @@ scheduleIdleRotate();
 
 const THEMES_API = window.IslandThemes || { normalizeTheme: (v) => v || 'midnight' };
 
+/** 浅色主题：自定义强调色的派生文字色往黑调（与 pill.css 各浅色主题块一致） */
+const LIGHT_THEMES = new Set(['mauve', 'lavender', 'cloud', 'sakura']);
+
 /** 与面板同一套 CSS 变量（胶囊侧只用到其中与胶囊相关的部分） */
 function applyPillAppearance(a) {
   if (!a) return;
   const root = document.documentElement;
-  root.dataset.theme = THEMES_API.normalizeTheme(a.theme);
+  const themeId = THEMES_API.normalizeTheme(a.theme);
+  root.dataset.theme = themeId;
   // 面板的动效开关不作用于胶囊：表情与呼吸属于岛自己的状态反馈
   root.style.setProperty('--island-alpha', String(Math.min(1, Math.max(0.55, Number(a.alpha) || 1))));
   const r = Math.round(Math.min(22, Math.max(10, Number(a.radius) || 18)));
   root.style.setProperty('--pill-radius', Math.min(22, r + 4) + 'px');
-  if (a.accent) root.style.setProperty('--accent', a.accent);
-  else root.style.removeProperty('--accent');
+  // 字体大小：与面板同一策略——标准及以上只缩文字（--font-scale），
+  // 「小」档整面 zoom 等比压缩（zoom 已含文字缩放，--font-scale 固定 1 防双重缩放）
+  const fs = Math.min(1.3, Math.max(0.85, Number(a.fontScale) || 1));
+  if (fs < 1) {
+    root.style.zoom = String(fs);
+    root.style.setProperty('--font-scale', '1');
+  } else {
+    root.style.removeProperty('zoom');
+    root.style.setProperty('--font-scale', String(fs));
+  }
+  // 自定义强调色：文字色与表情眼色从强调色派生（面板的 --accent-text 同款公式）。
+  // 深色主题往白调、浅色主题往黑调，保证任何自定义色都读得清。
+  if (a.accent) {
+    const tint = LIGHT_THEMES.has(themeId) ? '#000000' : '#ffffff';
+    root.style.setProperty('--accent', a.accent);
+    root.style.setProperty('--accent-text', `color-mix(in srgb, ${a.accent} 68%, ${tint})`);
+    root.style.setProperty('--accent-text-strong', `color-mix(in srgb, ${a.accent} 45%, ${tint})`);
+    root.style.setProperty('--face', a.accent);
+  } else {
+    // 未自定义时交还给主题覆盖块的颜色
+    root.style.removeProperty('--accent');
+    root.style.removeProperty('--accent-text');
+    root.style.removeProperty('--accent-text-strong');
+    root.style.removeProperty('--face');
+  }
   // 磨砂质感（界面内模拟，与面板同源）
   root.classList.toggle('glass-weak', a.glass === 'auto');
   root.classList.toggle('glass-on', a.glass === 'on');

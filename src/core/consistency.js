@@ -23,6 +23,26 @@ function truncValue(v) {
 }
 
 /**
+ * 屏蔽产物中是否残留「未屏蔽的原值」。
+ * 地址/机构为「前2 + **** + 尾4」形态，尾 4 字按设计可见；
+ * 当它恰好等于另一个检出实体时，不算泄漏。
+ */
+function containsPlain(masked, value) {
+  const s = String(masked || '');
+  let from = 0;
+  while (from <= s.length) {
+    const idx = s.indexOf(value, from);
+    if (idx < 0) return false;
+    // 紧邻可见尾段之前的星号是屏蔽形态的一部分：新格式 4 个，旧格式 6 个。
+    let stars = 0;
+    while (idx - stars - 1 >= 0 && s[idx - stars - 1] === '*') stars++;
+    if (stars !== 4 && stars !== 6) return true;
+    from = idx + value.length;
+  }
+  return false;
+}
+
+/**
  * @param {Array<{file:string, original:string, masked:string}>} entries 同案卷多文件
  * @param {{toggles?:Record<string,boolean>}} [options]
  * @returns {{ok:boolean, leaks:Array, codeMismatches:Array, entities:number}}
@@ -48,7 +68,7 @@ function checkConsistency(entries, options = {}) {
   for (const e of entries) {
     const masked = String(e.masked || '');
     for (const [value, meta] of entities) {
-      if (masked.includes(value)) {
+      if (containsPlain(masked, value)) {
         let leak = leaks.find((l) => l.sample === truncValue(value) && l.type === meta.type);
         if (!leak) {
           leak = { type: meta.type, sample: truncValue(value), files: [] };

@@ -3,6 +3,7 @@
 
 const { test, assert, ID1, ID_BAD, BANK1, SAMPLE, makeIdCard, assertNoLeak } = require('./helpers');
 const { detect, isValidIdCard, isValidUscc, luhnValid } = require('../src/core/detector');
+const { collectEntities } = require('../src/core/entities');
 
 const vals = (text, type, options) =>
   detect(text, options).items.filter((i) => i.type === type).map((i) => i.value);
@@ -151,6 +152,79 @@ test('扩展·案号：标准 / 号之一 / 括号', () => {
   assert.ok(hasValue('（2021）浙01民终456号之一', 'caseNo', '（2021）浙01民终456号之一'));
 });
 
+test('修复·机构边界：介词「经」/ 连接词「和」不再吞入机构名', () => {
+  assert.deepStrictEqual(vals('经江苏久久律师事务所指派', 'org'), ['江苏久久律师事务所']);
+  assert.deepStrictEqual(vals('甲公司和江苏久久律师事务所', 'org'), ['江苏久久律师事务所']);
+  // 负例成对：「经纬 / 和平县」是字号，不能被误截断
+  assert.deepStrictEqual(vals('经纬纺织有限公司承接项目', 'org'), ['经纬纺织有限公司']);
+  assert.deepStrictEqual(vals('和平县久久律师事务所出具证明', 'org'), ['和平县久久律师事务所']);
+});
+
+test('修复·机构边界：年份前缀不吞入字号，并列泛称学校不成机构', () => {
+  // 「2021年中小学幼儿园」曾得到「年中小学幼儿园」（显示「年中***儿园」）
+  assert.deepStrictEqual(
+    vals('以支付2021年中小学幼儿园教师全员培训用书费名义履行报账程序', 'org'), []);
+  // 负例成对：「年例」字号不因「年」断点受影响，真实学校照常识别
+  assert.ok(vals('石牌垌村年例理事会出具证明', 'org').includes('石牌垌村年例理事会'));
+  assert.ok(vals('北京师范大学附属中学出具证明', 'org').includes('北京师范大学附属中学'));
+});
+test('修复·机构边界：角色人称词「负责人」不吞入字号，不盖掉真姓名', () => {
+  // 「负责人」的人曾吞进字号得「人李太白银行」，并在重叠消解时盖掉姓名
+  assert.deepStrictEqual(vals('负责人李太白银行转账2.09万元', 'org'), []);
+  const known = collectEntities([
+    '证人：李太白。', '负责人李太白银行转账2.09万元', '详细说一下你收受李太白银行转账2.09万元',
+  ]);
+  assert.deepStrictEqual(
+    vals('负责人李太白银行转账2.09万元', 'name', { knownEntities: known }), ['李太白']);
+  // 负例成对：含「人」的真机构（人民医院/人民银行）不受影响
+  assert.ok(vals('浙江省杭州市第一人民医院出具证明', 'org').includes('浙江省杭州市第一人民医院'));
+  assert.strictEqual(vals('该公司向交通银行申请贷款', 'org').length, 0);
+});
+
+test('修复·机构边界：职务动词「负责/担任」不吞入字号', () => {
+  // 「负责涟水县师资培训中心」曾被整体当字号（显示为「负责****培训中心」）
+  assert.deepStrictEqual(
+    vals('李易峰利用其仍实际负责涟水县师资培训中心工作的职务便利', 'org'),
+    ['涟水县师资培训中心']);
+  assert.deepStrictEqual(vals('他担任红日建材公司经理期间', 'org'), ['红日建材公司']);
+  assert.deepStrictEqual(vals('其分管城东汽车工厂生产', 'org'), ['城东汽车工厂']);
+});
+test('修复·机构边界：受贿叙述动词不吞入字号，短泛称机构不屏蔽', () => {
+  // 「收受第一中学」曾整体当机构屏蔽（显示为「收受****〔机构·…〕」）；
+  // 「收/受/送/赠」入左边界断点后，「第一中学」这类 6 字以内泛称不再屏蔽。
+  for (const t of ['收受第一中学贿赂款', '他送雷阳中学锦旗', '收受南湖小学校服回扣']) {
+    assert.deepStrictEqual(vals(t, 'org'), [], `${t} → ${JSON.stringify(vals(t, 'org'))}`);
+  }
+});
+
+test('修复·姓名：职务后紧跟受贿类犯罪动词的候选直接确认', () => {
+  // 「张罗」兼有动词义，但「张罗贿赂14万元」只能是行为人姓名
+  assert.deepStrictEqual(vals('食堂负责人张罗贿赂14万元', 'name'), ['张罗']);
+  assert.deepStrictEqual(vals('负责人王强贪污公款', 'name'), ['王强']);
+  // 负例成对：普通动词后仍不确认（「张罗商议」单句不猜）
+  assert.strictEqual(vals('食堂负责人张罗商议', 'name').length, 0);
+});
+
+test('修复·公共机关：国家级机关不作为机构屏蔽', () => {
+  assert.strictEqual(vals('最高人民法院公报', 'org').length, 0);
+  assert.strictEqual(vals('最高人民检察院发布', 'org').length, 0);
+  assert.strictEqual(vals('临江市清河区人民法院', 'org').length, 1, '地方法院仍应命中');
+});
+
+test('修复·案号前缀：机关简称与类别词纳入屏蔽范围（检测部分）', () => {
+  const cases = [
+    ['公诉机关以南检刑诉[2026]Z25号起诉', '南检刑诉[2026]Z25号'],
+    ['苏淮（涟）援刑指字【2026】第527号', '援刑指字【2026】第527号'],
+    ['临江市清河区人民检察院南检刑诉[2026]Z25号', '南检刑诉[2026]Z25号'],
+  ];
+  for (const [text, expected] of cases) {
+    const found = vals(text, 'caseNo');
+    assert.ok(found.includes(expected), `${text} → ${JSON.stringify(found)}`);
+  }
+  // 负例成对：普通叙述中的括号编号不吞入前缀
+  assert.deepStrictEqual(vals('根据规定（2020）1234号', 'caseNo'), ['（2020）1234号']);
+});
+
 test('扩展·执业证号：带字母前缀 / 纯数字', () => {
   assert.ok(vals('执业证号14401202080123456', 'license').length >= 1);
   assert.ok(vals('律师执业证号 A14401202080123456', 'license').length >= 1);
@@ -186,9 +260,9 @@ test('检测：直接语境姓名（张三/李四）', () => {
   assert.ok(items.some((i) => i.type === 'name' && i.value === '李四'));
 });
 
-test('检测：称呼后缀姓名（王芳女士→王芳）', () => {
-  const { items } = detect(SAMPLE);
-  assert.ok(items.some((i) => i.type === 'name' && i.value === '王芳'));
+test('检测：称呼不单独确认姓名，身份字段才确认', () => {
+  assert.ok(!detect(SAMPLE).items.some((i) => i.type === 'name' && i.value === '王芳'));
+  assert.ok(hasValue('证人：王芳。', 'name', '王芳'));
 });
 
 test('检测：无语境姓名不误报（张伟）', () => {
@@ -200,7 +274,7 @@ test('检测：角色标签姓名（原告/被告人/审判长）', () => {
   const cases = [
     ['原告：陈阿满，男，2003年11月6日出生', '陈阿满'],
     ['被告一：陈德寿，男，1962年4月11日出生', '陈德寿'],
-    ['负责人陈兆坤，主任。', '陈兆坤'],
+    ['负责人：陈兆坤，主任。', '陈兆坤'],
     ['审　　判　　长　　　郑怀瑾', '郑怀瑾'],
   ];
   for (const [text, name] of cases) {
@@ -212,7 +286,7 @@ test('检测：角色标签姓名（原告/被告人/审判长）', () => {
 test('检测：地名与机构名不误判为姓名', () => {
   for (const text of [
     '住所地广东省雷州市北和镇石牌垌村祠堂侧',
-    '被告二：雷州市北和镇石牌垌村村民委员会，负责人陈兆坤，主任。',
+    '被告二：雷州市北和镇石牌垌村村民委员会，负责人：陈兆坤，主任。',
     '委托诉讼代理人：林敬舟，广东海田律师事务所律师。',
   ]) {
     const names = detect(text).items.filter((i) => i.type === 'name').map((i) => i.value);
@@ -233,31 +307,31 @@ test('检测：同文档姓名传播（后文只出现名字也命中）', () =>
   assert.ok(later.items.some((i) => i.type === 'name' && i.value === '陈阿满'));
 });
 
-test('扩展·姓名：角色标签全覆盖', () => {
+test('扩展·姓名：人称前缀 + 冒号结构', () => {
   const roles = ['原告', '被告', '法定代表人', '审判长', '证人', '鉴定人', '委托代理人'];
   for (const r of roles) {
-    assert.ok(hasValue(`${r}张三到庭`, 'name', '张三'), `${r} 未识别张三`);
+    assert.ok(hasValue(`${r}：张三。`, 'name', '张三'), `${r} 未识别张三`);
   }
 });
 
-test('扩展·姓名：称呼后缀 / 男女结构 / 职业前缀', () => {
-  assert.ok(hasValue('王芳女士确认', 'name', '王芳'));
+test('扩展·姓名：身份字段 / 人口学属性；职业词不单独作证据', () => {
+  assert.ok(hasValue('证人：王芳。', 'name', '王芳'));
   assert.ok(hasValue('当事人李四，男，汉族', 'name', '李四'));
-  assert.ok(hasValue('村医周济世到场', 'name', '周济世'));
+  assert.strictEqual(vals('村医周济世到场', 'name').length, 0);
 });
 
-test('扩展·姓名：复姓 / 2 字 / 3 字', () => {
-  assert.ok(hasValue('原告欧阳明到庭', 'name', '欧阳明'));
-  assert.ok(hasValue('原告张三到庭', 'name', '张三'));
-  assert.ok(hasValue('原告陈阿满到庭', 'name', '陈阿满'));
-  // 注：含「月/日」等时间功能字的 4 字姓名（如「欧阳明月」）会被时间词过滤截短，
-  // 属已知的保守边界，宁可少屏蔽也不误伤正文时间表述。
+test('扩展·姓名：复姓 / 2 字 / 3 字均由结构确认', () => {
+  assert.ok(hasValue('原告：欧阳明。', 'name', '欧阳明'));
+  assert.ok(hasValue('原告：张三。', 'name', '张三'));
+  assert.ok(hasValue('原告：陈阿满。', 'name', '陈阿满'));
+  assert.strictEqual(vals('原告欧阳明到庭', 'name').length, 0, '无分隔单句不猜测');
 });
 
-test('扩展·姓名：谓语语境（同意 / 商议 / 供述）', () => {
-  for (const t of ['张三同意', '与李四商议', '王芳供述']) {
-    const who = t.startsWith('与') ? '李四' : t.slice(0, 2);
-    assert.ok(hasValue(t, 'name', who), `${t} 未识别`);
+test('扩展·姓名：谓语不靠动作词识别，已确认姓名可传播', () => {
+  const known = collectEntities(['被告人：张三。', '证人：李四。', '记录人：王芳。']);
+  for (const [t, who] of [['张三同意', '张三'], ['与李四商议', '李四'], ['王芳供述', '王芳']]) {
+    assert.strictEqual(vals(t, 'name').length, 0, `${t} 不应靠谓语猜测`);
+    assert.ok(hasValue(t, 'name', who, { knownEntities: known }), `${t} 传播未命中`);
   }
 });
 
@@ -266,16 +340,18 @@ test('扩展·姓名：不误报常见普通词与地名', () => {
   assert.strictEqual(vals(t, 'name').length, 0, JSON.stringify(vals(t, 'name')));
 });
 
-test('扩展·姓名：谓语语境补强——收受/送给/支付 + 人名 + 金额', () => {
-  assert.ok(hasValue('被告人张三收受李四人民币2.09万元', 'name', '李四'), '收受后的人名应识别');
-  assert.ok(hasValue('王芳支付给陈阿满现金14万元', 'name', '陈阿满'), '支付后的人名应识别');
+test('扩展·姓名：金额语境不新增证据，使用案卷实体表传播', () => {
+  const known = collectEntities(['证人：李四。', '负责人：陈阿满。']);
+  assert.ok(hasValue('被告人张三收受李四人民币2.09万元', 'name', '李四', { knownEntities: known }));
+  assert.ok(hasValue('王芳支付给陈阿满现金14万元', 'name', '陈阿满', { knownEntities: known }));
 });
 
-test('新增·姓名弱语境：请/让/由/向/跟/和 + 姓名 + 动词命中，且「和张伟开会」不误报', () => {
-  for (const t of ['请张伟跟进项目', '由李四负责对接', '和王芳商议对策', '通知陈阿满出席会议']) {
-    assert.ok(vals(t, 'name').length >= 1, `弱语境姓名未命中: ${t}`);
-  }
-  assert.strictEqual(vals('今天上午和张伟开会讨论进度', 'name').length, 0, '开会不在动作词表，不应误报');
+test('姓名弱语境：引导词和动作词均不直接确认', () => {
+  const texts = ['请张伟跟进项目', '由李四负责对接', '和王芳商议对策', '通知陈阿满出席会议'];
+  for (const t of texts) assert.strictEqual(vals(t, 'name').length, 0, `弱语境不应命中: ${t}`);
+  assert.strictEqual(vals('今天上午和张伟开会讨论进度', 'name').length, 0);
+  const known = collectEntities(['证人：张伟。', '证人：李四。', '证人：王芳。', '证人：陈阿满。']);
+  for (const t of texts) assert.ok(vals(t, 'name', { knownEntities: known }).length >= 1, `实体传播未命中: ${t}`);
 });
 
 test('规则：身份证校验码不合法也命中（语境引导）', () => {
@@ -285,14 +361,14 @@ test('规则：身份证校验码不合法也命中（语境引导）', () => {
 });
 
 test('规则：角色标签长词优先，「被告人陈阿满在…」不漏检', () => {
-  const t = '2019年至2024年，被告人陈阿满在先后担任雷阳中学教务处主任期间';
+  const t = '2019年至2024年，被告人：陈阿满，在先后担任雷阳中学教务处主任期间';
   const names = detect(t).items.filter((i) => i.type === 'name').map((i) => i.value);
   assert.ok(names.includes('陈阿满'), names.join(','));
   assert.ok(!names.includes('教务处'), names.join(','));
 });
 
 test('规则：机构名不吞并人名、系动词与时间词', () => {
-  const t = '答：陈阿满是广东雷阳律师事务所负责人。2022年9月初广东雷阳律师事务所经招投标';
+  const t = '答：陈阿满，男，是广东雷阳律师事务所负责人。2022年9月初广东雷阳律师事务所经招投标';
   const r = detect(t);
   const orgs = r.items.filter((i) => i.type === 'org').map((i) => i.value);
   assert.deepStrictEqual(orgs, ['广东雷阳律师事务所', '广东雷阳律师事务所'], JSON.stringify(r.items));
@@ -303,15 +379,15 @@ test('规则：姓名精度（开庭/许可/回族/教务处 不误报，陈阿�
   const bad = detect('请审判长开庭。应当经审判长或独任审判员许可。回族，教务处主任');
   assert.strictEqual(bad.items.filter((i) => i.type === 'name').length, 0, JSON.stringify(bad.items));
   // 「元」是常见人名末字，不能被尾字过滤规则截断成两字
-  const yuan = detect('书记员：陈阿元担任法庭记录。');
+  const yuan = detect('书记员：陈阿元，担任法庭记录。');
   assert.ok(yuan.items.some((i) => i.type === 'name' && i.value === '陈阿元'), JSON.stringify(yuan.items));
-  const good = detect('书记员：张三担任法庭记录。审：被告人陈阿满，现法庭核实身份。答：我的学生王芳刚大学毕业');
+  const good = detect('书记员：张三，担任法庭记录。审：被告人：陈阿满，现法庭核实身份。答：王芳，女，刚大学毕业');
   const ns = good.items.filter((i) => i.type === 'name').map((i) => i.value);
   for (const n of ['张三', '陈阿满', '王芳']) assert.ok(ns.includes(n), n + ' → ' + ns.join(','));
 });
 
-test('规则：职务语境姓名（李四/王芳/陈阿满/张伟）', () => {
-  const t = '食堂负责人李四贿赂14万元，法定代表人王芳银行转账2.09万元，总经理陈阿满贿赂2万元，副总经理张伟同意';
+test('规则：人称角色与姓名字段确认姓名', () => {
+  const t = '食堂负责人：李四，贿赂14万元；法定代表人：王芳，银行转账2.09万元；总经理，姓名：陈阿满；副总经理，姓名：张伟';
   const ns = detect(t).items.filter((i) => i.type === 'name').map((i) => i.value);
   for (const n of ['李四', '王芳', '陈阿满', '张伟']) assert.ok(ns.includes(n), n + ' → ' + ns.join(','));
 });
@@ -326,8 +402,9 @@ test('规则：紧邻强 PII 的普通动词不级联成姓名', () => {
   const t = '订单编号 123456202301011234 已生成，另一编号 987654202312106789 审批完毕。';
   const ns = detect(t).items.filter((i) => i.type === 'name');
   assert.strictEqual(ns.length, 0, JSON.stringify(ns));
-  // 邻接证据对真名仍然有效（PII 旁 2 字内的真名正常判出）
-  const ok = detect('手机13812345678联系张三。');
+  // 号码邻接本身不构成姓名证据；已确认姓名可按实体表传播。
+  assert.strictEqual(detect('手机13812345678联系张三。').items.filter((i) => i.type === 'name').length, 0);
+  const ok = detect('手机13812345678联系张三。', { knownNames: new Set(['张三']) });
   assert.ok(ok.items.some((i) => i.type === 'name' && i.value === '张三'), JSON.stringify(ok.items));
 });
 
@@ -366,7 +443,8 @@ test('规则：地址整串含门牌楼栋单元室，并按地址尾字裁剪�
 
 test('规则：籍贯命中，国家机关名中的行政区划不误伤', () => {
   const a = detect('，回族，浙江杭州人，大学文化');
-  assert.ok(a.items.some((i) => i.type === 'address' && i.value === '浙江杭州'), JSON.stringify(a.items));
+  // 纯行政区划籍贯属于公开信息，不再按地址屏蔽
+  assert.strictEqual(a.items.filter((i) => i.type === 'address').length, 0, JSON.stringify(a.items));
   const b = detect('杭州市人民检察院查明，浙江省杭州市人民法院');
   assert.strictEqual(b.items.filter((i) => i.type === 'address').length, 0, JSON.stringify(b.items));
 });
@@ -396,9 +474,13 @@ test('扩展·地址：省市区县镇乡村多层级 + 门牌楼栋', () => {
   assert.ok(hit && hit.includes('502室'), JSON.stringify(vals(t, 'address')));
 });
 
-test('扩展·地址：籍贯表述', () => {
-  assert.ok(hasValue('，汉族，浙江杭州人，大学文化', 'address', '浙江杭州'));
-  assert.ok(hasValue('，回族，安徽雷州人，', 'address', '安徽雷州'));
+test('扩展·地址：籍贯表述（纯行政区划不屏蔽，含居住要素才屏蔽）', () => {
+  assert.strictEqual(vals('，汉族，浙江杭州人，大学文化', 'address').length, 0,
+    JSON.stringify(vals('，汉族，浙江杭州人，大学文化', 'address')));
+  assert.strictEqual(vals('，回族，安徽雷州人，', 'address').length, 0,
+    JSON.stringify(vals('，回族，安徽雷州人，', 'address')));
+  assert.strictEqual(vals('，广东雷州雷城街道人，', 'address').length, 0, '纯行政区划籍贯不屏蔽');
+  assert.ok(hasValue('籍贯：广东雷州雷城街道文三路18号', 'address', '广东雷州雷城街道文三路18号'));
 });
 
 test('扩展·地址：国家机关名中的行政区划不屏蔽', () => {
@@ -434,7 +516,7 @@ test('扩展·机构：泛指词不识别为主体', () => {
 });
 
 test('扩展·机构：不吞并人名 / 系动词 / 时间词', () => {
-  const t = '答：陈阿满是广东雷阳律师事务所负责人。2022年9月初广东雷阳律师事务所经招投标';
+  const t = '答：陈阿满，男，是广东雷阳律师事务所负责人。2022年9月初广东雷阳律师事务所经招投标';
   assert.deepStrictEqual(vals(t, 'org'), ['广东雷阳律师事务所', '广东雷阳律师事务所']);
 });
 
@@ -460,9 +542,10 @@ test('优化·机构：司法机关（人民检察院/法院）纳入遮蔽', ()
   assert.ok(hasValue('本案由雷州市人民检察院侦查终结', 'org', '雷州市人民检察院'));
 });
 
-test('优化·籍贯：无行政区划后缀地名（省份名锚定）', () => {
-  assert.ok(hasValue('李四，安徽仓吉人，回族，小学文化', 'address', '安徽仓吉'));
-  assert.ok(hasValue('陈阿满，广东雷州人，男', 'address', '广东雷州'));
+test('优化·籍贯：省份名锚定的纯地名籍贯不屏蔽', () => {
+  assert.strictEqual(vals('李四，安徽仓吉人，回族，小学文化', 'address').length, 0,
+    JSON.stringify(vals('李四，安徽仓吉人，回族，小学文化', 'address')));
+  assert.strictEqual(vals('陈阿满，广东雷州人，男', 'address').length, 0);
   assert.strictEqual(vals('王五是本地人，张伟是年轻人', 'address').length, 0);
 });
 
@@ -472,11 +555,10 @@ test('优化·机构：动作/系动词断点与多词叠加剥离', () => {
   assert.ok(hasValue('北京华创系统工程有限公司承接项目', 'org', '北京华创系统工程有限公司'));
 });
 
-test('优化·地址：叙述截断与单级地名兜底', () => {
-  const a = vals('位于仓吉县第一中学南校区食堂负责人办公室抓获', 'address');
-  assert.ok(a.some((v) => v === '仓吉县第一中学南校区'), JSON.stringify(a));
-  assert.ok(hasValue('案发地合肥市，另一现场在颍上县城关镇', 'address', '合肥市'));
-  assert.ok(hasValue('案发地合肥市，另一现场在颍上县城关镇', 'address', '颍上县城关镇'));
+test('优化·地址：必须有居住要素，单级行政区划不兜底', () => {
+  assert.strictEqual(vals('位于仓吉县第一中学南校区食堂负责人办公室抓获', 'address').length, 0);
+  assert.strictEqual(vals('案发地合肥市，另一现场在颍上县城关镇', 'address').length, 0);
+  assert.ok(hasValue('案发地合肥市西湖大道138号', 'address', '合肥市西湖大道138号'));
   assert.ok(vals('前往雷州市西湖大道138号', 'address').every((v) => !/^(前往|位于|在)/.test(v)));
 });
 
@@ -495,10 +577,10 @@ test('新增·机构后缀：医院/银行/支行/工作室/超市/宾馆/工厂
   const cases = [
     ['被告系杭州友好医院职工', '杭州友好医院'],
     ['该公司向中国工商银行深圳支行贷款', '中国工商银行深圳支行'],
-    ['负责人系星星超市法人', '星星超市'],
-    ['被告系金源宾馆员工', '金源宾馆'],
+    ['负责人系星星连锁超市法人', '星星连锁超市'],
+    ['被告系金源商务宾馆员工', '金源商务宾馆'],
     ['位于城东汽车工厂附近', '城东汽车工厂'],
-    ['系华联门市部员工', '华联门市部'],
+    ['系华联百货门市部员工', '华联百货门市部'],
   ];
   for (const [text, want] of cases) {
     assert.ok(hasValue(text, 'org', want), `机构未识别: ${text} → ${want}`);
@@ -524,7 +606,7 @@ test('优化·案号：检察院案号前缀不得被误判为姓名（检测部
   const t = '公诉机关以南检刑诉[2026]Z25号起诉';
   assert.strictEqual(vals(t, 'name').length, 0, JSON.stringify(vals(t, 'name')));
   assert.strictEqual(vals('杭检刑诉【2021】88号', 'name').length, 0);
-  assert.ok(hasValue('原告张三，南检刑诉[2026]Z25号', 'name', '张三'));
+  assert.ok(hasValue('原告：张三，南检刑诉[2026]Z25号', 'name', '张三'));
   assert.strictEqual(vals('检定员李四负责检测工作', 'name').length, 0);
 });
 
@@ -543,13 +625,9 @@ test('排除：性别/年龄/出生日期不被屏蔽', () => {
 
 /* ================= F:\Law\Test 案卷审计回归（误屏蔽 / 漏屏蔽修复锁定） ================= */
 
-const { hashName } = require('../src/core/detector');
 const { Vault, maskText } = require('../src/core/masker');
 
-test('审计·投毒缓存：执行/执业/文件/查笔 即使在缓存中也不得遮为姓名', () => {
-  // 旧版检测器曾把这些姓氏字开头的复合词误确认成姓名并写入缓存，
-  // 哈希传播曾让「执行立案」→「执*立案」。负例词表优先级高于一切传播。
-  const poisoned = new Set(['执行', '执业', '文件', '查笔', '执法', '执笔'].map(hashName));
+test('审计·普通词无结构锚点时不遮为姓名', () => {
   const v = new Vault();
   for (const t of [
     '执行立案审查。',
@@ -558,16 +636,17 @@ test('审计·投毒缓存：执行/执业/文件/查笔 即使在缓存中也�
     '相关文件如下。',
     '调查笔录一份。',
   ]) {
-    const m = maskText(t, v, { knownNameHashes: poisoned });
+    const m = maskText(t, v);
     assert.ok(!/〔姓名·/.test(m.masked), `${t} → 误遮: ${m.masked}`);
     assert.ok(/执行|执业|文件|调查笔录/.test(m.masked), `${t} → 原词应保留: ${m.masked}`);
     assertNoLeak(m.masked, '14401202080123456', '证号');
   }
 });
 
-test('审计·弱证据不入缓存：邻接 PII / 动作词 / 引导词确认的姓名 confident=false', () => {
-  const weak = detect('手机13812345678联系张三。').items.filter((i) => i.type === 'name');
-  assert.ok(weak.some((i) => i.value === '张三' && !i.confident), '邻接证据为弱证据');
+test('审计·邻接 PII 不确认姓名，传播命中 confident=false', () => {
+  assert.strictEqual(detect('手机13812345678联系张三。').items.filter((i) => i.type === 'name').length, 0);
+  const weak = detect('手机13812345678联系张三。', { knownNames: new Set(['张三']) }).items.filter((i) => i.type === 'name');
+  assert.ok(weak.some((i) => i.value === '张三' && !i.confident), '传播命中为弱证据');
   const strong = detect('原告：陈阿满，男').items.filter((i) => i.type === 'name');
   assert.ok(strong.some((i) => i.value === '陈阿满' && i.confident), '角色标签为强证据');
 });
@@ -592,14 +671,13 @@ test('审计·机构：年例理事会 / 委员会等基层组织整体识别', 
   assert.ok(vals('村民选举委员会公示名单', 'org').some((v) => v.endsWith('委员会')), '选举委员会');
   // 负例成对：连词残尾（「他和工厂」）不判机构，且不影响真地名机构
   assert.strictEqual(vals('他和工厂签了合同', 'org').length, 0, '他和工厂 → 连词残尾');
-  assert.ok(vals('线索移交给北和派出所', 'org').includes('北和派出所'), '北和派出所不受影响');
+  assert.ok(vals('线索移交给北和镇派出所', 'org').includes('北和镇派出所'), '北和镇派出所不受影响');
   assert.ok(vals('会同县人民法院受理', 'org').includes('会同县人民法院'), '会同县不受影响');
 });
 
-test('审计·姓名：米婆梁月娇（真名含「月」）经职业前缀命中', () => {
-  assert.ok(vals('米婆梁月娇到场。', 'name').includes('梁月娇'),
-    JSON.stringify(vals('米婆梁月娇到场。', 'name')));
-  // 上下文不足时仍不误报（relax 不改变证据门槛）
+test('审计·姓名：职业词不单独确认，明确人称结构可确认', () => {
+  assert.strictEqual(vals('米婆梁月娇到场。', 'name').length, 0);
+  assert.ok(vals('证人：梁月娇。', 'name').includes('梁月娇'));
   assert.strictEqual(vals('三月的梁家聚会', 'name').length, 0, '无语境不得误报');
 });
 

@@ -586,6 +586,22 @@ test('自适应布局：面板宽高独立，可细长 / 宽扁（非等比放�
   assert.strictEqual(autoUiScale(1920, 1040), 1);
 });
 
+test('自适应布局：胶囊宽度跟随字体档位等比伸缩，且不越出屏幕', () => {
+  const area = wa(1920, 1040);
+  const pillW = (fs) => computeIslandLayout(area, { fontScale: fs }).pill.width;
+  assert.ok(pillW(0.9) < pillW(1) && pillW(1) < pillW(1.15) && pillW(1.15) < pillW(1.3),
+    '字体档位越高胶囊越宽');
+  assert.ok(Math.abs(pillW(1.3) / pillW(1) - 1.3) <= 0.02, '宽度按档位系数等比伸缩');
+  assert.strictEqual(pillW(2), pillW(1.3), '越界档位钳到上限');
+  assert.strictEqual(pillW(0.1), pillW(0.85), '越界档位钳到下限');
+  assert.strictEqual(pillW('x'), pillW(1), '非法档位回退标准');
+  for (const [label, a] of SCREENS) {
+    for (const fs of [0.9, 1, 1.15, 1.3]) {
+      assertFits(a, computeIslandLayout(a, { fontScale: fs }), `${label}×fs${fs}`);
+    }
+  }
+});
+
 test('自适应布局：收起态胶囊贴顶，面板位置不受影响', () => {
   const area = wa(1920, 1040, 100, 30);
   const expanded = computeIslandLayout(area, { collapsed: false });

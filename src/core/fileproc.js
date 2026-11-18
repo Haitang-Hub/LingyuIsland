@@ -17,9 +17,10 @@ const {
   maskText, restoreText, countCodes, maskEdits, restoreEdits, cleanEdits,
 } = require('./masker');
 const { detect, hashName } = require('./detector');
+const { collectEntities, createEntities, mergeEntities } = require('./entities');
 const { xmlBlockTexts, transformXmlText } = require('./xmltext');
 const {
-  LEGACY_EXTS, getConverted, converterHint,
+  LEGACY_EXTS, isLegacyDoc, getConverted, converterHint,
 } = require('./docconvert');
 const pdfproc = require('./pdfproc');
 
@@ -129,11 +130,15 @@ function isZipFile(p) {
  */
 function normalizeSource(filePath) {
   const ext = path.extname(filePath).slice(1).toLowerCase();
-  if (!LEGACY_EXTS.has(ext)) return { src: filePath, ext, legacy: false };
-  if (isZipFile(filePath)) return { src: filePath, ext: 'docx', legacy: true };
-  const converted = getConverted(filePath);
-  if (converted) return { src: converted, ext: 'docx', legacy: true };
-  return { src: filePath, ext: 'legacy', legacy: true };
+  const legacyName = LEGACY_EXTS.has(ext);
+  if (isZipFile(filePath)) return { src: filePath, ext: legacyName ? 'docx' : ext, legacy: legacyName };
+  if (isLegacyDoc(filePath)) {
+    const converted = getConverted(filePath);
+    if (converted) return { src: converted, ext: 'docx', legacy: true };
+    return { src: filePath, ext: 'legacy', legacy: true };
+  }
+  if (legacyName) return { src: filePath, ext: 'legacy', legacy: true };
+  return { src: filePath, ext, legacy: false };
 }
 
 function legacyUnavailable(filePath) {
@@ -178,49 +183,22 @@ function restoredPathOf(p) {
 
 /* ---------------- 文本节点安全替换（Office XML 用） ---------------- */
 
-/**
- * 收集一份文档里「有语境证据」的姓名，用于跨段落传播：
- * 首次出现处有「原告：」「，男，」「村医」等锚点，后文只出现名字也能命中
- * 超大文本跳过预扫（几 MB 级别两遍扫描明显变慢，收益有限）
- */
-const NAME_PRESCAN_LIMIT = 1.5 * 1024 * 1024;
+const ENTITY_PRESCAN_LIMIT = 1.5 * 1024 * 1024;
 
-function collectKnownNames(segments, toggles) {
-  return collectKnownEntities(segments, toggles).names;
+function inheritedEntities(knownNames, opts = {}) {
+  const legacy = createEntities();
+  if (knownNames) for (const value of knownNames) legacy.name.add(value);
+  if (opts.knownPlaces) for (const value of opts.knownPlaces) legacy.address.add(value);
+  return mergeEntities(legacy, opts.knownEntities);
 }
 
-/**
- * 收集一份文档里「有语境证据」的姓名与地名，用于跨段落传播：
- *  - 姓名：仅收 strong 证据（角色标签 / 男女结构 / 职业前缀等）确认的；
- *    弱证据（邻接 PII / 动作词）不入缓存，防止「执行/文件」这类
- *    姓氏字开头的复合词被传播成全篇姓名。
- *  - 地名：已确认地址值（≥3 字），供「石牌垌下房亲邻群」这类
- *    无引导词、无行政区划后缀的提及命中。
- */
-function collectKnownEntities(segments, toggles) {
-  const names = new Set();
-  const places = new Set();
+function collectFileEntities(segments, toggles, inherited) {
   let total = 0;
   for (const seg of segments) {
     total += seg ? seg.length : 0;
-    if (total > NAME_PRESCAN_LIMIT) return { names, places };
+    if (total > ENTITY_PRESCAN_LIMIT) return mergeEntities(inherited);
   }
-  for (const seg of segments) {
-    if (!seg || !seg.trim()) continue;
-    for (const it of detect(seg, { toggles }).items) {
-      if (it.type === 'name' && it.confident) names.add(it.value);
-      else if (it.type === 'address' && it.value.length >= 3) places.add(it.value);
-    }
-  }
-  return { names, places };
-}
-
-/** 合并「本文档已有姓名」与「同批次其它文档已确认姓名」 */
-function mergeKnown(a, b) {
-  if (!b || !b.size) return a;
-  const out = new Set(a);
-  for (const v of b) if (v) out.add(v);
-  return out;
+  return collectEntities(segments, { toggles, knownEntities: inherited });
 }
 
 /* ---------------- 跨文件已知姓名缓存（应用数据目录，只存哈希，不存明文） ---------------- */
@@ -240,12 +218,11 @@ function caseDirKey(caseDir) {
 function readNamesStore(storeFile) {
   try {
     const data = JSON.parse(fs.readFileSync(storeFile, 'utf8'));
-    // v2 起才信任缓存：v1 是旧版检测器（负例词表不全）写下的，
-    // 其中混有把「执行/执业/文件」等复合词误确认成姓名的「毒哈希」，
-    // 会经哈希传播污染整篇脱敏产物 —— 旧缓存一律弃用，重新积累。
-    if (data && data.v === 2 && data.dirs && typeof data.dirs === 'object') return data;
+    // v3 起才信任缓存：旧版检测器可能写入误判姓名的哈希，
+    // 结构规则重设计后一律弃用旧缓存并重新积累。
+    if (data && data.v === 3 && data.dirs && typeof data.dirs === 'object') return data;
   } catch { /* 缺失/损坏 → 全新 */ }
-  return { v: 2, dirs: {} };
+  return { v: 3, dirs: {} };
 }
 
 /**
@@ -292,36 +269,15 @@ function saveKnownNameHashes(storeFile, caseDir, names) {
   } catch { return false; }
 }
 
-/* ---------------- 虚构声明强制注入 ---------------- */
-
-const DISCLAIMER_MARK = '灵屿岛脱敏声明';
-// 注意：声明会插入 PDF 首页顶部，必须保持在一行宽度内（约 ≤30 字），
-// 否则文本层抽取会折行，「屏蔽→还原」的逐字一致会被破坏。
-const DISCLAIMER_TEXT = `〔${DISCLAIMER_MARK}〕本文件经屏蔽处理，可凭映射库还原。`;
-// docx 注入的整段 <w:p>（注入与剥离用同一常量，保证幂等）
-const DISCLAIMER_PARA = `<w:p><w:r><w:t xml:space="preserve">${DISCLAIMER_TEXT}</w:t></w:r></w:p>`;
-
-/** docx：把声明段插到正文开头（幂等：已有声明不重复插入） */
-function injectOfficeDisclaimer(xml) {
-  if (xml.includes(DISCLAIMER_MARK)) return xml;
-  return xml.replace(/(<w:body[^>]*>)/i, `$1${DISCLAIMER_PARA}`);
-}
-
-/** docx 还原：剥离声明段，保证「屏蔽→还原」后正文与原件一致 */
-function stripOfficeDisclaimer(xml) {
-  if (!xml.includes(DISCLAIMER_MARK)) return xml;
-  return xml.split(DISCLAIMER_PARA).join('');
-}
-
 /* ---------------- 质量门禁：残留自检 ---------------- */
 
 /**
  * 用同一套检测器对屏蔽产物复检：如仍有敏感信息检出，
  * 返回 'residual-pii'（warning 标记，不阻断流程）。
  */
-function residualCheck(maskedText, toggles, knownNames) {
+function residualCheck(maskedText, toggles, knownNames, knownEntities) {
   try {
-    const { items } = detect(maskedText, { toggles, knownNames });
+    const { items } = detect(maskedText, { toggles, knownNames, knownEntities });
     return items.length ? 'residual-pii' : undefined;
   } catch { return undefined; }
 }
@@ -330,10 +286,10 @@ function residualCheck(maskedText, toggles, knownNames) {
  * 段落级拼接 → 统一检测 → 编辑映射回各 <w:t> 节点。
  * 只改 >text< 之间的内容，标签、属性、run 结构一律不动。
  */
-function maskXmlText(xml, vault, toggles, knownNames, knownNameHashes, knownPlaces) {
+function maskXmlText(xml, vault, toggles, knownEntities, knownNameHashes) {
   const r = transformXmlText(xml, (blockText, boundaries) => {
     const { edits, items } = maskEdits(blockText, vault, {
-      toggles, knownNames, knownNameHashes, knownPlaces, boundaries,
+      toggles, knownEntities, knownNameHashes, boundaries,
     });
     return { edits, count: items.length };
   });
@@ -431,22 +387,17 @@ function maskFile(filePath, vault, toggles, outPath, knownNames, opts = {}) {
     const outDir = path.dirname(out);
     // 跨文件已知姓名缓存（应用数据目录，按案卷目录区分；opts.namesFile 未传则跳过持久化）
     const knownHashes = opts.namesFile ? loadKnownNameHashes(opts.namesFile, outDir) : new Set();
-    const knownEnt = collectKnownEntities([dec.text], toggles);
-    const known = mergeKnown(knownEnt.names, knownNames);
+    const inherited = inheritedEntities(knownNames, opts);
+    const knownEnt = collectFileEntities([dec.text], toggles, inherited);
     const r = maskText(dec.text, vault, {
-      toggles, knownNames: known, knownNameHashes: knownHashes, knownPlaces: knownEnt.places,
+      toggles, knownEntities: knownEnt, knownNameHashes: knownHashes,
     });
     if (r.items.length === 0) return { ok: true, path: filePath, count: 0, counts: {}, skipped: 'no-pii' };
     fs.writeFileSync(out, encodeText(r.masked, dec.encoding, dec.bom));
     // 本文件确认的姓名并入跨文件缓存（只存哈希），供后续批次命中无语境重名
-    if (opts.namesFile) {
-      saveKnownNameHashes(opts.namesFile, outDir, [
-        ...known,
-        ...r.items.filter((i) => i.type === 'name' && i.confident).map((i) => i.value),
-      ]);
-    }
+    if (opts.namesFile) saveKnownNameHashes(opts.namesFile, outDir, [...knownEnt.name]);
     // 质量门禁：对屏蔽产物复检，残留敏感信息则以 warning 标记
-    const warning = residualCheck(r.masked, toggles, known);
+    const warning = residualCheck(r.masked, toggles, undefined, knownEnt);
     return { ok: true, path: filePath, maskedPath: out, count: r.items.length, counts: r.counts, ...(warning ? { warning } : {}) };
   }
   return { ok: false, path: filePath, skipped: 'unsupported', reason: n.ext };
@@ -493,27 +444,21 @@ function maskOffice(filePath, vault, toggles, outPath, knownNames, opts = {}) {
     const out = outPath || maskedPathOf(filePath);
     // 跨文件已知姓名缓存（应用数据目录，按案卷目录区分；opts.namesFile 未传则跳过持久化）
     const knownHashes = opts.namesFile ? loadKnownNameHashes(opts.namesFile, path.dirname(out)) : new Set();
-    // 先按段落级文本扫一遍收集已确认姓名，再统一替换
-    // （逐节点预扫会因「被告人：」与姓名分属不同 run 而整批漏掉）
+    // 先按逻辑块确认实体，再把完整实体表套用到全部段落和表格单元格。
     const segments = [];
     for (const p of parts) segments.push(...xmlBlockTexts(p.xml));
-    const knownEnt = collectKnownEntities(segments, toggles);
-    const known = mergeKnown(knownEnt.names, knownNames);
+    const inherited = inheritedEntities(knownNames, opts);
+    const knownEnt = collectFileEntities(segments, toggles, inherited);
 
     let count = 0;
     let touched = false;
     for (const p of parts) {
       let xml = p.xml;
       let c = 0;
-      const r = maskXmlText(xml, vault, toggles, known, knownHashes, knownEnt.places);
+      const r = maskXmlText(xml, vault, toggles, knownEnt, knownHashes);
       c += r.count;
       if (c > 0) {
-        // 虚构声明强制注入：仅 docx 正文，幂等（已有声明不重复插入）
-        if (p.name === 'word/document.xml' && opts.declare !== false) {
-          xml = injectOfficeDisclaimer(r.xml);
-        } else {
-          xml = r.xml;
-        }
+        xml = r.xml;
         zip.updateFile(p.name, Buffer.from(xml, 'utf8'));
         count += c;
         touched = true;
@@ -522,7 +467,7 @@ function maskOffice(filePath, vault, toggles, outPath, knownNames, opts = {}) {
     if (!touched) return { ok: true, path: filePath, count: 0, counts: {}, skipped: 'no-pii' };
     zip.writeZip(out);
     // 本文件确认的姓名并入跨文件缓存（只存哈希）
-    if (opts.namesFile) saveKnownNameHashes(opts.namesFile, path.dirname(out), [...known]);
+    if (opts.namesFile) saveKnownNameHashes(opts.namesFile, path.dirname(out), [...knownEnt.name]);
     // 质量门禁：对屏蔽产物（段落级拼接）复检
     const maskedZip = new AdmZip(out);
     const maskedParts = [];
@@ -530,7 +475,7 @@ function maskOffice(filePath, vault, toggles, outPath, knownNames, opts = {}) {
       const entry = maskedZip.getEntry(p.name);
       if (entry) maskedParts.push(...xmlBlockTexts(entry.getData().toString('utf8')));
     }
-    const warning = residualCheck(maskedParts.join('\n'), toggles, known);
+    const warning = residualCheck(maskedParts.join('\n'), toggles, undefined, knownEnt);
     return { ok: true, path: filePath, maskedPath: out, count, counts: {}, ...(warning ? { warning } : {}) };
   } catch (err) {
     return { ok: false, path: filePath, skipped: 'error', reason: String(err && err.message || err) };
@@ -546,16 +491,10 @@ function restoreOffice(filePath, vault, outPath) {
     for (const entry of zip.getEntries()) {
       if (!OFFICE_PARTS.some((re) => re.test(entry.entryName))) continue;
       let xml = entry.getData().toString('utf8');
-      // 屏蔽时注入的虚构声明段在此剥离，保证「屏蔽→还原」正文与原件逐字一致
-      if (entry.entryName === 'word/document.xml') xml = stripOfficeDisclaimer(xml);
       const r = restoreXmlText(xml, vault);
       if (r.count > 0) {
         zip.updateFile(entry.entryName, Buffer.from(r.xml, 'utf8'));
         count += r.count;
-        touched = true;
-      } else if (xml !== entry.getData().toString('utf8')) {
-        // 没有编码但剥离了声明段：也要写回，避免还原产物残留声明
-        zip.updateFile(entry.entryName, Buffer.from(r.xml, 'utf8'));
         touched = true;
       }
       missing = missing.concat(r.missing || []);
@@ -631,13 +570,15 @@ async function maskPdfFile(filePath, vault, toggles, outPath, opts = {}) {
     let count = 0;
     const knownHashes = opts.knownNameHashes
       || (opts.namesFile ? loadKnownNameHashes(opts.namesFile, path.dirname(out)) : new Set());
+    const inherited = inheritedEntities(opts.knownNames, opts);
+    const blocks = ex.pages.flatMap((page) => page.lines.map((line) => line.text));
+    const knownEnt = collectFileEntities(blocks, toggles, inherited);
     for (const page of ex.pages) {
       const lines = [];
       for (const line of page.lines) {
         const r = maskText(line.text, vault, {
           toggles,
-          knownNames: opts.knownNames,
-          knownPlaces: opts.knownPlaces,
+          knownEntities: knownEnt,
           knownNameHashes: knownHashes,
         });
         count += r.items.length;
@@ -646,23 +587,11 @@ async function maskPdfFile(filePath, vault, toggles, outPath, opts = {}) {
       perPage.push(lines);
     }
     if (count === 0) return { ok: true, path: filePath, count: 0, counts: {}, skipped: 'no-pii' };
-    // 虚构声明强制注入：首页顶部插入一行声明。
-    // 必须同步给提取结构补一行元数据（x/y/size），否则后续内容行会整体
-    // 顺延到默认坐标（页面顶部），「还原→再抽取」的行序会与原件不一致。
-    if (opts.declare !== false) {
-      if (!perPage.length) perPage.push([]);
-      if (!ex.pages.length) ex.pages.push({ width: 595, height: 842, lines: [] });
-      if (!ex.pages[0].lines.length) {
-        ex.pages[0].lines.push({ x: 40, y: ex.pages[0].height - 60, size: 12 });
-      }
-      ex.pages[0].lines.unshift({ x: 40, y: ex.pages[0].height - 60, size: 12 });
-      perPage[0].unshift(DISCLAIMER_TEXT);
-    }
     const bytes = await pdfproc.renderPdf(ex, perPage, opts.pdfFont);
     fs.writeFileSync(out, bytes);
     // 质量门禁：对屏蔽产物复检
     const maskedJoined = perPage.map((l) => l.join('\n')).join('\n');
-    const warning = residualCheck(maskedJoined, toggles, opts.knownNames);
+    const warning = residualCheck(maskedJoined, toggles, undefined, knownEnt);
     return { ok: true, path: filePath, maskedPath: out, count, counts: {}, ...(warning ? { warning } : {}) };
   } catch (err) {
     return { ok: false, path: filePath, skipped: 'error', reason: String((err && err.message) || err) };
@@ -692,13 +621,6 @@ async function restorePdfFile(filePath, vault, outPath) {
       perPage.push(lines);
     }
     if (resolved === 0 && missing.length === 0) return { ok: false, path: filePath, skipped: 'no-codes' };
-    // 剥离屏蔽时注入的声明文本，保证「屏蔽→还原」文本层与原件逐字一致。
-    // 声明行可能被抽取层与相邻行合并，按子串剥离而非整行丢弃。
-    for (const lines of perPage) {
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].includes(DISCLAIMER_MARK)) lines[i] = lines[i].split(DISCLAIMER_TEXT).join('');
-      }
-    }
     for (const lines of perPage) {
       for (let i = lines.length - 1; i >= 0; i--) if (!lines[i].trim()) lines.splice(i, 1);
     }
@@ -716,6 +638,5 @@ module.exports = {
   outputNameOf, normalizeSource, readFileText, detectFileIntent,
   readPdfText, detectPdfIntent, maskPdfFile, restorePdfFile, isPdf,
   loadKnownNameHashes, saveKnownNameHashes, caseDirKey, KNOWN_NAMES_FILE,
-  injectOfficeDisclaimer, stripOfficeDisclaimer, DISCLAIMER_MARK, DISCLAIMER_TEXT,
   residualCheck,
 };

@@ -52,7 +52,8 @@ function isOle2(p) {
 }
 
 function isLegacyDoc(p) {
-  return isLegacyName(p) && isOle2(p);
+  // 以文件头为准；兼容把老 Word 二进制错命名为 .docx 的案卷文件。
+  return (isLegacyName(p) || extOf(p) === 'docx') && isOle2(p);
 }
 
 function ensureTmpDir() {

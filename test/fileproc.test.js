@@ -68,7 +68,7 @@ test('UTF-8 文本文件 屏蔽→还原', () => {
   assert.strictEqual(fs.readFileSync(r.restoredPath, 'utf8'), SAMPLE);
 });
 
-test('docx 屏蔽→还原（含声明注入，还原剥离）', () => {
+test('docx 屏蔽→还原', () => {
   const docxPath = path.join(TMP, 'sample.docx');
   const zip = new AdmZip();
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -295,12 +295,12 @@ async function pdfSuite() {
   test('PDF·遮蔽后文本层不含原号码，含带标签编码', () => {
     assert.ok(!text1.includes('13812345678'));
     assert.ok(/〔[\u4e00-\u9fa5]{1,6}·[0-9a-f]{6,12}〕/.test(text1), '应含类型标签还原编码');
-    assert.ok(text1.includes('〔灵屿岛脱敏声明〕'), '应注入虚构声明');
+    assert.ok(text1.includes('〔灵屿岛脱敏声明〕') === false, '不应注入脱敏声明');
   });
 
   const r = await restorePdfFile(m.maskedPath, v, null);
   const text2 = await readPdfText(r.restoredPath);
-  test('PDF·还原后文本层逐字一致（声明行剥除）', () => {
+  test('PDF·还原后文本层逐字一致', () => {
     assert.strictEqual(r.ok, true, JSON.stringify(r));
     assert.strictEqual(text2, text0);
   });
