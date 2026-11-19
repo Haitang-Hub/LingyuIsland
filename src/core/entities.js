@@ -328,7 +328,10 @@ function detectOrgs(text) {
     if (GENERIC_SCHOOL_BRAND_RE.test(brand)) continue;
     if (value.length < 6 || brand.length < 2) continue;
     // 短后缀机构的独立字号应简洁；长叙述只有带行政区划或上层机构时才保留。
-    const anchored = ADMIN_UNIT_RE.test(brand) || ORG_SUFFIXES.some((s) => brand.includes(s));
+    // 锚定用的内嵌后缀排除本次命中的同一个——「危害法庭安全或妨害法庭」里
+    // 字号中的「法庭」只是同一后缀的前次出现，不是上层机构，不能当锚。
+    const anchored = ADMIN_UNIT_RE.test(brand)
+      || ORG_SUFFIXES.some((s) => s !== suffix && brand.includes(s));
     if (suffix.length <= 3 && brand.length > 4 && !anchored) continue;
     if (GENERIC_ORG_RE.test(brand) || NATIONAL_HEADQUARTERS_RE.test(value)) continue;
     out.push(item('org', start, end, value, true));
