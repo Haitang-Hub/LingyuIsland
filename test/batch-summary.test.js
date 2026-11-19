@@ -59,6 +59,14 @@ test('批量摘要：其他提示为绿色；空结果也以处理完成收尾',
   assertEndsWithDone(empty);
 });
 
+test('批量摘要：文件被占用单独红行，不再混入「无法处理」', () => {
+  const s = buildBatchSummary({ total: 1, locked: 1, skipped: 1 });
+  assert.ok(s.lines.some((l) =>
+    l.text === '未完成：1 份文件被占用，无法覆盖（请关闭后重试）' && l.tone === TONE.ERR));
+  assert.ok(!s.lines.some((l) => l.text.includes('无法处理')));
+  assertEndsWithDone(s);
+});
+
 test('批量摘要：多类未完成逐条列出原因，其他提示保持绿色', () => {
   const s = buildBatchSummary({
     total: 8, masked: 2,

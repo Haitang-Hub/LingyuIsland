@@ -16,6 +16,7 @@ const {
   collectPaths, maskFile, restoreFile,
   maskedPathOf, restoredPathOf, outputNameOf, detectFileIntent, readFileText,
   LEGACY_EXTS, PDF_EXTS, isPdf, detectPdfIntent, maskPdfFile, restorePdfFile, readPdfText,
+  skipReasonForError,
 } = require('../core/fileproc');
 const { preconvert } = require('../core/docconvert');
 const { collectEntities, createEntities } = require('../core/entities');
@@ -56,7 +57,7 @@ async function importAndMask(inputPaths, ctx, sender) {
     const done = {
       error: 'no-root', results: [], total: 0,
       masked: 0, restored: 0, restoredTotal: 0, restoreMissing: 0,
-      alreadyMasked: 0, noPii: 0, skipped: 0, convertFailed: 0, convertReason: '',
+      alreadyMasked: 0, noPii: 0, skipped: 0, locked: 0, convertFailed: 0, convertReason: '',
       totalPII: 0, trashed: 0, importedCount: 0, overwritten: 0,
     };
     island.broadcast('mask:done', done);
@@ -138,7 +139,7 @@ async function importAndMask(inputPaths, ctx, sender) {
         } catch { r.trashed = false; }
       }
     } catch (err) {
-      r = { ok: false, path: src, skipped: 'error', reason: String((err && err.message) || err) };
+      r = { ok: false, path: src, skipped: skipReasonForError(err), reason: String((err && err.message) || err) };
     }
 
     if (r.ok && r.count > 0) {
@@ -173,6 +174,7 @@ async function importAndMask(inputPaths, ctx, sender) {
     noPii: results.filter((r) => r.ok && r.skipped === 'no-pii').length,
     skipped: results.filter((r) => r.skipped && !['no-pii', 'already-masked'].includes(r.skipped)).length,
     pdfNoText: results.filter((r) => r.skipped === 'pdf-no-text').length,
+    locked: results.filter((r) => r.skipped === 'locked').length,
     convertFailed: results.filter((r) => r.skipped === 'legacy-convert').length,
     convertReason: (conversion.failed[0] && conversion.failed[0].reason) || '',
     totalPII,

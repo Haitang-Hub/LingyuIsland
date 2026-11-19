@@ -37,8 +37,9 @@
     const noPii = n(d.noPii);
     const convertFailed = n(d.convertFailed);
     const pdfNoText = n(d.pdfNoText);
+    const locked = n(d.locked);
     const skipped = n(d.skipped);
-    const otherSkipped = Math.max(0, skipped - convertFailed - pdfNoText);
+    const otherSkipped = Math.max(0, skipped - convertFailed - pdfNoText - locked);
 
     // 已完成 / 产物：绿色
     const doneParts = [];
@@ -51,6 +52,7 @@
 
     // 未完成：红色，每行都带原因说明
     const unfinished = [];
+    if (locked) unfinished.push(`${locked} 份文件被占用，无法覆盖（请关闭后重试）`);
     if (restoreMissing) unfinished.push(`编码无法识别 ${restoreMissing} 个（可能已被修改）`);
     if (convertFailed) unfinished.push(`.doc 转换失败 ${convertFailed} 份（请在 Word 中另存为 .docx）`);
     if (pdfNoText) unfinished.push(`扫描件 PDF ${pdfNoText} 份（无可提取文本）`);

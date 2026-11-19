@@ -101,7 +101,7 @@ test('可读性：跨节点片段为「标签+编码」占位，可读且可还�
   const v = new Vault();
   // 实体跨两个文本节点（boundaries 模拟 Office run 拆分）
   const t = '审判长：被告人陈阿满，你是否收到本庭向你送达的临江市清河区';
-  const r2 = '人民检察院南检刑诉[2026]Z25号起诉书副本。';
+  const r2 = '九洲有限公司南检刑诉[2026]Z25号起诉书副本。';
   const blockText = t + r2;
   const { edits } = maskEdits(blockText, v, { boundaries: [t.length] });
   // 按编辑区间应用
@@ -364,11 +364,12 @@ test('修复·案号前缀：屏蔽形态与还原闭环（含纯数字案号）
   }
 });
 
-test('优化·机构：司法机关遮蔽不影响案号独立编码，往返可逆', () => {
+test('优化·机构：公权力机关不遮蔽，案号仍独立编码且往返可逆', () => {
   const v = new Vault();
   const t = '临江市清河区人民检察院南检刑诉[2026]Z25号';
   const m = maskText(t, v);
-  assert.strictEqual((m.masked.match(CODE_BRACKET_RE) || []).length, 2, m.masked);
+  assert.ok(m.masked.includes('临江市清河区人民检察院'), m.masked);
+  assert.strictEqual((m.masked.match(CODE_BRACKET_RE) || []).length, 1, m.masked);
   assert.strictEqual(restoreText(m.masked, v).text, t);
 });
 

@@ -5,7 +5,7 @@
  * 1. 姓名只由身份字段、人称前缀、人口学属性、表格相邻块确认；
  * 2. 人称候选至少复现三次，且左右上下文均不唯一，才可确认；
  * 3. 地址必须含道路、门牌、楼栋、村组等居住要素；
- * 4. 机构必须有机构后缀、至少 6 字，并排除数量泛指和国家总部形态；
+ * 4. 机构必须有机构后缀、至少 6 字，并排除数量泛指、公权力机关与公共法律服务机构；
  * 5. 已确认实体按原值传播，未确认候选不猜测、不屏蔽。
  */
 
@@ -241,6 +241,17 @@ const GENERIC_ORG_RE = /(?:[一二两三四五六七八九十几数多每各某�
 const WELL_KNOWN_BANK_RE = /^中国[\u4e00-\u9fa5]{0,8}银行$/;
 const ADMIN_UNIT_RE = /(?:自治区|省|市|县|区|旗|盟|镇|乡|街道|村|社区)/;
 
+/**
+ * 公权力机关 + 公共法律服务机构：作为整体类别不按机构脱敏。
+ * 这些主体公开可查、不是隐私载体；按机关类型（名称结尾）判断，
+ * 而不是按「最高法」「法援中心」这类具体名称逐个补白名单。
+ * 分类型列出便于增补；地名/级别（国家级、省市县、乡镇）一律不影响判断。
+ */
+const PUBLIC_ORG_TYPE_RE = /(?:人民政府|人民法院|法院|法庭|检察院|监察委员会|监察委|公安局|公安厅|派出所|监狱|戒毒所|司法局|司法厅|司法所|司法部|法律援助中心|公共法律服务中心|公证处|仲裁委(?:员会)?)$/;
+function isPublicOrg(value) {
+  return PUBLIC_ORG_TYPE_RE.test(value);
+}
+
 // 职务动词紧跟机构名是案卷高频句式（「仍实际负责涟水县师资培训中心」），
 // 动词不切断就会吞进字号；单字断点表覆盖不了双字动词，这里按结尾窗口判断。
 const ORG_ROLE_VERB_RE = /(?:负责|担任|主管|分管|兼任|任职|调任|主持|主抓)$/;
@@ -343,6 +354,7 @@ function detectOrgs(text) {
       || ORG_SUFFIXES.some((s) => s !== suffix && brand.includes(s));
     if (suffix.length <= 3 && brand.length > 4 && !anchored) continue;
     if (GENERIC_ORG_RE.test(brand) || WELL_KNOWN_BANK_RE.test(value)) continue;
+    if (isPublicOrg(value)) continue;
     out.push(item('org', start, end, value, true));
   }
   return out;
@@ -411,7 +423,10 @@ function detectEntities(text, options = {}) {
   // 全案卷传播会放大「和江苏…公司」这类吞了连接词的伪机构：
   // 机构名以经/和开头且紧跟省级地名时，几乎必为边界错误，直接丢弃（含传播项）。
   return out.filter((it) => !(
-    it.type === 'org' && /^[和经]/.test(it.value) && PROVINCE_HEAD_RE.test(it.value.slice(1))
+    it.type === 'org' && (
+      isPublicOrg(it.value)
+      || (/^[和经]/.test(it.value) && PROVINCE_HEAD_RE.test(it.value.slice(1)))
+    )
   ));
 }
 

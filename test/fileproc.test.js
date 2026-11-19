@@ -10,7 +10,7 @@ const { Vault, maskText, restoreText, countCodes, maskEdits, restoreEdits, clean
 const {
   maskFile, restoreFile, decodeBuffer, encodeText, maskedPathOf,
   readFileText, detectFileIntent, isJunkFile, collectPaths,
-  outputNameOf, normalizeSource, LEGACY_EXTS,
+  outputNameOf, normalizeSource, LEGACY_EXTS, skipReasonForError,
 } = require('../src/core/fileproc');
 const { resolveOutputPath } = require('../src/main/importer');
 
@@ -36,6 +36,14 @@ test('decodeBuffer：UTF-8 BOM / 二进制识别', () => {
   assert.strictEqual(dec.bom, true);
   // 非法 UTF-8 且 GBK 乱码率超阈值（含 NUL）应判定为二进制
   assert.strictEqual(decodeBuffer(Buffer.from([0, 1, 2, 3, 255, 254, 0])), null, '二进制应返回 null');
+});
+
+test('写入异常分类：文件被占用/无权限归 locked，其余归 error', () => {
+  for (const code of ['EBUSY', 'EPERM', 'EACCES']) {
+    assert.strictEqual(skipReasonForError(Object.assign(new Error('busy'), { code })), 'locked');
+  }
+  assert.strictEqual(skipReasonForError(Object.assign(new Error('nope'), { code: 'ENOENT' })), 'error');
+  assert.strictEqual(skipReasonForError(new Error('plain')), 'error');
 });
 
 /* ---------------- 文本文件管道 ---------------- */

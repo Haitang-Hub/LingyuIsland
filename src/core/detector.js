@@ -149,14 +149,23 @@ const PRIORITY = {
  * 机构/地址/姓名的部分，避免把「临江市清河区人民检察院南检刑诉…」整体吞成案号。
  */
 const CASE_PREFIX_RE = /[\u4e00-\u9fa5]{0,2}(?:检|刑|民|行|政|执|他)(?:刑诉|民诉|行诉|刑初|民初|民终|刑终|指字|刑指|检字|政发|执字|他字)$/;
+// 机关类别字（院/局/委/所…）不属于案号简称，前缀补回遇到它们即停。
+// 机关整体不脱敏后不再有 org item 充当 blocker，这里必须自己识别边界，
+// 否则「人民检察院南检刑诉…」会吞成「院南检刑诉…」。
+const CASE_ORG_TAIL_RE = /^(?:人民法院|检察院|委员会|监察委|公安局|公安厅|派出所|司法局|司法厅|司法所|人民政府|中心|法院|院|局|厅|处|署|庭|所|部|委|会)/;
 function extendCasePrefixes(text, items) {
   for (const it of items) {
     if (it.type !== 'caseNo') continue;
     const before = text.slice(Math.max(0, it.start - 8), it.start);
     const m = CASE_PREFIX_RE.exec(before);
     if (!m) continue;
-    const prefix = m[0].replace(/^[以在向由给经为与和及对从当被把了新的]+/, '');
-    if (!prefix) continue;
+    let prefix = m[0].replace(/^[以在向由给经为与和及对从当被把了新的]+/, '');
+    // 去掉吞入的机关类别字（「院南检刑诉」→「南检刑诉」）；若整段都是类别字则不补。
+    const orgTail = CASE_ORG_TAIL_RE.exec(prefix);
+    if (orgTail) {
+      prefix = prefix.slice(orgTail[0].length);
+      if (!prefix) continue;
+    }
     const prefixStart = it.start - prefix.length;
     const blockers = items.filter((o) => o !== it && o.start < it.start && o.end > prefixStart);
     if (blockers.length) {

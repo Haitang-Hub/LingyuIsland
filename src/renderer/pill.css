@@ -566,7 +566,7 @@ body.collapsed .pill {
 .pill.busy .dot { --ring: rgba(255, 159, 10, 0.4);  animation: dotRing 1.4s ease-out infinite; }
 .pill.clip .dot { --ring: color-mix(in srgb, var(--accent) 45%, transparent); animation: dotRing 1.8s ease-out infinite; }
 .pill.ok .dot, .pill.pop .dot { --ring: rgba(48, 213, 88, 0.5); animation: dotRing 640ms ease-out; }
-.pill.err .dot { --ring: rgba(255, 107, 107, 0.5); animation: dotRing 640ms ease-out; }
+.pill.err .dot { background: #ff6b6b; --ring: rgba(255, 107, 107, 0.5); animation: dotRing 640ms ease-out; }
 
 /* 收起线段的轻微呼吸：偶尔泛起微光，提示这里可以唤回灵动岛 */
 body.collapsed .island-line { animation: lineGlint 6s ease-in-out 2.4s infinite; }

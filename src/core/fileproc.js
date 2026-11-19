@@ -28,6 +28,12 @@ const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
 
 const MAX_SIZE = 20 * 1024 * 1024; // 20MB
 
+/** 写入失败分类：文件被占用 / 无权限 → locked，其余归 error */
+function skipReasonForError(err) {
+  const code = err && err.code;
+  return code === 'EBUSY' || code === 'EPERM' || code === 'EACCES' ? 'locked' : 'error';
+}
+
 /**
  * 系统垃圾文件（Office「~$」所有者锁文件、LibreOffice「.~lock」锁文件、缩略图/桌面配置等）
  * —— 不索引、不导入、不屏蔽
@@ -478,7 +484,7 @@ function maskOffice(filePath, vault, toggles, outPath, knownNames, opts = {}) {
     const warning = residualCheck(maskedParts.join('\n'), toggles, undefined, knownEnt);
     return { ok: true, path: filePath, maskedPath: out, count, counts: {}, ...(warning ? { warning } : {}) };
   } catch (err) {
-    return { ok: false, path: filePath, skipped: 'error', reason: String(err && err.message || err) };
+    return { ok: false, path: filePath, skipped: skipReasonForError(err), reason: String(err && err.message || err) };
   }
 }
 
@@ -504,7 +510,7 @@ function restoreOffice(filePath, vault, outPath) {
     zip.writeZip(out);
     return { ok: true, path: filePath, restoredPath: out, resolved: count, missing };
   } catch (err) {
-    return { ok: false, path: filePath, skipped: 'error', reason: String(err && err.message || err) };
+    return { ok: false, path: filePath, skipped: skipReasonForError(err), reason: String(err && err.message || err) };
   }
 }
 
@@ -594,7 +600,7 @@ async function maskPdfFile(filePath, vault, toggles, outPath, opts = {}) {
     const warning = residualCheck(maskedJoined, toggles, undefined, knownEnt);
     return { ok: true, path: filePath, maskedPath: out, count, counts: {}, ...(warning ? { warning } : {}) };
   } catch (err) {
-    return { ok: false, path: filePath, skipped: 'error', reason: String((err && err.message) || err) };
+    return { ok: false, path: filePath, skipped: skipReasonForError(err), reason: String((err && err.message) || err) };
   }
 }
 
@@ -628,7 +634,7 @@ async function restorePdfFile(filePath, vault, outPath) {
     fs.writeFileSync(out, bytes);
     return { ok: true, path: filePath, restoredPath: out, resolved, missing };
   } catch (err) {
-    return { ok: false, path: filePath, skipped: 'error', reason: String((err && err.message) || err) };
+    return { ok: false, path: filePath, skipped: skipReasonForError(err), reason: String((err && err.message) || err) };
   }
 }
 
@@ -638,5 +644,5 @@ module.exports = {
   outputNameOf, normalizeSource, readFileText, detectFileIntent,
   readPdfText, detectPdfIntent, maskPdfFile, restorePdfFile, isPdf,
   loadKnownNameHashes, saveKnownNameHashes, caseDirKey, KNOWN_NAMES_FILE,
-  residualCheck,
+  residualCheck, skipReasonForError,
 };

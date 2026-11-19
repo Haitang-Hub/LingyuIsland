@@ -60,13 +60,11 @@ test('R-002 复合体：石牌垌村村民委员会整体识别为机构', () =>
   assert.strictEqual(restoreText(m.masked, v).text, t, '复合体往返应逐字一致');
 });
 
-test('R-002 复合体：基层派出所/司法所/法庭应识别为机构', () => {
-  assert.ok(vals('线索移交给北和镇派出所', 'org').includes('北和镇派出所'), '北和镇派出所');
-  // 「已交」的动词字会并入字号（ORG_BREAK 不能放行「交」，否则交通银行被切坏），
-  // 属于可接受的过屏蔽：只要「…司法所」整体被识别、屏蔽值不泄露即可。
-  assert.ok(vals('材料已交北和镇司法所备案', 'org').some((v) => v.includes('北和镇司法所')),
+test('R-002 复合体：基层派出所/司法所/法庭属公权力机关，不识别为机构', () => {
+  assert.strictEqual(vals('线索移交给北和镇派出所', 'org').length, 0, '北和镇派出所');
+  assert.strictEqual(vals('材料已交北和镇司法所备案', 'org').length, 0,
     '北和镇司法所: ' + JSON.stringify(vals('材料已交北和镇司法所备案', 'org')));
-  assert.ok(vals('临江市清河区人民法院刑事审判法庭', 'org').some((v) => v.endsWith('法庭')), '法庭');
+  assert.strictEqual(vals('临江市清河区人民法院刑事审判法庭', 'org').length, 0, '法庭');
   // 众人皆知的大型银行本身不屏蔽；动词字「交」仍不得作为字号断点，
   // 否则同类字号（交投集团）会被截断。
   assert.strictEqual(vals('该公司向交通银行申请贷款', 'org').length, 0, '交通银行');
