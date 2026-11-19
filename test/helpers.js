@@ -139,8 +139,8 @@ function truncValue(v) {
 
 /** 原值泄漏断言：消息只回显截断值，不泄隐私 */
 function assertNoLeak(masked, value, label) {
-  // 地址/机构采用「前2 + **** + 尾4」形态，尾 4 字会原样保留；
-  // 当尾 4 恰好等于另一个检出实体的完整值时，不能用裸 includes 判泄漏。
+  // 地址/机构采用「某X……尾字/后缀」形态，尾段会原样保留；
+  // 当尾段恰好等于另一个检出实体的完整值时，不能用裸 includes 判泄漏。
   // 规则：出现在 4 个（或旧格式 6 个）* 之后的原值属于可见尾段，不算泄漏。
   const s = String(masked || '');
   let from = 0;

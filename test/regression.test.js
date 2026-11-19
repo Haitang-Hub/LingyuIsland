@@ -56,16 +56,17 @@ test('R-002 复合体：石牌垌村村民委员会整体识别为机构', () =>
   const v = new Vault();
   const m = maskText(t, v);
   assertNoLeak(m.masked, '石牌垌村村民委员会', 'R-002');
-  assert.ok(m.masked.includes('石牌****民委员会〔机构·'), m.masked);
+  assert.ok(m.masked.includes('某村……村民委员会〔机构·'), m.masked);
   assert.strictEqual(restoreText(m.masked, v).text, t, '复合体往返应逐字一致');
 });
 
-test('R-002 复合体：基层派出所/司法所/法庭属公权力机关，不识别为机构', () => {
-  assert.strictEqual(vals('线索移交给北和镇派出所', 'org').length, 0, '北和镇派出所');
-  assert.strictEqual(vals('材料已交北和镇司法所备案', 'org').length, 0,
+test('R-002 复合体：公权力机关与基层站所不再类别排除，带层级即屏蔽', () => {
+  assert.ok(vals('线索移交给北和镇派出所', 'org').includes('北和镇派出所'), '北和镇派出所');
+  assert.ok(vals('材料已交北和镇司法所备案', 'org').includes('北和镇司法所'),
     '北和镇司法所: ' + JSON.stringify(vals('材料已交北和镇司法所备案', 'org')));
-  assert.strictEqual(vals('临江市清河区人民法院刑事审判法庭', 'org').length, 0, '法庭');
-  // 众人皆知的大型银行本身不屏蔽；动词字「交」仍不得作为字号断点，
+  assert.ok(vals('临江市清河区人民法院刑事审判法庭', 'org').some((v) => v.includes('人民法院')),
+    '人民法院: ' + JSON.stringify(vals('临江市清河区人民法院刑事审判法庭', 'org')));
+  // 众人皆知的大型银行无层级信息，自然不屏蔽；动词字「交」仍不得作为字号断点，
   // 否则同类字号（交投集团）会被截断。
   assert.strictEqual(vals('该公司向交通银行申请贷款', 'org').length, 0, '交通银行');
   assert.ok(vals('武汉交投集团承接项目', 'org').includes('武汉交投集团'), '交投集团');
@@ -110,7 +111,7 @@ test('R-003b 负例：众人皆知的机构、单级地名、常用词、泛指�
   assert.ok(vals('该公司向中国工商银行深圳支行贷款', 'org').includes('中国工商银行深圳支行'), '具体支行');
   assert.strictEqual(vals('案发地合肥市，另一现场在颍上县城关镇', 'address').length, 0, '纯行政区划');
   assert.ok(vals('案发地合肥市西湖大道138号', 'address').includes('合肥市西湖大道138号'), '具体地址');
-  assert.ok(vals('被告系金源商务宾馆员工', 'org').includes('金源商务宾馆'), '具体宾馆');
+  assert.ok(vals('被告系杭州金源商务宾馆员工', 'org').includes('杭州金源商务宾馆'), '具体宾馆');
   // 机构简称（<6 字）不单独屏蔽，且不得把前面主体与支付动词一起吞进字号
   assert.deepStrictEqual(vals('涟水县师资培训中心支付九洲公司', 'org'), ['涟水县师资培训中心'],
     JSON.stringify(vals('涟水县师资培训中心支付九洲公司', 'org')));

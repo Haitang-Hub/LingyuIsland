@@ -6,7 +6,7 @@
  */
 
 const {
-  ORG_SUFFIXES, detectEntities, hashName,
+  ORG_SUFFIXES, detectEntities, hashName, orgLevelOf, addressLevelOf,
 } = require('./entities');
 
 const RE = {
@@ -16,8 +16,9 @@ const RE = {
   email: /[\u4e00-\u9fa5A-Za-z0-9._%+-]+@[\u4e00-\u9fa5A-Za-z0-9-]+(?:\.[\u4e00-\u9fa5A-Za-z0-9-]+)+/g,
   passport: /(?<![A-Za-z0-9])[EGSPD][0-9]{8}(?![0-9A-Za-z])/g,
   plate: /(?<![A-Za-z0-9])[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵青藏川宁琼使领粤][A-HJ-NP-Z][A-HJ-NP-Z0-9挂学警港澳]{5,6}(?![A-Za-z0-9])/g,
-  caseNo: /[（(\[【［]\s*(?:19|20)\d{2}\s*[）)\]】］]\s*[\u4e00-\u9fa5]{1,8}\s*\d{0,6}\s*[\u4e00-\u9fa5A-Za-z]{1,6}\s*\d{1,6}\s*号(?:之[一二三四五六七八九十]+)?/g,
-  caseNoInline: /[（(\[【［]\s*(?:19|20)\d{2}\s*[）)\]】］]\s*[\u4e00-\u9fa5A-Za-z0-9]{1,12}\s*号(?:之[一二三四五六七八九十\d]+)?/g,
+  // 案号统一从年份括号起匹配（括号后字号/序号整体捕获，{1,16} 覆盖常见文号）；
+  // 括号前缀（机关简称 / 省市简称+地市括注）由 extendCasePrefixes 向左补回。
+  caseNo: /[（(\[【［]\s*(?:19|20)\d{2}\s*[）)\]】］]\s*[\u4e00-\u9fa5A-Za-z0-9]{1,16}\s*号(?:之[一二三四五六七八九十\d]+)?/g,
   landline: /(?<!\d)0\d{2,3}[-—\s]?\d{7,8}(?!\d)/g,
   hotline: /(?<!\d)(?:400|800)[-—\s]?\d{3}[-—\s]?\d{4}(?!\d)/g,
   imWechat: /(?:微信号|微信账号|WX号|wx号|vx号|VX号|威信号|WeChat号)\s*[:：]?\s*([A-Za-z][-_A-Za-z0-9]{5,19})/g,
@@ -100,10 +101,7 @@ function detectStrong(text, opts) {
     scanGrouped(RE_IDCARD_LOOSE, 'idCard');
   }
   if (opts.license !== false) scanGrouped(RE_LICENSE, 'license');
-  if (opts.caseNo !== false) {
-    scan(RE.caseNo, 'caseNo');
-    scan(RE.caseNoInline, 'caseNo');
-  }
+  if (opts.caseNo !== false) scan(RE.caseNo, 'caseNo');
   if (opts.bank !== false) {
     scan(RE.bank, 'bank', isValidBank, cleanBank);
     scanGrouped(RE_BANK_KEYWORD, 'bank', cleanBank);
@@ -144,11 +142,17 @@ const PRIORITY = {
 };
 
 /**
- * 案号前缀补回：正则从括号年份起匹配，「南检刑诉[2026]Z25号」中机关简称会被留下。
- * 这里只对已检出的案号向左补回紧邻的「简称 + 类别词」，且不吞进已被识别为
+ * 案号前缀补回：正则从括号年份起匹配，「南检刑诉[2026]Z25号」中机关简称会被留下，
+ * 「苏淮（涟）援刑指字【2026】…」中省市简称+地市括注也会被留下。
+ * 这里只对已检出的案号向左补回紧邻的「[简称+（括注）] + 类别词」，且不吞进已被识别为
  * 机构/地址/姓名的部分，避免把「临江市清河区人民检察院南检刑诉…」整体吞成案号。
  */
-const CASE_PREFIX_RE = /[\u4e00-\u9fa5]{0,2}(?:检|刑|民|行|政|执|他)(?:刑诉|民诉|行诉|刑初|民初|民终|刑终|指字|刑指|检字|政发|执字|他字)$/;
+// 可选「省市简称 + （地市/区县括注）」段：如 苏淮（涟）
+const CASE_PREFIX_LOCALITY = '(?:[\\u4e00-\\u9fa5]{0,6}[（(][\\u4e00-\\u9fa5]{1,3}[）)])?';
+const CASE_PREFIX_RE = new RegExp(
+  CASE_PREFIX_LOCALITY
+  + '[\\u4e00-\\u9fa5]{0,2}(?:检|刑|民|行|政|执|他)(?:刑诉|民诉|行诉|刑初|民初|民终|刑终|指字|刑指|检字|政发|执字|他字)$'
+);
 // 机关类别字（院/局/委/所…）不属于案号简称，前缀补回遇到它们即停。
 // 机关整体不脱敏后不再有 org item 充当 blocker，这里必须自己识别边界，
 // 否则「人民检察院南检刑诉…」会吞成「院南检刑诉…」。
@@ -156,7 +160,7 @@ const CASE_ORG_TAIL_RE = /^(?:人民法院|检察院|委员会|监察委|公安�
 function extendCasePrefixes(text, items) {
   for (const it of items) {
     if (it.type !== 'caseNo') continue;
-    const before = text.slice(Math.max(0, it.start - 8), it.start);
+    const before = text.slice(Math.max(0, it.start - 12), it.start);
     const m = CASE_PREFIX_RE.exec(before);
     if (!m) continue;
     let prefix = m[0].replace(/^[以在向由给经为与和及对从当被把了新的]+/, '');
@@ -232,5 +236,5 @@ function detect(text, options = {}) {
 }
 
 module.exports = {
-  detect, isValidIdCard, isValidUscc, luhnValid, ORG_SUFFIXES, hashName,
+  detect, isValidIdCard, isValidUscc, luhnValid, ORG_SUFFIXES, hashName, orgLevelOf, addressLevelOf,
 };

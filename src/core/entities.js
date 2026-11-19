@@ -5,7 +5,9 @@
  * 1. 姓名只由身份字段、人称前缀、人口学属性、表格相邻块确认；
  * 2. 人称候选至少复现三次，且左右上下文均不唯一，才可确认；
  * 3. 地址必须含道路、门牌、楼栋、村组等居住要素；
- * 4. 机构必须有机构后缀、至少 6 字，并排除数量泛指、公权力机关与公共法律服务机构；
+ * 4. 机构必须有机构后缀、至少 6 字且不超过 18 字，并含 省/市/县/区/镇/村
+ *    层级信息（或命中固定省市词典）；无层级信息的机构不再屏蔽；
+ *    仅排除数量泛指（一家宾馆/某公司），不再排除公权力机关等类别。
  * 5. 已确认实体按原值传播，未确认候选不猜测、不屏蔽。
  */
 
@@ -22,10 +24,51 @@ const ORG_SUFFIXES = [
   '工作室', '门市部', '支行', '宾馆', '酒店', '超市', '工厂',
   '银行', '医院', '中心', '村委会', '理事会', '委员会', '工会',
   '协会', '商会', '研究院', '研究所', '管理处', '管理局',
+  // 常见后缀补充：行政机关 / 文教卫生 / 生活服务 / 生产场所
+  '农业农村局', '市场监管局', '管理委员会', '管委会', '办事处',
+  '居委会', '村委会', '疾控中心', '服务站', '供电所',
+  '卫生院', '门诊部', '诊所', '药房', '药店', '福利院', '敬老院', '养老院',
+  '学院', '党校', '出版社', '报社', '书社', '书店',
+  '文化馆', '图书馆', '博物馆', '纪念馆', '展览馆', '体育馆',
+  '旅行社', '供销社', '信用社', '基金会', '商行', '分行',
+  '农场', '林场', '牧场', '印刷厂', '汽修厂', '总厂',
+  '加油站', '收费站', '车管所', '汽车站', '火车站',
+  '税务局', '财政局', '教育局', '民政局', '人社局', '住建局',
+  '审计局', '水务局', '烟草局', '邮政局', '海关',
+  '饭店', '酒楼', '餐厅', '影院', '剧院', '设计院',
 ].sort((a, b) => b.length - a.length);
 
 const ORG_SUFFIX_RE = new RegExp(ORG_SUFFIXES.join('|'), 'g');
 const ORG_TAIL_RE = new RegExp(`(?:${ORG_SUFFIXES.join('|')})$`);
+
+/* ---------------- 机构行政层级：统一「某X……后缀」屏蔽的前提 ---------------- */
+
+// 按后缀表取最长命中（表已按长度降序），供层级判定剥出字号。
+function findOrgSuffixOf(value) {
+  return ORG_SUFFIXES.find((s) => value.endsWith(s)) || '';
+}
+
+// 层级字：字号里出现 省/市/县/区/镇/村 即按该层级屏蔽（取最末次出现，
+// 「江苏省淮安市涟水县…」取县）；不含层级字时按固定词典兜底：
+// 直辖市/省会/主要城市 → 某市（南京），省份全名 → 某省（江西）；
+// 两者皆无的机构不再按机构屏蔽。
+const ORG_LEVEL_SCAN_RE = /[省市县区镇村]/g;
+const ORG_CITY_RE = /(?:北京|天津|上海|重庆|石家庄|太原|呼和浩特|沈阳|长春|哈尔滨|南京|杭州|合肥|福州|南昌|济南|郑州|武汉|长沙|广州|南宁|海口|成都|贵阳|昆明|拉萨|西安|兰州|西宁|银川|乌鲁木齐|深圳|苏州|青岛|大连|厦门|宁波|无锡|佛山|东莞|珠海|温州|常州|南通|烟台|潍坊|泉州|漳州|绍兴|嘉兴|金华|台州|中山|惠州|汕头|湛江|江门|湖州|洛阳|襄阳|宜昌|唐山|保定|徐州|扬州|镇江|盐城|淮安|连云港|临沂|济宁|淄博|威海|九江|赣州|宜春|衡阳|株洲|岳阳|常德)/;
+const ORG_PROVINCE_RE = /(?:河北|山西|辽宁|吉林|黑龙江|江苏|浙江|安徽|福建|江西|山东|河南|湖北|湖南|广东|广西|海南|四川|贵州|云南|陕西|甘肃|青海|宁夏|新疆|西藏|内蒙古|香港|澳门|台湾)/;
+
+function orgLevelOf(value) {
+  const s = String(value || '');
+  const suffix = findOrgSuffixOf(s);
+  const brand = suffix ? s.slice(0, s.length - suffix.length) : s;
+  ORG_LEVEL_SCAN_RE.lastIndex = 0;
+  let m;
+  let level = '';
+  while ((m = ORG_LEVEL_SCAN_RE.exec(brand)) !== null) level = m[0];
+  if (level) return level;
+  if (ORG_CITY_RE.test(brand)) return '市';
+  if (ORG_PROVINCE_RE.test(brand)) return '省';
+  return '';
+}
 const HAN_RE = /^[\u4e00-\u9fa5]+$/;
 const NAME_RE = /^[\u4e00-\u9fa5]{2,4}$/;
 const NAME_BAD_CHAR_RE = /[的了吗呢吧啊呀嘛了着过不没]/;
@@ -89,6 +132,45 @@ const CLOSED_NAME_LIST_RE = /^、[\u4e00-\u9fa5]{2,3}(?:、[\u4e00-\u9fa5]{2,3})
 // 「张罗」只能是姓名（动词「张罗」不可能带「贿赂」宾语+金额），直接确认。
 const CRIME_FOLLOW_RE = /^(?:贿赂|受贿|行贿|索贿|贪污|挪用|侵占|私分|诈骗)/;
 
+/* ---------------- 字段行嵌套角色词：「合议庭成员：审判员李舟」 ---------------- */
+
+// 冒号字段行内、嵌套角色词后的短姓名与主扫描共用一组防误遮守卫：
+// 审判员出庭/书记员记录/证人：到庭是动词短语，附：证人名单是名册短语，
+// 在记录/已到庭以句首功能字开头——它们与「角色词+姓名」结构同形，一律不确认。
+const PHRASE_HEAD_BAD_RE = /^[在已正将要该各均皆无每某]/;
+const PHRASE_VERB_BAD_RE = /(?:出庭|到庭|记录|回避|缺席|签名|告知|会见|述职|值庭|阅卷|参与|参加|陪同|陈述|答辩|举证|质证|宣读|讯问|发问|作证|签字|盖章|捺印|到场|到案|在逃|出示|出具|展示|提供|提交|调取|负责|担任|主管|分管|兼任|任职|调任|主持|主抓|名单|名册|花名|登记|签到)$/;
+const PHRASE_TAIL_BAD_RE = /[册表簿单页栏]$/;
+
+// 字段作用域止于句末标点/换行；段间以顿号、逗号、空白分隔
+//（「审判员李舟、人民陪审员王五」「审判员李舟 审判员王五」）。
+const NEST_SCOPE_END = '。？！；\n\r';
+const NEST_SEG_BREAK = new Set(['、', '，', ',', ' ', '\t', '\u3000']);
+
+/** 在冒号字段作用域内按「嵌套角色词（≥2 字）+ 2~3 字整段姓名」成对解析 */
+function scanNestedPairs(text, from, confirmed) {
+  let end = from;
+  while (end < text.length && !NEST_SCOPE_END.includes(text[end])) end++;
+  let i = from;
+  while (i < end) {
+    while (i < end && NEST_SEG_BREAK.has(text[i])) i++;
+    const segStart = i;
+    while (i < end && !NEST_SEG_BREAK.has(text[i])) i++;
+    // 角色词=段内以尾字结束的前缀（≥2 字）；余段 2~3 字整段为姓名候选。
+    // 「王告石」类姓名在尾字后余段不足 2 字，不会被拆错。
+    for (let j = i - 1; j >= segStart + 2; j--) {
+      if (!/[人员者师长告象]/.test(text[j - 1])) continue;
+      const value = text.slice(j, i);
+      if (value.length < 2 || value.length > 3) continue;
+      if (!validName(value) || value === '姓名' || value === '名字') continue;
+      if (PHRASE_HEAD_BAD_RE.test(value)) continue;
+      if (value.length === 2 && PHRASE_VERB_BAD_RE.test(value)) continue;
+      if (value.length === 3 && PHRASE_TAIL_BAD_RE.test(value)) continue;
+      confirmed.push({ start: j, end: i, value, raw: value });
+      break;
+    }
+  }
+}
+
 function roleCandidates(text) {
   const confirmed = [];
   const ambiguous = [];
@@ -122,11 +204,17 @@ function roleCandidates(text) {
         const listClosed = lengthClosed && wholeRun && after === '、'
           && (colon || CLOSED_NAME_LIST_RE.test(text.slice(end)));
         const physicallyClosed = lengthClosed && wholeRun && (colon || formatted)
-          && (PHYSICAL_END_RE.test(after) || !after);
+          && (PHYSICAL_END_RE.test(after) || !after)
+          && !PHRASE_HEAD_BAD_RE.test(value)
+          && !(value.length === 2 && PHRASE_VERB_BAD_RE.test(value))
+          && !(value.length === 3 && PHRASE_TAIL_BAD_RE.test(value));
         const candidate = { start, end, value, raw };
         if (listClosed || physicallyClosed || demographicClosed || crimeClosed) confirmed.push(candidate);
         else if (!colon && len === 3 && personMarked) ambiguous.push(candidate);
       }
+      // 冒号字段行的嵌套角色词（「合议庭成员：审判员李舟」）：嵌套处无排版边界，
+      // 主扫描候选被角色尾字拒绝；在字段作用域内按「角色词+短姓名」成对解析。
+      if (colon) scanNestedPairs(text, m.index + prefix.length, confirmed);
     }
   };
   scan(ROLE_PREFIX_RE, false);
@@ -162,36 +250,85 @@ function isPersonTableLabel(value) {
       && !/(?:告|人|犯|象)方$/.test(compact));
 }
 
-/* ---------------- 地址：居住要素是必要条件 ---------------- */
+/* ---------------- 地址：居民身份证格式（行政区划链 + 落点要素） ---------------- */
 
 const ADDRESS_GUIDE_RE = /(?:户籍所在地及住址|户籍所在地|经常居住地|户籍地址|户籍地|住所地|居住地|暂住地|现住址|通讯地址|联系地址|家庭住址|详细地址|办公地址|家庭地址|注册地|所在地|住址|地址|籍贯|原籍|祖籍|出生地|户籍|现住|暂住|居住|家住|住于|住在|位于|坐落于|住|案发地点|案发地|发案地|现场位于|前往|途经|到达|抵达)\s*[:：]?\s*/g;
-const GENERIC_ADDRESS_RE = /(?:^|[\s，,。；;、：:（）()【】\[\]在到从于往至去回])((?![在到从于往至去回])[\u4e00-\u9fa5]{2,12}(?:省|自治区|市|县|区|镇|乡|街道|村)[\u4e00-\u9fa5A-Za-z0-9#-]{0,50})/g;
-// 门牌、房间等单位必须与数字连用，避免「括号、办公室」被当成居住要素。
-const RESIDENTIAL_RE = /(?:大道|大街|街道|小区|花园|公寓|大厦|广场|家园|庭院|山庄|宿舍|大院|新村|车库|号楼|单元|路|街|巷|弄|村|组|队|\d+(?:号|楼|栋|幢|座|室|层|户))/g;
-const ADDRESS_START_RE = /^(?:[\u4e00-\u9fa5]{2,8}(?:省|自治区|市|县|区|旗|盟|镇|乡|街道|村)|[\u4e00-\u9fa5]{2,20}(?:大道|大街|路|街|巷|弄|小区|花园|公寓|大厦|广场|家园|庭院|山庄|宿舍|大院|新村|车库))/;
-const ADDRESS_PLACEHOLDER_RE = /[A-Za-z](?:省|市|县|区|镇|乡|街道|村)/;
-const PURE_ADMIN_ADDRESS_RE = /^(?:[\u4e00-\u9fa5]{1,8}(?:省|自治区|市|县|区|旗|盟|镇|乡|街道))+$/;
+
+// 行政区划链：按 省 → 市 → 县/区 → 乡镇/街道 → 村/社区 顺序逐级可选解析。
+// 名称段须为 1~8 位纯汉字且不含行政区划后缀字与泛指代词，
+// 防止叙述前缀（「其在浙江」「全村共有」）被当成地名组成部分。
+const ADMIN_TIERS = [
+  { suffixes: ['自治区', '省'], level: '省' },
+  { suffixes: ['自治州', '地区', '盟', '市'], level: '市' },
+  { suffixes: ['区', '县', '旗'], level: '' },
+  { suffixes: ['街道', '苏木', '镇', '乡'], level: '' },
+  { suffixes: ['社区', '嘎查', '村'], level: '' },
+];
+const ADMIN_NAME_RE = /^[\u4e00-\u9fa5]{1,8}$/;
+const ADMIN_NAME_BAD_RE = /[省市县区旗盟镇乡村全本我你该各每这那某]/;
+// 落点要素：小区/道路/村组类为自由单位；门牌楼栋类须紧邻数字（防「括号、办公室」）。
+const ADDR_LEAF_RE = /(?:小区|花园|公寓|大厦|广场|家园|庭院|山庄|宿舍|大院|新村|车库|胡同|大道|大街|路|街|巷|弄|组|队|单元|号楼|栋|幢|座|楼|号|室|层|户|院)/g;
+const ADDR_DOOR_RE = /(?:单元|号楼|栋|幢|座|楼|号|室|层|户|院)/;
+const ADMIN_SUFFIX_SEARCH_RE = /(?:自治区|自治州|街道|社区|地区|省|市|盟|县|区|旗|苏木|镇|乡|嘎查|村)/;
 const ADDRESS_BAD_CHAR_RE = /[的了吗呢吧啊呀嘛了着过]/;
+const GENERIC_ADDRESS_RE = /(?:^|[\s，,。；;、：:（）()【】\[\]在到从于往至去回])((?![在到从于往至去回])[\u4e00-\u9fa5A-Za-z0-9#-]{3,60})/g;
+
+/** 解析行政区划链：返回链尾位置、最高层级与末级所在档位；level 为空表示无层级 */
+function scanAdminChain(raw) {
+  let i = 0;
+  let level = '';
+  let lastTier = -1;
+  for (let t = 0; t < ADMIN_TIERS.length; t++) {
+    const tier = ADMIN_TIERS[t];
+    let bestEnd = -1;
+    let bestLevel = '';
+    for (const suf of tier.suffixes) {
+      const idx = raw.indexOf(suf, i);
+      if (idx < 0 || idx - i > 8) continue;
+      const name = raw.slice(i, idx);
+      if (!ADMIN_NAME_RE.test(name) || ADMIN_NAME_BAD_RE.test(name)) continue;
+      const end = idx + suf.length;
+      if (bestEnd < 0 || end <= bestEnd) { bestEnd = end; bestLevel = tier.level || suf; }
+    }
+    if (bestEnd >= 0) { i = bestEnd; if (!level) level = bestLevel; lastTier = t; }
+  }
+  return { i, level, lastTier };
+}
+
+/** 落点要素右边界：最后一个合法落点单位（门牌类须紧邻数字）的结束位置 */
+function leafEndAt(raw, from) {
+  const rest = raw.slice(from);
+  if (!rest) return -1;
+  let end = -1;
+  ADDR_LEAF_RE.lastIndex = 0;
+  let m;
+  while ((m = ADDR_LEAF_RE.exec(rest)) !== null) {
+    if (ADDR_DOOR_RE.test(m[0]) && !/[0-9]/.test(rest[m.index - 1] || '')) continue;
+    end = m.index + m[0].length;
+  }
+  return end;
+}
+
+/** 「地址值 → 最高行政层级」：屏蔽形态「某X……尾1」与还原修饰共用 */
+function addressLevelOf(value) {
+  return scanAdminChain(String(value || '')).level;
+}
 
 function addressAt(text, start) {
-  const match = /^[\u4e00-\u9fa5A-Za-z0-9#-]+/.exec(text.slice(start));
-  if (!match) return null;
-  let raw = match[0];
+  const run = /^[\u4e00-\u9fa5A-Za-z0-9#-]+/.exec(text.slice(start));
+  if (!run) return null;
+  let raw = run[0];
   const bad = ADDRESS_BAD_CHAR_RE.exec(raw);
   if (bad) raw = raw.slice(0, bad.index);
-  if (!ADDRESS_START_RE.test(raw) || ADDRESS_PLACEHOLDER_RE.test(raw)) return null;
-
-  RESIDENTIAL_RE.lastIndex = 0;
-  let m;
-  let end = -1;
-  while ((m = RESIDENTIAL_RE.exec(raw)) !== null) end = m.index + m[0].length;
-  if (end < 0) return null;
-  let value = raw.slice(0, end);
-  // 「石牌垌村村务」中的第二个「村」属于后词，不属于地名。
-  const doubledVillage = /村村/.exec(value);
-  if (doubledVillage) value = value.slice(0, doubledVillage.index + 1);
-  if (value.length < 3 || PURE_ADMIN_ADDRESS_RE.test(value)) return null;
-  return item('address', start, start + value.length, value, true);
+  const chain = scanAdminChain(raw);
+  if (!chain.level) return null;
+  // 落点要素：链后须有道路/门牌/小区等单位；
+  // 仅当链止于村/社区档位时允许以村/社区收尾（如「雷州市北和镇石牌垌村」）。
+  let end = leafEndAt(raw, chain.i);
+  if (end >= 0) end += chain.i;
+  else if (chain.lastTier === 4) end = chain.i;
+  if (end < 3) return null;
+  return item('address', start, start + end, raw.slice(0, end), true);
 }
 
 function detectAddresses(text) {
@@ -212,8 +349,8 @@ function detectAddresses(text) {
     // 引导路径已经识别；通用路径若包含同一引导词，跳过这个更长候选。
     if (guides.some((g) => start <= g.from && g.from < start + value.length)) continue;
     // 正则从最左侧起配时可能带入叙述；首个行政区划前的最后位置字才是左边界。
-    const admin = /(?:省|自治区|市|县|区|镇|乡|街道|村)/.exec(value);
-    if (admin) {
+    const admin = ADMIN_SUFFIX_SEARCH_RE.exec(value);
+    if (admin && admin.index > 0) {
       const prefix = value.slice(0, admin.index);
       let cut = -1;
       for (const ch of '在到从于往至去回') cut = Math.max(cut, prefix.lastIndexOf(ch));
@@ -237,20 +374,7 @@ const ORG_PREP_RE = /(?:根据|依据|按照|依照)$/;
 const PROVINCE_HEAD_RE = /北京|天津|上海|重庆|河北|山西|辽宁|吉林|黑龙江|江苏|浙江|安徽|福建|江西|山东|河南|湖北|湖南|广东|广西|海南|四川|贵州|云南|陕西|甘肃|青海|宁夏|新疆|西藏|内蒙古|香港|澳门|台湾/;
 const ORG_SUFFIX_TEST = new RegExp(ORG_SUFFIXES.join('|'));
 const GENERIC_ORG_RE = /(?:[一二两三四五六七八九十几数多每各某这那该]家|[某该这那])$/;
-// 众人皆知的银行总行（「中国建设银行」）属公开主体，不按机构脱敏；具体支行仍保留。
-const WELL_KNOWN_BANK_RE = /^中国[\u4e00-\u9fa5]{0,8}银行$/;
 const ADMIN_UNIT_RE = /(?:自治区|省|市|县|区|旗|盟|镇|乡|街道|村|社区)/;
-
-/**
- * 公权力机关 + 公共法律服务机构：作为整体类别不按机构脱敏。
- * 这些主体公开可查、不是隐私载体；按机关类型（名称结尾）判断，
- * 而不是按「最高法」「法援中心」这类具体名称逐个补白名单。
- * 分类型列出便于增补；地名/级别（国家级、省市县、乡镇）一律不影响判断。
- */
-const PUBLIC_ORG_TYPE_RE = /(?:人民政府|人民法院|法院|法庭|检察院|监察委员会|监察委|公安局|公安厅|派出所|监狱|戒毒所|司法局|司法厅|司法所|司法部|法律援助中心|公共法律服务中心|公证处|仲裁委(?:员会)?)$/;
-function isPublicOrg(value) {
-  return PUBLIC_ORG_TYPE_RE.test(value);
-}
 
 // 职务动词紧跟机构名是案卷高频句式（「仍实际负责涟水县师资培训中心」），
 // 动词不切断就会吞进字号；单字断点表覆盖不了双字动词，这里按结尾窗口判断。
@@ -279,11 +403,14 @@ function isOrgLeftBreak(text, ch, start, brandEnd, suffixEnd) {
     if (/^开[发区]|^纬|^济|^贸|^技/.test(rightBrand)) return false;
     return PROVINCE_HEAD_RE.test(rightBrand) || ADMIN_UNIT_RE.test(rightBrand);
   }
-  if (ch === '和') {
+  if (ch === '和' || ch === '与') {
     // 「A公司和B公司」是连接词；「和平/和顺/和县/北和镇」是地名或字号，不能断。
     if (/^[平县顺田]/.test(rightBrand)) return false;
     const left = text.slice(Math.max(0, start - 14), start);
     if (/[\u4e00-\u9fa5]$/.test(left) && !ORG_SUFFIX_TEST.test(left)) return false;
+    // 右侧须是一段完整主体（≥6 字）才断开；「北和镇卫生院」的「和」只是
+    // 地名用字，右侧残段（镇卫生院）过短，继续向前回溯到真正的边界。
+    if (text.slice(start, suffixEnd).length < 6) return false;
     return ADMIN_UNIT_RE.test(rightBrand)
       || PROVINCE_HEAD_RE.test(rightBrand)
       || ORG_SUFFIX_TEST.test(text.slice(start + 1, suffixEnd));
@@ -298,9 +425,8 @@ function suffixEndingAt(text, end) {
   return false;
 }
 
-// 字号段整体由泛称学校字组成（「中小学」是并列泛称，指一类学校而非具体主体）
-// 不作为机构屏蔽；真实机构字号必然含专名用字，不会全落在这个字符集内。
-const GENERIC_SCHOOL_BRAND_RE = /^[中小初高学园幼]{1,8}$/;
+// // 字号段整体由泛称学校字组成（「中小学」是并列泛称）——不再单独排除，
+// 由「须含省/市/县/区/镇/村层级信息」这条统一前提兜住。
 
 function detectOrgs(text) {
   const out = [];
@@ -321,6 +447,22 @@ function detectOrgs(text) {
     const min = Math.max(0, brandEnd - 24);
     while (start > min) {
       const ch = text[start - 1];
+      // 短括注（「盛景（南京）智能装备股份有限公司」）是字号组成部分：
+      // 括注内为 ≤8 字纯专名时跨过后继续回溯；「（以下简称××）」不跨。
+      if (ch === '）' || ch === ')') {
+        const open = ch === '）' ? '（' : '(';
+        const openIdx = text.lastIndexOf(open, start - 1);
+        if (openIdx >= min) {
+          const inner = text.slice(openIdx + 1, start - 1);
+          if (inner.length >= 1 && inner.length <= 8
+            && /^[\u4e00-\u9fa5A-Za-z0-9]+$/.test(inner)
+            && !/简称|以下/.test(inner)) {
+            start = openIdx;
+            continue;
+          }
+        }
+        break;
+      }
       // 「系」可作系动词，但「系统」是常见字号组成部分；经/和需语境判断。
       if (!/[\u4e00-\u9fa5]/.test(ch) || isOrgLeftBreak(text, ch, start, brandEnd, m.index + suffix.length)) break;
       if (suffix === '公司' && suffixEndingAt(text, start)) { adjacentToOrg = true; break; }
@@ -344,17 +486,14 @@ function detectOrgs(text) {
       return !ADMIN_UNIT_RE.test(value.slice(0, -alias.length));
     });
     if (narrativeAlias) continue;
-    // 并列泛称（中小学幼儿园等）不识别为具体机构
-    if (GENERIC_SCHOOL_BRAND_RE.test(brand)) continue;
     if (value.length < 6 || brand.length < 2) continue;
-    // 短后缀机构的独立字号应简洁；长叙述只有带行政区划或上层机构时才保留。
-    // 锚定用的内嵌后缀排除本次命中的同一个——「危害法庭安全或妨害法庭」里
-    // 字号中的「法庭」只是同一后缀的前次出现，不是上层机构，不能当锚。
-    const anchored = ADMIN_UNIT_RE.test(brand)
-      || ORG_SUFFIXES.some((s) => s !== suffix && brand.includes(s));
-    if (suffix.length <= 3 && brand.length > 4 && !anchored) continue;
-    if (GENERIC_ORG_RE.test(brand) || WELL_KNOWN_BANK_RE.test(value)) continue;
-    if (isPublicOrg(value)) continue;
+    if (value.length > 18) continue; // 机构全名一般不超过 18 字
+    // 数量泛指（一家宾馆/某公司）仍不是具体主体；其余类别（公权力机关、
+    // 知名银行、并列泛称等）不再排除——有层级信息就按机构屏蔽。
+    if (GENERIC_ORG_RE.test(brand)) continue;
+    // 统一形态前提：字号须含 省/市/县/区/镇/村（或命中固定省市词典）。
+    // 该前提同时兜住了「危害法庭安全」这类叙述残段——它们不含层级信息。
+    if (!orgLevelOf(value)) continue;
     out.push(item('org', start, end, value, true));
   }
   return out;
@@ -423,10 +562,8 @@ function detectEntities(text, options = {}) {
   // 全案卷传播会放大「和江苏…公司」这类吞了连接词的伪机构：
   // 机构名以经/和开头且紧跟省级地名时，几乎必为边界错误，直接丢弃（含传播项）。
   return out.filter((it) => !(
-    it.type === 'org' && (
-      isPublicOrg(it.value)
-      || (/^[和经]/.test(it.value) && PROVINCE_HEAD_RE.test(it.value.slice(1)))
-    )
+    it.type === 'org'
+      && /^[和经]/.test(it.value) && PROVINCE_HEAD_RE.test(it.value.slice(1))
   ));
 }
 
@@ -538,6 +675,8 @@ function collectEntities(input, options = {}) {
 
 module.exports = {
   ORG_SUFFIXES,
+  orgLevelOf,
+  addressLevelOf,
   createEntities,
   mergeEntities,
   detectEntities,

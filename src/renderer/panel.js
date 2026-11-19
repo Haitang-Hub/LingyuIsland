@@ -303,12 +303,14 @@ function showMaskResult(done) {
   const otherSkipped = (done.skipped || 0) - convertFailed - pdfNoText;
   if (otherSkipped > 0) problems.push(`${otherSkipped} 份文件无法处理（格式不支持或过大）`);
 
-  const hasError = done.restoreMissing > 0 || done.alreadyMasked > 0 || (done.skipped || 0) > 0;
+  // 错误（编码失效/已屏蔽）用红色 err；仅跳过类失败用橙色 warn
+  const hasErr = done.restoreMissing > 0 || done.alreadyMasked > 0;
+  const hasWarn = (done.skipped || 0) > 0;
   if (okParts.length) {
     toast(okParts.join('，'), 'ok');
     loadHistory();
   }
-  if (problems.length) toast(problems.join('；'), hasError ? 'err' : '');
+  if (problems.length) toast(problems.join('；'), hasErr ? 'err' : hasWarn ? 'warn' : '');
   if (!okParts.length && !problems.length) toast('处理完成，未生成新副本');
 }
 
