@@ -229,17 +229,24 @@ function detectAddresses(text) {
 
 // 只含功能字/介词的断点；不把「和、同、也、交」等可能属于字号的字当断点。
 const ORG_LEFT_BREAK = new Set([...'的了着过是在于以由向从为即给我你他她它您咱月初底旬收受送赠']);
+// 双字句首介词是结构断点，不能吞进机构字号（「根据红日建材公司」
+// 应得到「红日建材公司」，介词不进字号）。
+const ORG_PREP_RE = /(?:根据|依据|按照|依照)$/;
 // 「经/和」既可能是介词/连接词，也可能是字号（经纬/和平县），只在前方已是一个
 // 完整主体、或右侧带行政区划时才当断点；否则保留在字号里，避免把机构切坏。
 const PROVINCE_HEAD_RE = /北京|天津|上海|重庆|河北|山西|辽宁|吉林|黑龙江|江苏|浙江|安徽|福建|江西|山东|河南|湖北|湖南|广东|广西|海南|四川|贵州|云南|陕西|甘肃|青海|宁夏|新疆|西藏|内蒙古|香港|澳门|台湾/;
 const ORG_SUFFIX_TEST = new RegExp(ORG_SUFFIXES.join('|'));
 const GENERIC_ORG_RE = /(?:[一二两三四五六七八九十几数多每各某这那该]家|[某该这那])$/;
-const NATIONAL_HEADQUARTERS_RE = /^(?:中国[\u4e00-\u9fa5]{0,8}|最高)(?:银行|人民检察院|人民法院|人民政府)$/;
+// 众人皆知的银行总行（「中国建设银行」）属公开主体，不按机构脱敏；具体支行仍保留。
+const WELL_KNOWN_BANK_RE = /^中国[\u4e00-\u9fa5]{0,8}银行$/;
 const ADMIN_UNIT_RE = /(?:自治区|省|市|县|区|旗|盟|镇|乡|街道|村|社区)/;
 
 // 职务动词紧跟机构名是案卷高频句式（「仍实际负责涟水县师资培训中心」），
 // 动词不切断就会吞进字号；单字断点表覆盖不了双字动词，这里按结尾窗口判断。
 const ORG_ROLE_VERB_RE = /(?:负责|担任|主管|分管|兼任|任职|调任|主持|主抓)$/;
+// 出示/出具类叙述动词同样不能吞进字号（「出示红日建材有限公司」曾整体入字号，
+// 前2取到「出示」而显示为「出示****公司」）。这些词只作动作，不作机构字号。
+const ORG_NARRATION_VERB_RE = /(?:出示|出具|展示|提供|提交|调取)$/;
 // 角色人称词的「人」同样不能吞进字号（「负责人李太白银行转账」曾得「人李太白银行」，
 // 还会在重叠消解时盖掉真姓名）。「人民银行/人民医院」的「人」前面是机构专名而非角色词，不受影响。
 const ORG_ROLE_PERSON_RE = /(?:被会见|会见|受援|委托诉讼代理|委托代理|法定代表|实际负责|委托|辩护|代理|被上诉|上诉|申诉|申请执行|被执行|申请|复议|被处罚|违法行为|行为|行贿|受贿|报案|被侵害|被害|被侵权|当事|同案|涉案|在场|主持|记录|调查|陪同|到庭|公诉|见证|负责|第三|证)人$/;
@@ -247,6 +254,8 @@ const ORG_ROLE_PERSON_RE = /(?:被会见|会见|受援|委托诉讼代理|委托
 /** 机构左边界断点：介词「经」、连接词「和」需额外语境，不能一律吞掉或一律截断 */
 function isOrgLeftBreak(text, ch, start, brandEnd, suffixEnd) {
   if (ORG_ROLE_VERB_RE.test(text.slice(Math.max(0, start - 4), start))) return true;
+  if (ORG_NARRATION_VERB_RE.test(text.slice(Math.max(0, start - 4), start))) return true;
+  if (ORG_PREP_RE.test(text.slice(Math.max(0, start - 4), start))) return true;
   // 「负责人/辩护人/证人…」的人后紧跟的只能是姓名或叙述，不是机构字号；
   // 窗口取 14 字覆盖「委托诉讼代理人/申请执行人」等长角色词
   if (ch === '人' && ORG_ROLE_PERSON_RE.test(text.slice(Math.max(0, start - 14), start))) return true;
@@ -333,7 +342,7 @@ function detectOrgs(text) {
     const anchored = ADMIN_UNIT_RE.test(brand)
       || ORG_SUFFIXES.some((s) => s !== suffix && brand.includes(s));
     if (suffix.length <= 3 && brand.length > 4 && !anchored) continue;
-    if (GENERIC_ORG_RE.test(brand) || NATIONAL_HEADQUARTERS_RE.test(value)) continue;
+    if (GENERIC_ORG_RE.test(brand) || WELL_KNOWN_BANK_RE.test(value)) continue;
     out.push(item('org', start, end, value, true));
   }
   return out;

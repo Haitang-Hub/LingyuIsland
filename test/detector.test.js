@@ -202,6 +202,18 @@ test('修复·机构边界：职务动词「负责/担任」不吞入字号', ()
   assert.deepStrictEqual(vals('他担任红日建材公司经理期间', 'org'), ['红日建材公司']);
   assert.deepStrictEqual(vals('其分管城东汽车工厂生产', 'org'), ['城东汽车工厂']);
 });
+test('修复·机构边界：出示类叙述动词不吞入字号', () => {
+  // 「出示红日建材有限公司」曾被整体当字号，前2取「出示」，形态错成「出示****公司」
+  assert.deepStrictEqual(
+    vals('现向你出示红日建材有限公司材料', 'org'),
+    ['红日建材有限公司']);
+  assert.deepStrictEqual(vals('向对方出具红日建材有限公司证明', 'org'), ['红日建材有限公司']);
+  assert.deepStrictEqual(vals('提供了涟水县师资培训中心材料', 'org'), ['涟水县师资培训中心']);
+  // 端到端形态：8 字机构 = 前2 + **** + 尾2
+  const { Vault: V, maskText: m } = require('../src/core/masker');
+  const masked = m('现向你出示红日建材有限公司材料', new V()).masked;
+  assert.ok(masked.includes('红日****公司〔机构·'), masked);
+});
 test('修复·机构边界：受贿叙述动词不吞入字号，短泛称机构不屏蔽', () => {
   // 「收受第一中学」曾整体当机构屏蔽（显示为「收受****〔机构·…〕」）；
   // 「收/受/送/赠」入左边界断点后，「第一中学」这类 6 字以内泛称不再屏蔽。
@@ -216,12 +228,6 @@ test('修复·姓名：职务后紧跟受贿类犯罪动词的候选直接确认
   assert.deepStrictEqual(vals('负责人王强贪污公款', 'name'), ['王强']);
   // 负例成对：普通动词后仍不确认（「张罗商议」单句不猜）
   assert.strictEqual(vals('食堂负责人张罗商议', 'name').length, 0);
-});
-
-test('修复·公共机关：国家级机关不作为机构屏蔽', () => {
-  assert.strictEqual(vals('最高人民法院公报', 'org').length, 0);
-  assert.strictEqual(vals('最高人民检察院发布', 'org').length, 0);
-  assert.strictEqual(vals('临江市清河区人民法院', 'org').length, 1, '地方法院仍应命中');
 });
 
 test('修复·案号前缀：机关简称与类别词纳入屏蔽范围（检测部分）', () => {

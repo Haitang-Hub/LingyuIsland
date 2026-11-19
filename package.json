@@ -1,7 +1,7 @@
 {
   "name": "@haitang-hub/lingyu-island",
   "productName": "灵屿岛",
-  "version": "1.10.2",
+  "version": "1.10.3",
   "description": "灵动岛式文件屏蔽与恢复工具：拖入文件即可屏蔽个人敏感信息，随时还原",
   "main": "src/main/main.js",
   "author": "Haitang-Hub",
