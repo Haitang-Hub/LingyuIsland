@@ -89,7 +89,7 @@ if (!window.island) {
   const mockDone = (n) => ({
     results: [], total: n,
     masked: n, restored: 0, restoredTotal: 0, restoreMissing: 0,
-    alreadyMasked: 0, noPii: 0, skipped: 0, convertFailed: 0, convertReason: '',
+    alreadyMasked: 0, noPii: 0, skipped: 0, convertFailed: 0, convertReason: '', pdfNoText: 0,
     totalPII: n * 3, trashed: 0, importedCount: 0, overwritten: 0,
   });
 

@@ -172,6 +172,7 @@ async function importAndMask(inputPaths, ctx, sender) {
     alreadyMasked: results.filter((r) => r.skipped === 'already-masked').length,
     noPii: results.filter((r) => r.ok && r.skipped === 'no-pii').length,
     skipped: results.filter((r) => r.skipped && !['no-pii', 'already-masked'].includes(r.skipped)).length,
+    pdfNoText: results.filter((r) => r.skipped === 'pdf-no-text').length,
     convertFailed: results.filter((r) => r.skipped === 'legacy-convert').length,
     convertReason: (conversion.failed[0] && conversion.failed[0].reason) || '',
     totalPII,

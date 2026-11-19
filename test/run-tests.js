@@ -9,6 +9,7 @@
  *  - test/masker.test.js     屏蔽引擎（编码格式 / 保留位 / 还原兼容 / Office XML 映射）
  *  - test/fileproc.test.js   文件管道（编码识别 / txt-docx / 老式 .doc / PDF）
  *  - test/app-units.test.js  应用单元（导入 / 索引 / 设置 / 剪贴板 / 灵动岛 / 布局 / 更新）
+ *  - test/batch-summary.test.js 批量结果摘要（仅胶囊轮播文案）
  *  - test/regression.test.js 回归锁定（R-001..R-006 / 泄漏断言 / 一致性 / 门禁）
  *
  * 真实案卷套件（test/real-files.test.js）与 E2E（test/e2e.js）单独运行：
@@ -25,6 +26,7 @@ require('./two-pass.test.js');
 require('./masker.test.js');
 const registerPdfTests = require('./fileproc.test.js');
 require('./app-units.test.js');
+require('./batch-summary.test.js');
 require('./regression.test.js');
 
 (async () => {

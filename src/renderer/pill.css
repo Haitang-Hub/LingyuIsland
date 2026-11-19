@@ -440,14 +440,14 @@ html[data-theme="sakura"] {
   border-radius: var(--pill-radius, 22px);
 }
 
-/* 忙碌 */
+/* 仅三种反馈色：处理中橙 / 完成绿 / 未完成红 */
 .pill.busy .label-idle { color: #ffb340; }
 .pill.ok .label-idle { color: var(--green); }
-.pill.warn .label-idle { color: #ff6b6b; }
+.pill.err .label-idle { color: #ff6b6b; }
 
-/* 反馈期（忙碌/完成/警示）：悬停文案不得覆盖反馈文字 */
-.pill.busy .label-hover, .pill.ok .label-hover, .pill.warn .label-hover { opacity: 0; }
-.pill.busy .label-idle, .pill.ok .label-idle, .pill.warn .label-idle { opacity: 1; }
+/* 反馈期（忙碌/完成/未完成）：悬停文案不得覆盖反馈文字 */
+.pill.busy .label-hover, .pill.ok .label-hover, .pill.err .label-hover { opacity: 0; }
+.pill.busy .label-idle, .pill.ok .label-idle, .pill.err .label-idle { opacity: 1; }
 
 /* ---------------- 收起态：屏幕顶边的细线 ----------------
    主进程切到收起态时窗口已贴住屏幕顶边并开启点击穿透（悬停自动展开），
@@ -566,6 +566,7 @@ body.collapsed .pill {
 .pill.busy .dot { --ring: rgba(255, 159, 10, 0.4);  animation: dotRing 1.4s ease-out infinite; }
 .pill.clip .dot { --ring: color-mix(in srgb, var(--accent) 45%, transparent); animation: dotRing 1.8s ease-out infinite; }
 .pill.ok .dot, .pill.pop .dot { --ring: rgba(48, 213, 88, 0.5); animation: dotRing 640ms ease-out; }
+.pill.err .dot { --ring: rgba(255, 107, 107, 0.5); animation: dotRing 640ms ease-out; }
 
 /* 收起线段的轻微呼吸：偶尔泛起微光，提示这里可以唤回灵动岛 */
 body.collapsed .island-line { animation: lineGlint 6s ease-in-out 2.4s infinite; }

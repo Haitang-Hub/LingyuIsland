@@ -298,7 +298,9 @@ function showMaskResult(done) {
   if (convertFailed > 0) {
     problems.push(`${convertFailed} 份 .doc 未能自动转换${done.convertReason ? `：${done.convertReason}` : '，请在 Word 中另存为 .docx 后重试'}`);
   }
-  const otherSkipped = (done.skipped || 0) - convertFailed;
+  const pdfNoText = done.pdfNoText || 0;
+  if (pdfNoText > 0) problems.push(`${pdfNoText} 份 PDF 为扫描件`);
+  const otherSkipped = (done.skipped || 0) - convertFailed - pdfNoText;
   if (otherSkipped > 0) problems.push(`${otherSkipped} 份文件无法处理（格式不支持或过大）`);
 
   const hasError = done.restoreMissing > 0 || done.alreadyMasked > 0 || (done.skipped || 0) > 0;

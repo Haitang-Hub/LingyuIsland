@@ -14,7 +14,7 @@ let maskedCount = 0;
 
 function setState(next) {
   mode = next;
-  pill.classList.remove('clip', 'busy', 'ok', 'warn');
+  pill.classList.remove('clip', 'busy', 'ok', 'err');
   if (next === 'clip') pill.classList.add('clip');
   if (next === 'busy') pill.classList.add('busy');
   resetIdleTimer(); // 状态变化视为一次活动，空闲计时重新开始
@@ -406,29 +406,75 @@ function setBusy(text) {
   glanceAtText(); // 看向进度文字
 }
 
-// 还原结果展示期间忽略主进程的 cleared 广播，避免反馈文案被立刻覆盖
-let feedbackHold = null; // { text, cls, until, timer } —— 反馈文案持有期：悬停/轮换/广播都不抢
+// 结果反馈持有期：悬停/轮换/主进程广播都不抢；批量结果按行轮播。
+let feedbackHold = null; // { lines, index, until, timer, rotateTimer, fadeTimer, text, cls }
+
+function clearFeedbackTimers() {
+  if (!feedbackHold) return;
+  clearTimeout(feedbackHold.timer);
+  if (feedbackHold.rotateTimer) clearInterval(feedbackHold.rotateTimer);
+  if (feedbackHold.fadeTimer) clearTimeout(feedbackHold.fadeTimer);
+  feedbackHold = null;
+}
 
 function holdActive() { return !!(feedbackHold && Date.now() < feedbackHold.until); }
 
-function showHold(text, cls, ms) {
-  if (feedbackHold) clearTimeout(feedbackHold.timer);
-  feedbackHold = { text, cls, until: Date.now() + ms, timer: 0 };
-  pill.classList.remove('ok', 'warn');
-  if (cls) pill.classList.add(cls);
-  labelIdle.textContent = text;
+/** 应用一行反馈：颜色、文案、轻滑动画 */
+function applyHoldLine(line) {
+  pill.classList.remove('ok', 'err');
+  if (line.tone) pill.classList.add(line.tone);
+  labelIdle.textContent = line.text;
+  if (feedbackHold && feedbackHold.fadeTimer) clearTimeout(feedbackHold.fadeTimer);
+  pill.classList.remove('swap');
+  void pill.offsetWidth; // 强制重排：连续轮播时动画可重复触发
+  pill.classList.add('swap');
+  if (feedbackHold) {
+    feedbackHold.fadeTimer = setTimeout(() => pill.classList.remove('swap'), 460);
+  }
+  updateFace();
+}
+
+/**
+ * 按行轮播结果。单行时退化为原来的 showHold 行为。
+ * 不用 native title：悬停弹窗会挡住胶囊，信息全部放在轮播行里。
+ */
+function showHoldSequence(lines, ms) {
+  clearFeedbackTimers();
+  if (!lines || !lines.length) return;
+  const state = {
+    lines, index: 0, until: Date.now() + ms,
+    text: lines[0].text, cls: lines[0].tone,
+    timer: 0, rotateTimer: 0, fadeTimer: 0,
+  };
+  feedbackHold = state;
   resetIdleTimer();
-  feedbackHold.timer = setTimeout(() => {
-    feedbackHold = null;
-    pill.classList.remove('ok', 'warn');
+  applyHoldLine(lines[0]);
+  if (lines.length > 1) {
+    const step = Math.max(900, Math.floor(ms / lines.length));
+    state.rotateTimer = setInterval(() => {
+      if (!holdActive()) return;
+      state.index = (state.index + 1) % state.lines.length;
+      const line = state.lines[state.index];
+      state.text = line.text;
+      state.cls = line.tone;
+      applyHoldLine(line);
+    }, step);
+  }
+  state.timer = setTimeout(() => {
+    clearFeedbackTimers();
+    pill.classList.remove('ok', 'err', 'swap');
     refreshIdleLabel();
   }, ms);
+}
+
+function showHold(text, cls, ms) {
+  showHoldSequence([{ text, tone: cls }], ms);
 }
 
 function showFeedback(text, ok = false) {
   if (ok) celebrate();
   else faceShake(); // 没成功 → 轻轻摇头
-  showHold(text, ok ? 'ok' : '', 6000);
+  showHold(text, ok ? 'ok' : 'err', 6000);
 }
 
 async function restoreClipText() {
@@ -473,7 +519,7 @@ window.island.on('clip:found', (info) => {
     refreshIdleLabel();
     return;
   }
-  feedbackHold = null; // 新的剪贴板提示优先于未过期的反馈文案
+  clearFeedbackTimers(); // 新的剪贴板提示优先于未过期的反馈文案
   setState('clip');
   dot.classList.add('clip');
   clipChip.hidden = false;
@@ -509,7 +555,7 @@ window.island.on('mask:done', (done) => {
   if (done.error === 'no-root') {
     setState('idle');
     // 未配置根目录是拖入失败的主因：必须让用户明确看见，而不是 3 秒一闪而过
-    showHold('未配置根目录，正在为你打开设置…', 'warn', 8000);
+    showHold('未配置根目录，正在为你打开设置…', 'err', 8000);
     // 直接弹出面板的设置页（面板内同步有 toast 提示），省得用户去找入口
     window.island.invoke('panel:show-tab', 'settings');
     return;
@@ -517,18 +563,11 @@ window.island.on('mask:done', (done) => {
   if (done.masked > 0) maskedCount += done.masked;
   setState('idle');
   if (done.total > 0) {
-    const parts = [];
-    if (done.masked > 0) parts.push(`屏蔽 ${done.masked} 份`);
-    if (done.restored > 0) parts.push(`还原 ${done.restored} 份`);
-    if (done.overwritten > 0) parts.push(`覆盖同名 ${done.overwritten} 份`);
-    if (parts.length) celebrate(); // 有实际成果 → 弹跳 + 高光
-    const line = parts.length
-      ? `已完成：${parts.join(' · ')}，副本已生成`
-      : (done.restoreMissing > 0 ? '编码无法识别，未还原'
-        : done.alreadyMasked > 0 ? '未找到可还原编码'
-        : done.noPii > 0 ? '未检出敏感信息' : '处理完成');
-    // 完成/结果提示持有 6 秒：期间悬停、闲聊轮换都不会顶掉它
-    showHold(line, 'ok', 6000);
+    const summary = window.BatchSummary.buildBatchSummary(done);
+    if (summary.celebrate) celebrate(); // 有实际成果 → 弹跳 + 高光
+    // 批量结果按行轮播；总时长随行数增加，保证每行都能读完。
+    const holdMs = summary.lines.length > 1 ? 1200 * summary.lines.length : 6000;
+    showHoldSequence(summary.lines, holdMs);
   } else {
     refreshIdleLabel();
   }
@@ -726,6 +765,6 @@ window.addEventListener('drop', async (e) => {
   } catch (err) {
     // invoke 层面的异常（如 IPC 竞态）也不能静默，否则胶囊永远卡在忙碌态
     setState('idle');
-    showHold('处理失败：' + String(err && err.message || err).slice(0, 30), '', 6000);
+    showHold('处理失败：' + String(err && err.message || err).slice(0, 30), 'err', 6000);
   }
 });
