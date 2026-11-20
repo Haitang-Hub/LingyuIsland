@@ -66,15 +66,13 @@ function resolveConflictName(dir, name, ext, policy = 'keep', existsFn) {
 const CATEGORY_EXTS = {
   doc: ['docx', 'doc', 'pdf', 'pptx', 'ppt', 'odt', 'rtf', 'wps', 'pages'],
   sheet: ['xlsx', 'xls', 'csv', 'tsv', 'ods', 'numbers'],
+  image: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'tif', 'tiff', 'ico', 'heic', 'heif', 'avif'],
   text: ['txt', 'md', 'json', 'xml', 'yaml', 'yml', 'ini', 'cfg', 'conf', 'log', 'srt', 'vtt', 'properties'],
-  code: ['js', 'ts', 'jsx', 'tsx', 'py', 'java', 'kt', 'go', 'rs', 'c', 'h', 'cpp', 'hpp', 'cs',
-         'php', 'rb', 'sh', 'bat', 'ps1', 'sql', 'vue', 'html', 'htm', 'css', 'scss', 'less',
-         'toml', 'tex', 'swift', 'dart', 'lua'],
 };
 
-const CATEGORY_LABEL = { all: '全部', doc: '文档', sheet: '表格', text: '文本', code: '代码', other: '其他' };
+const CATEGORY_LABEL = { all: '全部', doc: '文档', sheet: '表格', image: '图片', text: '文本', other: '其他' };
 
-/** 扩展名 → 类别（doc/sheet/text/code/other） */
+/** 扩展名 → 类别（doc/sheet/image/text/other；代码等未列类型归入 other） */
 function categoryOf(ext) {
   const e = String(ext || '').replace(/^\./, '').toLowerCase();
   for (const [cat, list] of Object.entries(CATEGORY_EXTS)) {

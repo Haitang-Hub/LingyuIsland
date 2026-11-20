@@ -209,7 +209,7 @@ async function run({ store, island, indexer, updater }) {
   const catDoc = indexer.search('', 50, 'doc');
   const catSheet = indexer.search('', 50, 'sheet');
   const catText = indexer.search('', 50, 'text');
-  const catCode = indexer.search('', 50, 'code');
+  const catImage = indexer.search('', 50, 'image');
   const catOther = indexer.search('', 50, 'other');
   check('按类别过滤', () => {
     assert.ok(catDoc.items.length > 0, '应有文档类样例');
@@ -217,11 +217,13 @@ async function run({ store, island, indexer, updater }) {
     assert.ok(catSheet.items.length > 0, '应有表格类样例');
     assert.ok(catSheet.items.every((i) => ['xlsx', 'xls', 'csv'].includes(i.e)));
     assert.ok(catText.items.every((i) => ['txt', 'md', 'json'].includes(i.e)));
-    assert.ok(catCode.items.every((i) => i.e === 'py'));
-    assert.ok(catOther.items.every((i) => i.e === 'png'));
+    assert.ok(catImage.items.length > 0, '应有图片类样例');
+    assert.ok(catImage.items.every((i) => i.e === 'png'));
+    assert.ok(catOther.items.length > 0, '应有其他类样例');
+    assert.ok(catOther.items.some((i) => i.e === 'py'), '代码类文件应归入其他');
     assert.strictEqual(catAll.counts.all, indexer.stats().count, '全部计数应等于索引文件数');
     assert.strictEqual(
-      catDoc.total + catSheet.total + catText.total + catCode.total + catOther.total,
+      catDoc.total + catSheet.total + catText.total + catImage.total + catOther.total,
       catAll.total,
       '各类别命中数之和应等于全部命中数'
     );
@@ -315,6 +317,8 @@ async function run({ store, island, indexer, updater }) {
         exts: [...document.querySelectorAll('#searchList .row .file-ico')].map(function(e){ return e.textContent.trim(); }),
         active: document.querySelector('#catChips .chip-btn.is-active').dataset.cat,
         counts: [...document.querySelectorAll('#catChips .chip-count')].map(function(e){ return e.textContent; }),
+        cats: [...document.querySelectorAll('#catChips .chip-btn')].map(function(e){ return e.dataset.cat; }),
+        titles: [...document.querySelectorAll('#catChips .chip-btn')].map(function(e){ return e.getAttribute('title'); }),
         meta: document.getElementById('searchMeta').textContent,
       };
     })()`);
@@ -323,6 +327,8 @@ async function run({ store, island, indexer, updater }) {
       assert.ok(filterState.exts.length >= 1, 'rows=' + filterState.exts.length);
       assert.ok(filterState.exts.every((e) => ['TXT', 'MD', 'JSON'].includes(e)),
         '筛选后仍出现非文本类文件: ' + filterState.exts.join(','));
+      assert.deepStrictEqual(filterState.cats, ['all', 'doc', 'sheet', 'image', 'text', 'other'], '类别顺序不符');
+      assert.ok(filterState.titles.every((t) => t === null), '类别按钮不应有 title 提示弹窗');
       assert.ok(filterState.counts.length === 6 && filterState.counts.every((c) => /^[0-9]+$/.test(c)),
         '类别计数未渲染: ' + filterState.counts.join(','));
       assert.ok(filterState.meta.includes('文本'), '结果说明未体现类别: ' + filterState.meta);
@@ -645,9 +651,9 @@ async function run({ store, island, indexer, updater }) {
         title: chip.title,
       };
     })()`);
-    check('胶囊：识别到含屏蔽信息并显示还原按钮', () => {
+    check('胶囊：嗅到敏感信息并显示还原按钮', () => {
       assert.strictEqual(pillState.text, '还原文本');
-      assert.strictEqual(pillState.idle, '识别到含屏蔽信息');
+      assert.strictEqual(pillState.idle, '咦，嗅到敏感信息');
       assert.strictEqual(pillState.hover, '点击展开操作面板');
       assert.strictEqual(pillState.hidden, false);
       assert.strictEqual(pillState.tag, 'BUTTON');

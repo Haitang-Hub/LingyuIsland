@@ -1,7 +1,7 @@
 {
   "name": "@haitang-hub/lingyu-island",
   "productName": "灵屿岛",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "description": "灵动岛式文件屏蔽与恢复工具：拖入文件即可屏蔽个人敏感信息，随时还原",
   "main": "src/main/main.js",
   "author": "Haitang-Hub",
@@ -42,23 +42,28 @@
     "files": [
       "src/**/*",
       "assets/**/*",
+      "!assets/engine/**/*",
       "package.json",
       "!test/**"
     ],
+    "electronLanguages": ["zh-CN"],
+    "extraResources": [
+      {
+        "from": "assets/engine",
+        "to": "engine",
+        "filter": ["**/*"]
+      }
+    ],
     "asarUnpack": [
-      "node_modules/pdfjs-dist/legacy/build/**/*"
+      "node_modules/pdfjs-dist/legacy/build/**/*",
+      "node_modules/pdfjs-dist/standard_fonts/**/*",
+      "node_modules/@napi-rs/canvas/**/*"
     ],
     "win": {
       "icon": "assets/icon.png",
       "target": [
         {
           "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "zip",
           "arch": [
             "x64"
           ]
@@ -75,6 +80,7 @@
     }
   },
   "dependencies": {
+    "@napi-rs/canvas": "^0.1.100",
     "@pdf-lib/fontkit": "^1.1.1",
     "adm-zip": "^0.5.16",
     "electron-updater": "^6.8.11",

@@ -12,10 +12,8 @@ if (!window.island) {
   const CAT_EXTS = {
     doc: ['docx', 'doc', 'pdf', 'pptx', 'ppt', 'odt', 'rtf', 'wps', 'pages'],
     sheet: ['xlsx', 'xls', 'csv', 'tsv', 'ods', 'numbers'],
+    image: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'tif', 'tiff', 'ico', 'heic', 'heif', 'avif'],
     text: ['txt', 'md', 'json', 'xml', 'yaml', 'yml', 'ini', 'cfg', 'conf', 'log', 'srt', 'vtt', 'properties'],
-    code: ['js', 'ts', 'jsx', 'tsx', 'py', 'java', 'kt', 'go', 'rs', 'c', 'h', 'cpp', 'hpp', 'cs',
-           'php', 'rb', 'sh', 'bat', 'ps1', 'sql', 'vue', 'html', 'htm', 'css', 'scss', 'less',
-           'toml', 'tex', 'swift', 'dart', 'lua'],
   };
   const catOf = (e) => {
     const x = String(e || '').toLowerCase();
@@ -131,9 +129,9 @@ if (!window.island) {
           return true;
         case 'search:query': {
           const q = (args[0] || '').trim().toLowerCase();
-          const cat = ['all', 'doc', 'sheet', 'text', 'code', 'other'].includes(args[2]) ? args[2] : 'all';
+          const cat = ['all', 'doc', 'sheet', 'image', 'text', 'other'].includes(args[2]) ? args[2] : 'all';
           const limit = Number.isFinite(args[1]) && args[1] > 0 ? args[1] : 50;
-          const counts = { all: 0, doc: 0, sheet: 0, text: 0, code: 0, other: 0 };
+          const counts = { all: 0, doc: 0, sheet: 0, image: 0, text: 0, other: 0 };
           const pool = indexFiles.filter((f) =>
             !q || f.n.toLowerCase().includes(q) || f.p.toLowerCase().includes(q));
           for (const f of pool) { counts.all++; counts[catOf(f.e)]++; }
@@ -157,8 +155,19 @@ if (!window.island) {
           };
         }
         case 'mask:files': {
-          const done = mockDone((args[0] || []).length);
-          setTimeout(() => emit('mask:done', done), 60);
+          // 浏览器演示完整链路：转换（不定长）→ 逐文件进度（带文件名）
+          // → 末尾留 8 秒静默，正好演示「防卡住」的轮换提示
+          const files = args[0] || [];
+          const n = Math.max(1, files.length);
+          setTimeout(() => emit('mask:converting', { count: 1 }), 100);
+          for (let i = 1; i <= n; i++) {
+            setTimeout(() => emit('mask:progress', {
+              i, total: n,
+              path: '人事/员工花名册.xlsx',
+            }), 400 + i * 500);
+          }
+          const done = mockDone(n);
+          setTimeout(() => emit('mask:done', done), 900 + n * 500 + 8000);
           return done;
         }
         case 'clip:restore':
@@ -170,8 +179,11 @@ if (!window.island) {
           settings.rootDir = 'D:\\工作文档';
           return settings.rootDir;
         case 'dialog:pick-files': {
+          setTimeout(() => emit('mask:progress', {
+            i: 1, total: 1, path: '会议纪要0412.txt',
+          }), 150);
           const done = mockDone(1);
-          setTimeout(() => emit('mask:done', done), 60);
+          setTimeout(() => emit('mask:done', done), 700);
           return done;
         }
         case 'mask:restore-file':

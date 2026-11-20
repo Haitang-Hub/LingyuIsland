@@ -133,3 +133,112 @@ test('姓名·传播：源头误判不入表，哈希命中遵循最长优先', 
   const masked = maskText('审判长张三宣布开庭。', v).masked;
   assert.strictEqual(restoreText(masked, v).text, '审判长张三宣布开庭。');
 });
+
+test('姓名·冷僻姓：裴/邝/冼 等非高频姓不得因形状门槛漏遮，虚词不得误遮', () => {
+  // 旧实现用「常见姓氏白名单」做 2 字准入门槛，表外的真姓（裴钱）直接漏遮。
+  for (const [text, name] of [
+    ['被会见人：裴钱', '裴钱'],
+    ['被害人：邝丽，女，1987年出生。', '邝丽'],
+    ['证人：冼芳', '冼芳'],
+    ['被害人：岑伟', '岑伟'],
+    ['原告：于洋', '于洋'],
+  ]) {
+    assert.ok(vals(text, 'name').includes(name), `${text} → ${JSON.stringify(vals(text, 'name'))}`);
+    const v = new Vault();
+    const masked = maskText(text, v).masked;
+    assert.ok(masked.includes('〔姓名·'), `${text} 应被屏蔽: ${masked}`);
+    assert.strictEqual(restoreText(masked, v).text, text, `${text} 往返应逐字一致`);
+  }
+  // 虚词首字仍不得确认为姓名
+  for (const text of ['被告人：现在，你可以走了。', '被害人：有权，请记录在案。',
+    '被告人：应当', '被害人：尚未', '被害人：包括', '被害人：查明']) {
+    assert.strictEqual(vals(text, 'name').length, 0, `${text} → ${JSON.stringify(vals(text, 'name'))}`);
+  }
+});
+
+test('姓名·冒号语境：字段值确认，冒号引出的话语不确认', () => {
+  // 判据是「冒号后是字段值还是一句话」，与姓氏/姓名表无关：
+  // 句子含人称代词、情态助动词、请求语时，冒号处的字词不是姓名。
+  for (const text of [
+    '被告人：现在，你可以走了。',
+    '审判长：现在核对被告人身份。',
+    '被害人：有权，请记录在案。',
+    '被告人：有权委托辩护人。',
+    '被告人：如实供述',
+    '被害人：自愿认罪',
+    '被害人：同意赔偿',
+    '被告人：是否听清',
+  ]) {
+    assert.strictEqual(vals(text, 'name').length, 0, `${text} → ${JSON.stringify(vals(text, 'name'))}`);
+  }
+  for (const [text, name] of [
+    ['被会见人：裴钱', '裴钱'],
+    ['负责人：陈兆坤，主任。', '陈兆坤'],
+    ['书记员：张三，担任法庭记录。', '张三'],
+    ['原告：张三，南检刑诉[2026]Z25号', '张三'],
+  ]) {
+    assert.ok(vals(text, 'name').includes(name), `${text} → ${JSON.stringify(vals(text, 'name'))}`);
+  }
+});
+
+test('姓名·字段行：嵌套角色词不遮角色词片段，间隔号长名整体确认', () => {
+  // 「姓名：审判员李长顺」曾把「审判」当姓名（字段前缀全命中）。
+  assert.deepStrictEqual(vals('姓名：审判员李长顺', 'name'), ['李长顺']);
+  assert.deepStrictEqual(vals('姓名：审判员', 'name'), []);
+  // 姓名：字段 + 间隔号长名应整体确认，不能退化成前缀「阿依」「阿依古」
+  assert.deepStrictEqual(vals('姓名：阿依古丽·买买提', 'name'), ['阿依古丽·买买提']);
+  assert.deepStrictEqual(vals('被害人阿依古丽·买买提陈述。', 'name'), ['阿依古丽·买买提']);
+});
+
+test('姓名·谓语与罪名边界：不吞谓语、不越过动词吞罪名', () => {
+  // 「本律师担任裴钱涉嫌盗窃罪一案」曾被遮成「裴*嫌」：候选「裴钱涉嫌」
+  // 被后随「盗窃」触发叙述闭合，把谓语「涉嫌」吞进了姓名。
+  for (const [text, name] of [
+    ['本律师担任裴钱涉嫌盗窃罪一案', '裴钱'],
+    ['本律师担任裴钱涉嫌盗窃罪一案，现依法会见。', '裴钱'],
+    ['被会见人：裴钱涉嫌盗窃罪一案', '裴钱'],
+    ['姓名：裴钱涉嫌盗窃罪', '裴钱'],
+    ['裴钱涉嫌盗窃罪', '裴钱'],
+    ['被告人裴钱涉嫌盗窃罪，现羁押于雷州市看守所。', '裴钱'],
+  ]) {
+    assert.deepStrictEqual(vals(text, 'name'), [name], `${text} → ${JSON.stringify(vals(text, 'name'))}`);
+    const v = new Vault();
+    const masked = maskText(text, v).masked;
+    assert.ok(masked.includes('裴*〔姓名·'), `${text} 应遮成 2 字形态: ${masked}`);
+    assert.ok(!masked.includes('裴*嫌'), `${text} 不应吞谓语: ${masked}`);
+    assert.strictEqual(restoreText(masked, v).text, text, `${text} 往返应逐字一致`);
+  }
+  // 间隔号姓名在「涉嫌」锚点下要整体确认，不能只遮「买买提」。
+  assert.deepStrictEqual(vals('阿依古丽·买买提涉嫌盗窃罪', 'name'), ['阿依古丽·买买提']);
+  // 指代/否定语素开头、方位收尾都不是姓名
+  for (const text of ['该公司涉嫌走私。', '上述人员涉嫌犯罪。', '同案人涉嫌共同犯罪。',
+    '犯罪嫌疑人涉嫌盗窃罪。', '对方涉嫌违约。', '以上涉嫌虚构。', '其涉嫌盗窃罪。',
+    '本案涉嫌金额巨大。', '我们涉嫌违规操作。', '非法集资涉嫌犯罪。']) {
+    assert.strictEqual(vals(text, 'name').length, 0, `${text} → ${JSON.stringify(vals(text, 'name'))}`);
+  }
+  // 庭审指令仍不得因「后随动词」被确认
+  for (const text of ['合议庭成员：审判长开庭审理本案', '审判长：开庭。', '书记员：请审判长开庭。']) {
+    assert.strictEqual(vals(text, 'name').length, 0, `${text} → ${JSON.stringify(vals(text, 'name'))}`);
+  }
+});
+
+test('姓名·律师表述：连续谓语后取宾语，所有格结构取姓名', () => {
+  // 角色词与姓名之间隔着一到多个身份谓语时，锚点仍要命中
+  for (const [text, name] of [
+    ['本律师接受指派担任裴钱涉嫌盗窃罪一案辩护人', '裴钱'],
+    ['辩护人接受委托担任裴钱盗窃案一审辩护人', '裴钱'],
+    ['本律师会见裴钱，了解案件情况。', '裴钱'],
+    ['本律师担任张三的辩护人。', '张三'],
+    ['法官助理李四担任张三的辩护人。', '张三'],
+  ]) {
+    assert.ok(vals(text, 'name').includes(name), `${text} → ${JSON.stringify(vals(text, 'name'))}`);
+  }
+  // 「指派律师王五担任张三的辩护人」两个姓名都要遮
+  const both = vals('指派律师王五担任张三的辩护人', 'name');
+  assert.ok(both.includes('王五') && both.includes('张三'), JSON.stringify(both));
+  // 所有格/涉嫌锚点不得把普通名词、机构、指代词当姓名
+  for (const text of ['完成含原告肖像的照片核查。', '公司的意见。', '该公司的委托代理人。',
+    '被告人的辩护人。', '经办人的意见。', '上述材料的复印件。', '以上涉嫌虚构。']) {
+    assert.strictEqual(vals(text, 'name').length, 0, `${text} → ${JSON.stringify(vals(text, 'name'))}`);
+  }
+});

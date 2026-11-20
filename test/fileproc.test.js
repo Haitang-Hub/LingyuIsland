@@ -252,6 +252,18 @@ test('collectPaths：跳过 ~$ 锁文件，老式 .doc 不被静默丢弃', () =
   assert.strictEqual(LEGACY_EXTS.has('doc') && LEGACY_EXTS.has('dot'), true);
 });
 
+test('collectPaths：图片文件必须被收集（曾经漏掉导致拖图无反应）', () => {
+  const dir = path.join(TMP, 'collect-img');
+  fs.mkdirSync(dir, { recursive: true });
+  const img = path.join(dir, '扫描件.jpg');
+  fs.writeFileSync(img, 'x');
+  const png = path.join(dir, '截图.PNG');
+  fs.writeFileSync(png, 'x');
+  const got = collectPaths([dir]);
+  assert.ok(got.some((p) => p === img), '.jpg 应被收集');
+  assert.ok(got.some((p) => path.basename(p) === '截图.PNG'), '大写后缀 .PNG 应被收集');
+});
+
 /* ---------------- 老式 .doc ---------------- */
 
 test('老式 .doc / .dot 的结果统一命名为 .docx', () => {
@@ -291,7 +303,8 @@ async function pdfSuite() {
   const { PDFDocument } = require('pdf-lib');
   const fontkit = require('@pdf-lib/fontkit');
   const pdfproc = require('../src/core/pdfproc');
-  const { readPdfText, maskPdfFile, restorePdfFile } = require('../src/core/fileproc');
+  const pdfredact = require('../src/core/pdfredact');
+  const { readPdfText, redactPdfFile, restorePdfFile } = require('../src/core/fileproc');
   const dir = path.join(TMP, 'pdf');
   fs.mkdirSync(dir, { recursive: true });
   const src = path.join(dir, 'pdf-unit.pdf');
@@ -316,33 +329,91 @@ async function pdfSuite() {
   });
 
   const v = new Vault();
-  const m = await maskPdfFile(src, v, {}, null, {});
-  test('PDF·遮蔽生成新 PDF 且无敏感值残留', () => {
+  const m = await redactPdfFile(src, v, {}, null, { dpi: 120 });
+  test('PDF·不可逆遮盖生成新文件且不写 vault', () => {
     assert.strictEqual(m.ok, true, JSON.stringify(m));
-    assert.ok(m.maskedPath && m.count > 0);
+    assert.ok(m.redactedPath && m.count > 0);
+    assert.strictEqual(m.irreversible, true);
+    assert.strictEqual(v.size, 0, 'PDF 遮盖不应写入可还原映射库');
+    assert.ok(/_屏蔽\.pdf$/.test(m.redactedPath), '结果名应为 _屏蔽');
   });
-  const text1 = await readPdfText(m.ok ? m.maskedPath : src);
-  test('PDF·遮蔽后文本层不含原号码，含带标签编码', () => {
-    assert.ok(!text1.includes('13812345678'));
-    assert.ok(/〔[\u4e00-\u9fa5]{1,6}·[0-9a-f]{6,12}〕/.test(text1), '应含类型标签还原编码');
-    assert.ok(text1.includes('〔灵屿岛脱敏声明〕') === false, '不应注入脱敏声明');
+  const text1 = await readPdfText(m.ok ? m.redactedPath : src);
+  test('PDF·遮盖产物为纯图像，无文本层', () => {
+    assert.strictEqual(text1, null, '不应残留可复制文本层');
   });
 
-  const r = await restorePdfFile(m.maskedPath, v, null);
-  const text2 = await readPdfText(r.restoredPath);
-  test('PDF·还原后文本层逐字一致', () => {
-    assert.strictEqual(r.ok, true, JSON.stringify(r));
-    assert.strictEqual(text2, text0);
+  // 回归守卫：坐标映射曾把 pdfjs 已缩放的 width 再乘字体缩放（约 14 倍），
+  // 且 mergeBoxes 逐行连锁合并，导致整页被涂黑。这里直接统计渲染后的黑色像素占比。
+  if (m.ok) {
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const { createCanvas } = require('@napi-rs/canvas');
+    const redDoc = await pdfjs.getDocument({ data: new Uint8Array(fs.readFileSync(m.redactedPath)) }).promise;
+    const redPage = await redDoc.getPage(1);
+    const vp = redPage.getViewport({ scale: 1 });
+    const cv = createCanvas(Math.round(vp.width), Math.round(vp.height));
+    await redPage.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+    const pixels = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+    let dark = 0;
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (pixels[i] < 32 && pixels[i + 1] < 32 && pixels[i + 2] < 32) dark++;
+    }
+    const blackRatio = dark / (cv.width * cv.height);
+    test('PDF·遮盖只覆盖敏感区而非整页涂黑', () => {
+      assert.ok(blackRatio < 0.25, `黑框占比应远小于整页，实际 ${(blackRatio * 100).toFixed(1)}%`);
+    });
+  }
+
+  const again = await redactPdfFile(src, v, {}, null, { dpi: 120 });
+  test('PDF·重复拖入不跳过，始终重新处理', () => {
+    assert.notStrictEqual(again.skipped, 'already-redacted', JSON.stringify(again));
+    assert.strictEqual(again.ok, true, JSON.stringify(again));
+  });
+
+  const rr = await restorePdfFile(m.ok ? m.redactedPath : src, v, null);
+  test('PDF·还原入口被禁用', () => {
+    assert.strictEqual(rr.skipped, 'pdf-restore-disabled');
   });
 
   const blankDoc = await PDFDocument.create();
   blankDoc.addPage([200, 200]);
   const blank = path.join(dir, 'pdf-blank.pdf');
   fs.writeFileSync(blank, await blankDoc.save());
-  const bm = await maskPdfFile(blank, new Vault(), {}, null, {});
-  test('PDF·扫描件/无文本层返回 pdf-no-text', () => {
+  const bm = await redactPdfFile(blank, new Vault(), {}, null, {
+    dpi: 120, ocrEngineDir: path.join(dir, '__no_engine__'),
+  });
+  test('PDF·无文本层且无 OCR 引擎返回 pdf-no-text', () => {
     assert.strictEqual(bm.skipped, 'pdf-no-text', JSON.stringify(bm));
   });
+
+  // 有 RapidOCR-json 引擎时，验证「图片 PDF → OCR → 定位 → 遮盖」完整链路
+  const engineDir = pdfredact.resolveEngineDir();
+  if (engineDir) {
+    const { createCanvas, GlobalFonts } = require('@napi-rs/canvas');
+    GlobalFonts.registerFromPath(fp, 'LingyuTestCJK');
+    const canvas = createCanvas(900, 240);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 900, 240);
+    ctx.fillStyle = '#000000';
+    ctx.font = '34px LingyuTestCJK';
+    ctx.fillText('手机：13812345678', 30, 90);
+    ctx.fillText('姓名：张三', 30, 160);
+    const imgDoc = await PDFDocument.create();
+    const img = await imgDoc.embedPng(canvas.toBuffer('image/png'));
+    const imgPage = imgDoc.addPage([450, 120]);
+    imgPage.drawImage(img, { x: 0, y: 0, width: 450, height: 120 });
+    const scanned = path.join(dir, 'pdf-scanned.pdf');
+    fs.writeFileSync(scanned, await imgDoc.save());
+    const sm = await redactPdfFile(scanned, new Vault(), {}, null, {
+      dpi: 200, ocrEngineDir: engineDir,
+    });
+    test('PDF·图片 PDF 经 OCR 定位后遮盖', () => {
+      assert.strictEqual(sm.ok, true, JSON.stringify(sm));
+      assert.strictEqual(sm.ocr, true, '应走 OCR 分支');
+      assert.ok(sm.count > 0, '应检出敏感信息');
+      assert.ok(fs.existsSync(sm.redactedPath), '应生成遮盖产物');
+    });
+  }
 }
 
 /* ---------------- 输出 ---------------- */

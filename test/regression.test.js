@@ -305,7 +305,7 @@ test('knownNames：缓存读写幂等且损坏文件安全回退（Windows 路�
     // 损坏存储文件安全回退
     fs.writeFileSync(namesFile, '{broken', 'utf8');
     assert.strictEqual(loadKnownNameHashes(namesFile, caseDir).size, 0, '损坏缓存应回退为空集');
-    // v1/v2/v3 均弃用；v4 非法条目被过滤。
+    // v1/v2/v3/v4/v5 均弃用；v6 非法条目被过滤。
     fs.writeFileSync(namesFile,
       JSON.stringify({ v: 2, dirs: { [caseDirKey(caseDir)]: { hashes: [hashName('李四')] } } }), 'utf8');
     assert.strictEqual(loadKnownNameHashes(namesFile, caseDir).size, 0, 'v2 缓存不得吸收');
@@ -313,7 +313,13 @@ test('knownNames：缓存读写幂等且损坏文件安全回退（Windows 路�
       JSON.stringify({ v: 3, dirs: { [caseDirKey(caseDir)]: { hashes: [hashName('李四')] } } }), 'utf8');
     assert.strictEqual(loadKnownNameHashes(namesFile, caseDir).size, 0, 'v3 缓存不得吸收');
     fs.writeFileSync(namesFile,
-      JSON.stringify({ v: 4, dirs: { [caseDirKey(caseDir)]: { hashes: ['bad', hashName('李四')] } } }), 'utf8');
+      JSON.stringify({ v: 4, dirs: { [caseDirKey(caseDir)]: { hashes: [hashName('李四')] } } }), 'utf8');
+    assert.strictEqual(loadKnownNameHashes(namesFile, caseDir).size, 0, 'v4 缓存不得吸收（v1.12.0 时间词毒哈希）');
+    fs.writeFileSync(namesFile,
+      JSON.stringify({ v: 5, dirs: { [caseDirKey(caseDir)]: { hashes: [hashName('李四')] } } }), 'utf8');
+    assert.strictEqual(loadKnownNameHashes(namesFile, caseDir).size, 0, 'v5 缓存不得吸收（连词/谓语毒哈希）');
+    fs.writeFileSync(namesFile,
+      JSON.stringify({ v: 6, dirs: { [caseDirKey(caseDir)]: { hashes: ['bad', hashName('李四')] } } }), 'utf8');
     const set = loadKnownNameHashes(namesFile, caseDir);
     assert.strictEqual(set.size, 1);
     assert.ok(set.has(hashName('李四')));
@@ -323,7 +329,7 @@ test('knownNames：缓存读写幂等且损坏文件安全回退（Windows 路�
   }
 });
 
-test('knownNames：旧版案卷内 .mask-names.json 直接清除（毒哈希不吸收）+ 缓存 v4', () => {
+test('knownNames：旧版案卷内 .mask-names.json 直接清除（毒哈希不吸收）+ 缓存 v6', () => {
   const caseDir = tempDir('lingyu-regress-case-');
   const storeDir = tempDir('lingyu-regress-store-');
   try {
@@ -339,15 +345,182 @@ test('knownNames：旧版案卷内 .mask-names.json 直接清除（毒哈希不�
     // 旧文件被删除，案卷目录不留任何缓存
     assert.ok(!fs.existsSync(path.join(caseDir, '.mask-names.json')), '案卷目录内旧缓存应被删除');
     const store = JSON.parse(fs.readFileSync(namesFile, 'utf8'));
-    assert.strictEqual(store.v, 4, '存储格式应为 v4');
+    assert.strictEqual(store.v, 6, '存储格式应为 v6');
     const entry = store.dirs[caseDirKey(caseDir)];
     // v1 旧缓存出自旧版检测器（含「执行/文件」等毒哈希），不吸收
-    assert.ok(!entry.hashes.includes(legacyHash), 'v1 旧哈希不得进入 v4 缓存');
+    assert.ok(!entry.hashes.includes(legacyHash), 'v1 旧哈希不得进入 v6 缓存');
     // 本批确认姓名正常入库
     assert.ok(entry.hashes.includes(hashName('张三')), '本批确认姓名应入缓存');
   } finally {
     rmDir(caseDir);
     rmDir(storeDir);
+  }
+});
+
+test('时间词不得成为姓名种子：「被告人：现在，…」不毒化「检察院现在给你做不起诉」', () => {
+  const { collectEntities } = require('../src/core/entities');
+  // 冒号字段 + 逗号边界的笔录句式曾把「现在」确认为姓名，经原值/哈希传播后
+  // 「检察院现在给你做不起诉」被遮成「现*〔姓名·…〕」。
+  for (const t of [
+    '被告人：现在，你可以走了。',
+    '审判长：现在核对被告人身份。',
+    '现在，男，30岁。',
+    '合议庭成员：现在',
+  ]) {
+    assert.strictEqual([...collectEntities([t]).name].filter((v) => v === '现在').length, 0,
+      `${t} → 「现在」不得入 known 集合`);
+  }
+  const transcript = [
+    '问：鉴于你们都已经赔偿到位且被害人已经出具谅解书了，检察院现在给你做不起诉。',
+    '答：好的，我接受。',
+    '被告人：现在，你可以走了。',
+  ].join('\n');
+  const m = maskText(transcript, new Vault());
+  assert.ok(!m.masked.includes('〔姓名·'), `时间词不应被遮: ${m.masked}`);
+  assert.ok(m.masked.includes('检察院现在给你做不起诉'), '目标句不应改动');
+});
+
+test('姓名形状门槛：虚词开头的 2 字候选不得成为种子（有权/现在/应当），冷僻姓不受影响', () => {
+  // 「即你有权为自己辩护」曾被遮成「你有*〔姓名·…〕」：冒号字段/人口学位
+  // 把「有权」确认成姓名后经哈希传播全卷。旧实现用「常见姓氏白名单」拦截，
+  // 结果裴/邝/冼 等不在表内的真姓全被漏掉（「被会见人：裴钱」不遮）；
+  // 现改为「语法功能字」黑名单：只拦虚词首字，不判姓氏。
+  for (const t of [
+    '犯罪嫌疑人：有权，请记录在案。',
+    '被告人：有权委托辩护人。',
+    '有权，男，45岁。',
+    ['诉讼权利', '有权'],
+    '被告人：应当，请核对。',
+    '被害人：包括本案共三人。',
+    '被害人：查明事实后另行处理。',
+    '被害人：尚未到案。',
+  ]) {
+    const blocks = Array.isArray(t) ? t : [t];
+    const bad = [...collectEntities(blocks).name].filter((v) => /^(?:有权|应当|包括|查明|尚未)$/.test(v));
+    assert.deepStrictEqual(bad, [], `${JSON.stringify(blocks)} → 虚词不得入 known 集合`);
+  }
+  // 冷僻姓 / 首字为姓的 2 字真名必须照常确认
+  for (const [blocks, who] of [
+    [['被会见人：裴钱'], '裴钱'],
+    [['被害人：邝丽，女，1987年出生。'], '邝丽'],
+    [['证人：冼芳'], '冼芳'],
+    [['被害人：包拯'], '包拯'],
+    [['被害人：尚伟'], '尚伟'],
+    [['原告：于洋'], '于洋'],
+  ]) {
+    assert.ok(collectEntities(blocks).name.has(who), `${JSON.stringify(blocks)} → ${who} 应确认`);
+  }
+  // 告知书目标句不再被遮
+  const m = maskText('（三）辩护及获得法律援助、法律帮助的权利：即你有权为自己辩护，也可以委托辩护人为你辩护；你有权约见值班律师；', new Vault());
+  assert.ok(!m.masked.includes('〔姓名·'), `「有权」不应被遮: ${m.masked}`);
+  assert.ok(m.masked.includes('即你有权为自己辩护'), '目标句不应改动');
+});
+
+test('传播校验：毒哈希不得复活字段词（日出生/出生），真名传播不受影响', () => {
+  const t = '2010年02月08日出生';
+  for (const poison of ['出生', '日出生']) {
+    const r = maskText(t, new Vault(), { knownNameHashes: new Set([hashName(poison)]) });
+    assert.ok(!r.masked.includes('〔姓名·'), `缓存种子「${poison}」不应再遮日期: ${r.masked}`);
+    assert.strictEqual(r.masked, t);
+  }
+  // 字段词也不得成为种子
+  for (const blocks of [['出生日期', '日出生'], ['姓名：日出生'], ['日出生，男，2010年02月08日。']]) {
+    const hit = [...collectEntities(blocks).name].filter((v) => /出生/.test(v));
+    assert.deepStrictEqual(hit, [], `${JSON.stringify(blocks)} → 字段词不得入 known 集合`);
+  }
+  // 真名经哈希传播仍正常
+  const ok = maskText('陈阿满到场。', new Vault(), { knownNameHashes: new Set([hashName('陈阿满')]) });
+  assert.ok(ok.masked.includes('〔姓名·'), '真名传播应保留');
+});
+
+test('角色词尾同形虚词与动作谓语：不得确认「差错」「作最后」为姓名', () => {
+  // 「对记载有遗漏或者差错提出补充或改正」里「或者」的「者」曾是角色词尾，
+  // 「差错」被叙述动词「提出」闭合后确认成姓名，并经哈希传播把会见笔录里所有
+  // 「有差错的」「如无差错」都遮掉。
+  const errorSentences = [
+    '三、核对听证笔录、对记载有遗漏或者差错提出补充或改正的权利。',
+    '如果记载有遗漏或者差错，你有权要求补充或改正。',
+    '以上的会见笔录，请你详细阅读，有差错的，可以要求进行更正。',
+    '如无差错，请签名或者按印。',
+  ];
+  for (const t of errorSentences) {
+    const names = vals(t, 'name');
+    assert.deepStrictEqual(names, [], `${t} → 不得检出姓名（实际 ${JSON.stringify(names)}）`);
+    assert.ok(!collectEntities([t]).name.has('差错'), `${t} → 「差错」不得入 known 集合`);
+  }
+
+  // 角色词后直接跟「作/进行/参与/予以…」这类只带动作宾语的谓语：宾语位是行为而非人。
+  for (const t of [
+    '法庭辩论结束，现在由被告人作最后陈述。',
+    '（4）被告人可以在法庭辩论终结后作最后陈述。',
+    '被告人作最后陈述',
+    '辩护人参与整个审查过程，现附条件不起诉决定书',
+  ]) {
+    const names = vals(t, 'name');
+    assert.deepStrictEqual(names, [], `${t} → 不得检出姓名（实际 ${JSON.stringify(names)}）`);
+  }
+
+  // 角色词 + 单字虚词（「受援人因涉嫌」）与文书对象名词（案件/案卷）不是姓名
+  for (const t of [
+    '承办过程：受援人因涉嫌犯盗窃罪被某县公安局移送审查起诉。',
+    '文书用于承办人记载向受援人通报和向法律援助机构报告案件办理进展情况。',
+    '辩护人详细查阅本案卷宗材料。',
+  ]) {
+    const names = vals(t, 'name');
+    assert.deepStrictEqual(names, [], `${t} → 不得检出姓名（实际 ${JSON.stringify(names)}）`);
+  }
+
+  const transcript = [
+    '审：法庭辩论结束，现在由被告人作最后陈述。',
+    '审：以上的会见笔录，请你详细阅读，有差错的，可以要求进行更正。如无差错，请签名或者按印。',
+    '三、核对听证笔录、对记载有遗漏或者差错提出补充或改正的权利。',
+  ].join('\n');
+  const m = maskText(transcript, new Vault());
+  assert.strictEqual(m.masked, transcript, `整段不应有任何改动: ${m.masked}`);
+
+  // 负例成对：真正的角色锚点 + 姓名 + 叙述动词仍应确认
+  for (const [t, who] of [
+    ['审判长张三宣布开庭。', '张三'],
+    ['被告人欧阳明盗窃他人财物，数额较大。', '欧阳明'],
+    ['被会见人：裴钱', '裴钱'],
+    ['被告人张三提出异议，法庭予以支持。', '张三'],
+    ['本律师担任裴钱涉嫌盗窃罪一案。', '裴钱'],
+    // 「姓名 + 因 + 涉嫌」与「角色词 + 姓名 + 冒号」都要照常确认
+    ['承办过程：受援人王芳因涉嫌犯盗窃罪被移送审查起诉。', '王芳'],
+    ['审判长张三：现在核对身份。', '张三'],
+    ['被告人李四作最后陈述。', '李四'],
+  ]) {
+    assert.ok(vals(t, 'name').includes(who), `${t} → ${who} 应确认`);
+  }
+});
+
+test('身份锚点补强：头衔/关系名词、弱字段、被字句（校长沙悟净、总经理刘星、学生王东）', () => {
+  // 真实笔录里反复出现却始终没被标注的三类姓名：
+  // ① 头衔尾字不在「人/员/者/师/长/告/象」（总经理/学生）；
+  // ② 姓名字段没有冒号（「姓名为王东」「客户名称为“王东”」）；
+  // ③ 「姓名 + 被 + 谓语」（「原校长沙悟净被组织留置」）。
+  for (const [t, who] of [
+    ['涟水实验中学原校长沙悟净被组织留置后，我约人见面。', '沙悟净'],
+    ['某省某某有限公司总经理刘星贿赂2万元', '刘星'],
+    ['这份姓名为王东的中国建设银行银行卡', '王东'],
+    ['依法调取的客户名称为“王东”、交易卡号为“6217001730012324565”的流水', '王东'],
+    ['我就将我学生王东的建行卡号及其姓名告诉他', '王东'],
+  ]) {
+    assert.ok(vals(t, 'name').includes(who), `${t} → ${who} 应确认（实际 ${JSON.stringify(vals(t, 'name'))}）`);
+  }
+  // 弱字段不得把后续定语吞进姓名
+  const loose = vals('这份姓名为王东的中国建设银行银行卡', 'name');
+  assert.ok(!loose.some((v) => v.length > 3), `弱字段只取姓名本身: ${JSON.stringify(loose)}`);
+
+  // 负例成对：告尾动词与头衔泛称不得借锚点确认后续普通词
+  for (const t of [
+    '应当宣告缓刑：',
+    '下面我把相关的权利义务告知你：',
+    '该公司总经理负责食堂运营。',
+    '被告人当庭被带出法庭。',
+    '学生的家长到庭旁听。',
+  ]) {
+    assert.deepStrictEqual(vals(t, 'name'), [], `${t} → 不得检出姓名（实际 ${JSON.stringify(vals(t, 'name'))}）`);
   }
 });
 

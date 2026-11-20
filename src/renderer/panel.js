@@ -62,7 +62,7 @@ let lastSearchSeq = 0;
 
 const CATEGORIES = [
   ['all', '全部'], ['doc', '文档'], ['sheet', '表格'],
-  ['text', '文本'], ['code', '代码'], ['other', '其他'],
+  ['image', '图片'], ['text', '文本'], ['other', '其他'],
 ];
 
 function timeGroupOf(ts) {
@@ -286,6 +286,7 @@ function showMaskResult(done) {
 
   const okParts = [];
   if (done.masked > 0) okParts.push(`屏蔽完成 ${done.masked} 份 · ${done.totalPII} 处敏感信息`);
+  if (done.irreversible > 0) okParts.push(`其中 PDF/图片 不可逆遮盖 ${done.irreversible} 份（不支持还原）`);
   if (done.restored > 0) okParts.push(`还原完成 ${done.restored} 份 · ${done.restoredTotal} 处`);
   if (done.overwritten > 0) okParts.push(`已覆盖 ${done.overwritten} 个同名文件`);
   if (done.trashed > 0) okParts.push(`${done.trashed} 份原文件已移入回收站`);
@@ -299,7 +300,7 @@ function showMaskResult(done) {
     problems.push(`${convertFailed} 份 .doc 未能自动转换${done.convertReason ? `：${done.convertReason}` : '，请在 Word 中另存为 .docx 后重试'}`);
   }
   const pdfNoText = done.pdfNoText || 0;
-  if (pdfNoText > 0) problems.push(`${pdfNoText} 份 PDF 为扫描件`);
+  if (pdfNoText > 0) problems.push(`${pdfNoText} 份 PDF 无文本层且未配置 OCR 引擎`);
   const otherSkipped = (done.skipped || 0) - convertFailed - pdfNoText;
   if (otherSkipped > 0) problems.push(`${otherSkipped} 份文件无法处理（格式不支持或过大）`);
 
@@ -442,7 +443,6 @@ function buildChips() {
     b.type = 'button';
     b.className = 'chip-btn' + (v === searchCategory ? ' is-active' : '');
     b.dataset.cat = v;
-    b.dataset.label = label;
     b.innerHTML = `${esc(label)}<span class="chip-count" aria-hidden="true">0</span>`;
     b.setAttribute('role', 'tab');
     b.setAttribute('aria-selected', String(v === searchCategory));
@@ -467,7 +467,6 @@ function updateChipCounts(counts) {
     const badge = chip.querySelector('.chip-count');
     if (badge) badge.textContent = n > 999 ? '999+' : String(n);
     chip.classList.toggle('is-empty', n === 0);
-    chip.title = `${chip.dataset.label}：${n} 个文件（←→ 切换类别）`;
   }
 }
 

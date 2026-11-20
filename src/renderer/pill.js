@@ -17,6 +17,7 @@ function setState(next) {
   pill.classList.remove('clip', 'busy', 'ok', 'err');
   if (next === 'clip') pill.classList.add('clip');
   if (next === 'busy') pill.classList.add('busy');
+  if (next !== 'busy') stopBusyHints(); // 离开忙碌 → 轮换提示立即停止
   resetIdleTimer(); // 状态变化视为一次活动，空闲计时重新开始
   updateFace();
 }
@@ -126,42 +127,43 @@ function faceShake() {
 })();
 
 /* 空闲文案池：随机轮换的「情绪价值」文案
-   基调是「有梗、有料、贫嘴」——冷知识 / 小吐槽 / 桌宠式互动为主，温柔话只做点缀，
-   不再一味安慰打气。每行末尾是它触发的表情情绪；改文案时留意关键词是否仍匹配
-   faceMood() 的正则（困/睡→sleepy，可爱/夸→shy，晒/发呆→content，别急/烦恼→think，歇/喝水→warm）。 */
+   基调是「有梗、有料、贫嘴」——冷知识 / 小吐槽 / 桌宠式互动为主，温柔话只做点缀。
+   每行控制在 16 个全角字位内（会被 clampText 截断，超宽即丢字）；
+   每行末尾是它触发的表情情绪：改文案时保证带上本组关键词，且不要撞上更高优先级的词
+   （困/睡→sleepy，可爱/夸/摸摸头→shy，晒/光→content，别急/寄存/烦恼→think，歇/喝水/撑→warm）。 */
 const MOOD_LINES = [
   // 桌宠式贫嘴：像住在屏幕顶上的小家伙
-  '嘿嘿，摸鱼的手速不错嘛',
-  '嘘，我在记小本本，你今天戳了我三次',
-  '别戳了，再戳我就……更可爱给你看',      // shy（可爱）
-  '今天也很可爱，不接受反驳',              // shy（可爱）
-  '夸我一句，我就把你的小秘密忘掉',        // shy（夸）
-  '点击我不会变有钱，但会有我',
+  '戳一下，灵感 +1',
+  '小本本记着呢：今天已被戳 3 次',
+  '再戳我就更可爱给你看',        // shy（可爱）
+  '今日可爱指标已超标',          // shy（可爱）
+  '夸我一句就忘掉你的小秘密',    // shy（夸）
+  '点我不会变有钱，但会有我',
   // 冷知识：有趣有料，顺带劝睡劝晒
-  '冷知识：章鱼有三个心脏，省着点用',
-  '冷知识：蜂蜜永不过期，困意会过期',      // sleepy（困）
-  '冷知识：猫一天睡16小时，欠的觉快补上',  // sleepy（睡）
-  '冷知识：海獭睡觉会牵手，怕漂散',        // sleepy（睡）
-  '冷知识：香蕉是浆果，草莓不是',
-  '冷知识：晒太阳补维D，比咖啡温柔',       // content（晒）
+  '章鱼三个心脏，省着点用',
+  '蜂蜜不会过期，困意会',        // sleepy（困）
+  '猫一天睡16小时，你欠的觉呢',  // sleepy（睡）
+  '海獭睡觉会牵手，怕漂散',      // sleepy（睡）
+  '香蕉是浆果，草莓不是',
+  '晒太阳补维 D，比咖啡温柔',    // content（晒）
   // 小机灵 / 伪哲学
   '我不内耗，我只耗电',
-  '进度条没动，是它在攒大招',
-  '拖延不是病，是给灵感让路',
-  '摸鱼不是偷懒，是战略性喘气',
-  '我从不焦虑，焦虑只焦虑别人',
+  '进度条没动，在攒大招',
+  '拖延是给灵感让路',
+  '摸鱼是战略性喘气',
+  '我不焦虑，只焦虑别人',
   // 打工人吐槽：扎心但轻
   '这个会，本可以是一封邮件',
-  '手机说我屏幕时间太长，它管得真宽',
-  '周报文学：稳步推进，持续向好',
-  '元气满满地……先歇十分钟',              // warm（歇）
+  '屏幕时间太长？它管得真宽',
+  '周报文学：稳步推进',
+  '元气满满地……先歇十分钟',      // warm（歇）
   // 温柔点缀：保留少数，配比「有趣为主、偶尔软一下」
-  '摸摸头，今天也辛苦了',                  // shy
-  '记得喝水，顺便看看远处',                // warm（喝水）
-  '窗前有光，就去晒一会儿',                // content（晒）
-  '困了就眯一会儿，天不会塌',              // sleepy
-  '别急，一件一件来',                      // think
-  '烦恼先寄存在我这儿吧',                  // think
+  '摸摸头，今天也辛苦了',        // shy
+  '记得喝水，顺便看看远处',      // warm（喝水）
+  '窗前有光，就去晒一会儿',      // content（晒）
+  '困了就眯一会儿，天塌不了',    // sleepy
+  '别急，一件一件来',            // think
+  '烦恼先寄存在我这儿',          // think
 ];
 
 /** 按当前时段挑一句应景的话（每个时段多条，随机取一） */
@@ -169,21 +171,21 @@ function timeMoodLine() {
   const h = new Date().getHours();
   let pool;
   if (h >= 5 && h < 9) {
-    pool = ['早安，早起的鸟儿有虫吃，你不吃虫，多躺会儿', '起床成功，今天的难度已调至简单模式', '闹钟已阵亡，你刚从被窝战场凯旋'];
+    pool = ['早安，虫就留给别人吧', '起床成功，难度已调至简单', '闹钟阵亡，你从被窝凯旋'];
   } else if (h < 11) {
-    pool = ['上午适合攻坚，也适合摸鱼，看你悟性', '冷知识：上午的咖啡，下班前才生效', '开机成功，假装努力加载中'];
+    pool = ['上午适合攻坚，也适合摸鱼', '上午的咖啡，下班前才生效', '开机成功，假装努力加载中'];
   } else if (h < 13) {
-    pool = ['干饭要紧，KPI 不会跑', '午饭选难吃的，下午就不会恋战', '干饭人干饭魂，先吃再说'];
+    pool = ['干饭要紧，KPI 不会跑', '午饭选难吃的，下午不恋战', '干饭人干饭魂，先吃再说'];
   } else if (h < 16) {
-    pool = ['下午三点，人体电量不足，请补水', '困意是下午的常驻嘉宾，赶不走就请它眯会儿', '这个点撑住，离下班就剩……嗯，挺久'];
+    pool = ['下午三点，人体电量不足', '困意常驻，请它眯会儿', '这个点撑住，下班还有很久'];
   } else if (h < 19) {
-    pool = ['下班倒计时中，今日摸鱼额度即将清零', '傍晚的风免费，错过再等一天', '收工前的最后一战：假装很忙'];
+    pool = ['摸鱼额度即将清零', '傍晚的风免费，错过再等', '收工前最后一战：假装很忙'];
   } else if (h < 22) {
-    pool = ['晚上适合复盘，也适合摆烂，二选一', '电视剧和作业，总有一个在骗你「马上就好」', '晚上的你效率惊人——指的是点外卖'];
+    pool = ['晚上适合复盘，也适合摆烂', '「马上就好」是最大谎言', '晚上的你效率惊人——点外卖'];
   } else if (h < 24) {
-    pool = ['熬夜冠军是你，奖品是黑眼圈', '手机该睡了，它比你累', '再刷五分钟——这句话已经刷了五次了'];
+    pool = ['熬夜冠军是你，奖品黑眼圈', '手机该睡了，它比你累', '再刷五分钟——第五遍了'];
   } else {
-    pool = ['凌晨的你和被窝，总有一个在硬撑', '这个点醒着的人，都是时间的叛逆者'];
+    pool = ['凌晨，你和被窝总有一个硬撑', '这个点醒着的，都是叛逆者'];
   }
   return pool[Math.floor(Math.random() * pool.length)];
 }
@@ -191,10 +193,10 @@ function timeMoodLine() {
 /* 周末彩蛋：周六日随机追加一句 */
 const WEEKEND_LINES = [
   '周末的快乐，从不起床开始',
-  '今天的目标：把沙发坐出包浆',
+  '今日目标：把沙发坐出包浆',
   '周末不谈工作，谈饭',
   '躺平进行时，请勿打扰',
-  '周末最高机密：其实什么也没打算干',
+  '周末机密：其实啥也没打算干',
 ];
 
 const IDLE_LINES = () => {
@@ -203,9 +205,9 @@ const IDLE_LINES = () => {
   if (day === 0 || day === 6) {
     lines.push(WEEKEND_LINES[Math.floor(Math.random() * WEEKEND_LINES.length)]);
   }
-  if (maskedCount > 0) lines.push(`${maskedCount} 份文件已被悄悄守护`);
+  if (maskedCount > 0) lines.push(`悄悄守护着 ${maskedCount} 份文件`);
   // 保留一句功能提示，避免新用户不知道可以拖文件进来
-  lines.push('拖入文件，即可一键屏蔽');
+  lines.push('把文件丢给我，我来屏蔽');
   return lines;
 };
 
@@ -231,7 +233,7 @@ function refreshIdleLabel() {
     return;
   }
   const applyLine = () => {
-    labelIdle.textContent = pickIdleLine();
+    labelIdle.textContent = clampText(pickIdleLine());
     fxOnce('swap', 420); // 轻轻浮入，避免生硬跳变
     updateFace();        // 读完新消息 → 按内容给出表情反应
     faceNod();           // 轻轻点头「收到」
@@ -400,10 +402,141 @@ function dismissClip() {
   refreshIdleLabel();
 }
 
-function setBusy(text) {
+/* ---------------- 文字宽度预算 ----------------
+ * 胶囊文字区实测容量：标准字号约 18.7 个全角字（窗口 372 − 内边距/点/表情 138，
+ * 字号 12.5px；大小字号档位经 zoom/窗口同步缩放后容量基本不变，小字档略紧）。
+ * 统一预算 16 个全角位（半角字母/数字算半个）留出字体度量余量，
+ * 超出一律在此截断加「…」，避免出现截图里「（产物为 _屏蔽，不」式硬裁。 */
+
+const LABEL_MAX_UNITS = 16;
+
+/** 显示宽度估算：全角/宽字符 = 1，ASCII 半角 = 0.5 */
+function dispWidth(s) {
+  let w = 0;
+  for (const ch of String(s)) {
+    w += ch.codePointAt(0) >= 0x80 ? 1 : 0.5;
+  }
+  return w;
+}
+
+/** 超预算截断（含 1 位省略号） */
+function clampText(text, maxUnits = LABEL_MAX_UNITS) {
+  const s = String(text);
+  if (dispWidth(s) <= maxUnits) return s;
+  let w = 0;
+  let out = '';
+  for (const ch of s) {
+    const cw = ch.codePointAt(0) >= 0x80 ? 1 : 0.5;
+    if (w + cw > maxUnits - 1) return out + '…';
+    w += cw;
+    out += ch;
+  }
+  return s;
+}
+
+function setBusy(text, poolKey) {
+  if (mode !== 'busy') busySince = Date.now(); // 用时从本轮忙碌开始累计
   setState('busy');
-  labelIdle.textContent = text;
+  stopBusyHints();
+  labelIdle.textContent = clampText(text);
   glanceAtText(); // 看向进度文字
+  // 同一提示停留超过 4 秒（单文件内部 OCR/逐页重绘等静默长耗时）→ 开始轮换安抚提示
+  busyTimer = setTimeout(() => rotateBusyHint(poolKey || 'generic'), BUSY_HOLD_MS);
+}
+
+/* ---------------- 忙碌状态：防卡住的轮换提示 ----------------
+ * 主进程只在阶段切换时广播（识别/转换/逐文件），单个文件内部的
+ * OCR、逐页重绘等长耗时阶段是静默的。同一提示停留超过 BUSY_HOLD_MS
+ * 就开始轮换阶段相关的安抚提示（附带累计用时），让人知道没有卡住。 */
+
+const BUSY_HOLD_MS = 4000;   // 停留多久后开始轮换
+const BUSY_ROTATE_MS = 3500; // 轮换间隔
+
+let busySince = 0;  // 本轮忙碌开始时刻（「已用 X 秒」按它累计）
+let busyTimer = 0;  // 轮换定时器
+let lastHint = '';
+
+/* 忙碌提示是小家伙「边干活边自言自语」：正文 ≤10 字位，
+   加上「（已 X 秒）」后缀 ≈6 字位，整行卡进 16 位预算 */
+const BUSY_HINTS = {
+  identify: [
+    '让我先翻一翻',
+    '嗅嗅哪里有敏感信息',
+    '一份一份来，不急',
+  ],
+  convert: [
+    '老 .doc 要先变身',
+    '借 Word 的力转换中',
+  ],
+  scan: [
+    '逐段排查敏感信息',
+    'OCR 认字中，稍慢',
+    '一页一页认真看',
+  ],
+  restore: [
+    '按编码找回原文',
+    '对上号就能复原',
+  ],
+  generic: [
+    '在呢在呢，没卡住',
+    '这步急不来，值当',
+    '快了，在收尾了',
+  ],
+};
+
+function elapsedText() {
+  const s = Math.max(0, Math.floor((Date.now() - busySince) / 1000));
+  // 分钟档只报分不报秒：压住 16 字位预算（否则长提示 + 长后缀会被截断）
+  return s >= 60 ? `${Math.floor(s / 60)} 分` : `${s} 秒`;
+}
+
+/** 文案轻滑浮入（与空闲轮换同款动画） */
+function swapLabel() {
+  pill.classList.remove('swap');
+  void pill.offsetWidth;
+  pill.classList.add('swap');
+  setTimeout(() => pill.classList.remove('swap'), 460);
+}
+
+function rotateBusyHint(poolKey) {
+  const pool = [...(BUSY_HINTS[poolKey] || []), ...BUSY_HINTS.generic];
+  let line = pool[Math.floor(Math.random() * pool.length)];
+  let guard = 0;
+  while (line === lastHint && pool.length > 1 && guard++ < 8) {
+    line = pool[Math.floor(Math.random() * pool.length)];
+  }
+  lastHint = line;
+  // 正文 ≤10 字位 + 后缀 ≈6 字位，卡进 16 位预算（超了也会被 clampText 兜底）
+  labelIdle.textContent = clampText(`${line}（已 ${elapsedText()}）`);
+  swapLabel();
+  glanceAtText();
+  busyTimer = setTimeout(() => rotateBusyHint(poolKey), BUSY_ROTATE_MS);
+}
+
+function stopBusyHints() {
+  clearTimeout(busyTimer);
+  busyTimer = 0;
+  lastHint = '';
+}
+
+/* ---------------- 冲击波速度：随实际进度加速 ----------------
+ * 绿色光波；不定长阶段固定 2s 一波；逐文件阶段按 i/total 缩短周期
+   （2s → 1.1s），越接近完成冲击越快，给人「正在冲向终点」的推进感 */
+
+function setWaveSpeed(pct) {
+  if (pct == null) {
+    pill.style.setProperty('--wave-dur', '2s');
+  } else {
+    const p = Math.min(1, Math.max(0, Number(pct) || 0));
+    pill.style.setProperty('--wave-dur', (2 - p * 0.9).toFixed(2) + 's');
+  }
+}
+
+/** 取文件名并截断，供进度行展示（路径分隔符兼容 \ 与 /） */
+function shortName(p) {
+  const base = String(p || '').split(/[\\/]/).pop().trim();
+  if (!base) return '';
+  return base.length > 16 ? base.slice(0, 15) + '…' : base;
 }
 
 // 结果反馈持有期：悬停/轮换/主进程广播都不抢；批量结果按行轮播。
@@ -419,11 +552,11 @@ function clearFeedbackTimers() {
 
 function holdActive() { return !!(feedbackHold && Date.now() < feedbackHold.until); }
 
-/** 应用一行反馈：颜色、文案、轻滑动画 */
+/** 应用一行反馈：颜色、文案（超预算截断）、轻滑动画 */
 function applyHoldLine(line) {
   pill.classList.remove('ok', 'err');
   if (line.tone) pill.classList.add(line.tone);
-  labelIdle.textContent = line.text;
+  labelIdle.textContent = clampText(line.text);
   if (feedbackHold && feedbackHold.fadeTimer) clearTimeout(feedbackHold.fadeTimer);
   pill.classList.remove('swap');
   void pill.offsetWidth; // 强制重排：连续轮播时动画可重复触发
@@ -474,14 +607,15 @@ function showHold(text, cls, ms) {
 function showFeedback(text, ok = false) {
   if (ok) celebrate();
   else faceShake(); // 没成功 → 轻轻摇头
-  showHold(text, ok ? 'ok' : 'err', 6000);
+  // 两色方案：绿色正常 6 秒；红色是出错，多停留一会儿让人看清原因
+  showHold(text, ok ? 'ok' : 'err', ok ? 6000 : 10000);
 }
 
 async function restoreClipText() {
   if (mode === 'busy' || clipChip.hidden) return;
   clipChip.disabled = true;
   clipClose.disabled = true; // 还原进行中不允许取消，避免打断状态机
-  setBusy('正在还原文本…');
+  setBusy('正在找回原文…', 'restore');
   let r;
   try {
     r = await window.island.invoke('clip:restore');
@@ -491,7 +625,7 @@ async function restoreClipText() {
   leaveClip();
   setState('idle');
   if (r.ok) {
-    showFeedback(`已还原 ${r.resolved} 处，写回剪贴板`, true);
+    showFeedback(`找回来了！已还原 ${r.resolved} 处`, true); // happy 欢呼配「找回来了」
   } else if (r.stale) {
     showFeedback('剪贴板内容已变化，未执行还原');
   } else if (r.missing && r.missing.length) {
@@ -528,7 +662,7 @@ window.island.on('clip:found', (info) => {
   clipClose.disabled = false;
   clipText.textContent = '还原文本';
   clipChip.title = `还原当前复制文本中的 ${info.count} 处屏蔽信息`;
-  labelIdle.textContent = '识别到含屏蔽信息';
+  labelIdle.textContent = '咦，嗅到敏感信息'; // surprise 表情配「嗅到」的惊讶感
   labelHover.textContent = '点击展开操作面板';
   glanceAtText(); // 惊讶地看向新消息
 });
@@ -544,18 +678,23 @@ window.island.on('clip:cleared', () => {
 /* ---------------- 屏蔽进度 ---------------- */
 
 window.island.on('mask:converting', ({ count }) => {
-  setState('busy');
-  labelIdle.textContent = `正在转换 ${count} 份 .doc…`;
+  setBusy(`正在转换 ${count} 份 .doc…`, 'convert');
 });
-window.island.on('mask:progress', ({ i, total }) => {
-  setState('busy');
-  labelIdle.textContent = `正在屏蔽 ${i}/${total}…`;
+window.island.on('mask:progress', ({ i, total, path }) => {
+  const name = shortName(path);
+  // 带上当前文件名：长批次时用户能看清卡在哪一份上（「屏蔽中」比「正在屏蔽」短，给文件名腾字位）
+  setBusy(name
+    ? `屏蔽中 ${i}/${total} · ${name}`
+    : `屏蔽中 ${i}/${total}…`, 'scan');
+  setWaveSpeed(Number(i) / Number(total || 1)); // 越接近完成冲击越快
 });
 window.island.on('mask:done', (done) => {
+  stopBusyHints();
+  setWaveSpeed(null);
   if (done.error === 'no-root') {
     setState('idle');
-    // 未配置根目录是拖入失败的主因：必须让用户明确看见，而不是 3 秒一闪而过
-    showHold('未配置根目录，正在为你打开设置…', 'err', 8000);
+    // 未配置根目录是拖入失败的主因：必须让用户明确看见，红色多停留一会儿
+    showHold('未配置根目录，正在为你打开设置…', 'err', 10000);
     // 直接弹出面板的设置页（面板内同步有 toast 提示），省得用户去找入口
     window.island.invoke('panel:show-tab', 'settings');
     return;
@@ -566,7 +705,10 @@ window.island.on('mask:done', (done) => {
     const summary = window.BatchSummary.buildBatchSummary(done);
     if (summary.celebrate) celebrate(); // 有实际成果 → 弹跳 + 高光
     // 批量结果按行轮播；总时长随行数增加，保证每行都能读完。
-    const holdMs = summary.lines.length > 1 ? 1200 * summary.lines.length : 6000;
+    // 含红色（未完成/出错）时放慢轮播并保底 10 秒，让人来得及读原因。
+    const holdMs = summary.hasUnfinished
+      ? Math.max(10000, 1600 * summary.lines.length)
+      : (summary.lines.length > 1 ? 1200 * summary.lines.length : 6000);
     showHoldSequence(summary.lines, holdMs);
   } else {
     refreshIdleLabel();
@@ -759,12 +901,16 @@ window.addEventListener('drop', async (e) => {
     .map((f) => window.island.filePath(f))
     .filter(Boolean);
   if (paths.length === 0) return;
-  setBusy(`正在识别并处理 ${paths.length} 个文件…`);
+  setBusy(paths.length === 1
+    ? '先让我看看这份文件…'
+    : `${paths.length} 份文件排队中，逐份检查…`, 'identify');
   try {
     await window.island.invoke('mask:files', paths);
   } catch (err) {
     // invoke 层面的异常（如 IPC 竞态）也不能静默，否则胶囊永远卡在忙碌态
+    stopBusyHints();
+    setWaveSpeed(null);
     setState('idle');
-    showHold('处理失败：' + String(err && err.message || err).slice(0, 30), 'err', 6000);
+    showHold('处理失败：' + String(err && err.message || err).slice(0, 30), 'err', 10000);
   }
 });

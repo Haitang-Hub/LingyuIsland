@@ -15,7 +15,8 @@ const { shell } = require('electron');
 const {
   collectPaths, maskFile, restoreFile,
   maskedPathOf, restoredPathOf, outputNameOf, detectFileIntent, readFileText,
-  LEGACY_EXTS, PDF_EXTS, isPdf, detectPdfIntent, maskPdfFile, restorePdfFile, readPdfText,
+  LEGACY_EXTS, PDF_EXTS, IMAGE_EXTS, isPdf, isImage, detectPdfIntent, detectImageIntent,
+  redactPdfFile, redactImageFile, readPdfText,
   skipReasonForError,
 } = require('../core/fileproc');
 const { preconvert } = require('../core/docconvert');
@@ -37,6 +38,8 @@ function summarize(counts) {
 function resolveOutputPath(root, src, intent, policy) {
   // .doc 的结果以 .docx 落地，冲突检测也必须按 .docx 名字计算
   const virtual = path.join(root, outputNameOf(path.basename(src)));
+  // 命名统一：屏蔽产物一律 _屏蔽，还原产物一律 _还原。
+  // PDF / 图片虽为不可逆遮盖，但产物同样用 _屏蔽（只是不可还原、不写映射库）。
   const base = intent === 'restore' ? restoredPathOf(virtual) : maskedPathOf(virtual);
   const dir = path.dirname(base);
   const ext = path.extname(base);
@@ -102,36 +105,53 @@ async function importAndMask(inputPaths, ctx, sender) {
       sender.send('mask:progress', { i: i + 1, total: files.length, path: src });
     }
     let r;
+    let pdf = false;
+    let image = false;
     try {
-      const pdf = isPdf(src);
-      const intent = pdf ? await detectPdfIntent(src, store.vault) : detectFileIntent(src, store.vault);
-      const { out, base, action } = resolveOutputPath(rootNorm, src, intent, conflictPolicy);
+      pdf = isPdf(src);
+      image = isImage(src);
+      // PDF / 图片永不还原，也不按 vault 编码判断意图
+      const intent = pdf ? 'mask' : (image ? 'mask' : detectFileIntent(src, store.vault));
+      const resolved = resolveOutputPath(rootNorm, src, intent, conflictPolicy);
+      let { out } = resolved;
+      const { base, action } = resolved;
 
-      // 结果路径恰好等于源文件（如根目录里名为 xxx_屏蔽 却无编码的文件）：
-      // 既不覆盖源文件，也不重复屏蔽
-      if (path.resolve(out) === path.resolve(src) || path.resolve(base) === path.resolve(src)) {
-        r = { ok: false, path: src, action: intent, skipped: 'already-masked' };
-      } else {
-        if (action === 'overwrite') overwritten++;
-        if (pdf) {
-          r = intent === 'restore'
-            ? await restorePdfFile(src, store.vault, out)
-            : await maskPdfFile(src, store.vault, store.settings.toggles, out,
-              { knownEntities, namesFile: store.paths.knownNames });
-        } else if (intent === 'restore') {
-          r = restoreFile(src, store.vault, out);
-        } else {
-          r = maskFile(src, store.vault, store.settings.toggles, out, undefined,
-            { knownEntities, namesFile: store.paths.knownNames });
-        }
-        r.action = intent;
+      // 不跳过任何文件：若结果路径恰好与源文件重合，改用一个不冲突的序号名继续处理，
+      // 保证「原位置文件永不改动」的同时，每次拖入都会真正重新处理。
+      if (path.resolve(out) === path.resolve(src)) {
+        const dir = path.dirname(out);
+        const ext = path.extname(out);
+        const nm = path.basename(out, ext);
+        const alt = resolveConflictName(dir, nm, ext, 'keep',
+          (full) => path.resolve(full) === path.resolve(src) || fs.existsSync(full));
+        out = path.join(dir, alt.name);
       }
+
+      if (action === 'overwrite') overwritten++;
+      if (pdf || image) {
+        const cfg = store.settings.pdfRedact || {};
+        const redactOpts = {
+          knownEntities,
+          ocrEngineDir: cfg.ocrEngineDir,
+        };
+        r = pdf
+          ? await redactPdfFile(src, store.vault, store.settings.toggles, out,
+            { ...redactOpts, pdfDpi: cfg.dpi })
+          : await redactImageFile(src, store.vault, store.settings.toggles, out, redactOpts);
+      } else if (intent === 'restore') {
+        r = restoreFile(src, store.vault, out);
+      } else {
+        r = maskFile(src, store.vault, store.settings.toggles, out, undefined,
+          { knownEntities, namesFile: store.paths.knownNames });
+      }
+      r.action = intent;
       r.origPath = src;
       r.outputPath = out;
 
       // 丢弃模式只作用于根目录外的原位置文件；根目录里用户自己的文件绝不动。
       // 处理失败（含 .doc 转换失败、格式不支持、读取出错）时绝不移动原文件。
-      if (discard && !isInsideRoot(src, rootNorm) && r.ok === true && r.skipped !== 'already-masked') {
+      if (discard && !isInsideRoot(src, rootNorm) && r.ok === true
+        && r.skipped !== 'already-masked') {
         try {
           await shell.trashItem(src);
           r.trashed = true;
@@ -144,13 +164,15 @@ async function importAndMask(inputPaths, ctx, sender) {
 
     if (r.ok && r.count > 0) {
       totalPII += r.count;
-      vaultDirty = true;
+      // PDF / 图片遮盖不写 vault、不产生可还原编码，因此无需持久化映射库
+      if (!pdf && !image) vaultDirty = true;
       store.addHistory({
         origPath: r.origPath,
-        maskedPath: r.maskedPath,
+        maskedPath: r.maskedPath || r.redactedPath,
         count: r.count,
         counts: r.counts || {},
         summary: summarize(r.counts),
+        irreversible: (pdf || image) || undefined,
       });
       island.broadcast('history:changed');
     }
@@ -171,6 +193,7 @@ async function importAndMask(inputPaths, ctx, sender) {
     restoredTotal: restoreResults.reduce((n, r) => n + (r.ok ? (r.resolved || 0) : 0), 0),
     restoreMissing: restoreResults.reduce((n, r) => n + ((r.missing && r.missing.length) || 0), 0),
     alreadyMasked: results.filter((r) => r.skipped === 'already-masked').length,
+    irreversible: results.filter((r) => r.ok && r.irreversible && r.count > 0).length,
     noPii: results.filter((r) => r.ok && r.skipped === 'no-pii').length,
     skipped: results.filter((r) => r.skipped && !['no-pii', 'already-masked'].includes(r.skipped)).length,
     pdfNoText: results.filter((r) => r.skipped === 'pdf-no-text').length,

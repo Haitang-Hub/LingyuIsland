@@ -21,7 +21,7 @@ const SKIP_DIRS = new Set([
 ]);
 const MAX_FILES = 20000;
 const MAX_DEPTH = 12;
-const VALID_CATEGORIES = new Set(['all', 'doc', 'sheet', 'text', 'code', 'other']);
+const VALID_CATEGORIES = new Set(['all', 'doc', 'sheet', 'image', 'text', 'other']);
 
 class Indexer {
   constructor() {
@@ -117,7 +117,7 @@ class Indexer {
    * 快速查找（支持类别筛选）
    * @param {string} query 关键词，空串表示「最近修改」
    * @param {number} [limit=50] 返回条数上限
-   * @param {string} [category='all'] 类别过滤 all/doc/sheet/text/code/other
+   * @param {string} [category='all'] 类别过滤 all/doc/sheet/image/text/other
    * @returns {{items:Array, total:number, root:string, counts:Object, category:string}}
    *   total  当前类别下的命中总数（不受 limit 截断影响）
    *   counts 本次查询在各分类下的命中数（不受当前类别影响，供筛选 chips 显示）
@@ -154,7 +154,7 @@ class Indexer {
 }
 
 function emptyCounts() {
-  return { all: 0, doc: 0, sheet: 0, text: 0, code: 0, other: 0 };
+  return { all: 0, doc: 0, sheet: 0, image: 0, text: 0, other: 0 };
 }
 
 /** 关键词相关性打分；任一 token 未命中返回 null（该文件不参与结果） */

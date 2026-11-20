@@ -46,6 +46,8 @@ const DEFAULT_SETTINGS = {
     // （im 仅在聊天记录场景按需开启，避免误报普通数字串）
     landline: true, im: false, hkmt: false, uscc: true,
   },
+  // PDF 不可逆遮盖：dpi 控制清晰度/体积；ocrEngineDir 为空时自动探测本机 OcrFlow 引擎
+  pdfRedact: { dpi: 200, ocrEngineDir: '' },
   clipboardWatch: true,           // 剪贴板自动识别可恢复内容
   autoCollapse: true,             // 灵动岛无操作自动收起为顶部线段
   autoCollapseDelay: DEFAULT_COLLAPSE_SEC, // 自动收起时长（秒），可在设置中自定义
@@ -101,6 +103,7 @@ class Store {
       this.settings = {
         ...DEFAULT_SETTINGS, ...raw,
         toggles: { ...DEFAULT_SETTINGS.toggles, ...(raw.toggles || {}) },
+        pdfRedact: { ...DEFAULT_SETTINGS.pdfRedact, ...(raw.pdfRedact || {}) },
       };
     } catch { /* 首次运行 */ }
     // 缺字段或被外部改写的非法值统一规范化

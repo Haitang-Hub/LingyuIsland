@@ -35,9 +35,11 @@ test('categoryOf：常见扩展名归类', () => {
   assert.strictEqual(categoryOf('csv'), 'sheet');
   assert.strictEqual(categoryOf('txt'), 'text');
   assert.strictEqual(categoryOf('md'), 'text');
-  assert.strictEqual(categoryOf('py'), 'code');
-  assert.strictEqual(categoryOf('png'), 'other');
+  assert.strictEqual(categoryOf('png'), 'image');
+  assert.strictEqual(categoryOf('jpg'), 'image');
+  assert.strictEqual(categoryOf('py'), 'other', '代码类已取消，归入其他');
   assert.ok(CATEGORY_LABEL[categoryOf('docx')]);
+  assert.deepStrictEqual(Object.keys(CATEGORY_LABEL), ['all', 'doc', 'sheet', 'image', 'text', 'other']);
 });
 
 test('timeGroupOf：时间分组', () => {
@@ -76,9 +78,10 @@ test('类别筛选：空查询只返回该类别的文件', () => {
   const idx = makeCategoryIndexer();
   assert.deepStrictEqual(idx.search('', 50, 'doc').items.map((i) => i.e).sort(), ['docx', 'pdf']);
   assert.deepStrictEqual(idx.search('', 50, 'sheet').items.map((i) => i.e).sort(), ['csv', 'xlsx']);
+  assert.deepStrictEqual(idx.search('', 50, 'image').items.map((i) => i.e).sort(), ['png']);
   assert.deepStrictEqual(idx.search('', 50, 'text').items.map((i) => i.e).sort(), ['json', 'txt']);
-  assert.deepStrictEqual(idx.search('', 50, 'code').items.map((i) => i.e).sort(), ['html', 'py']);
-  assert.deepStrictEqual(idx.search('', 50, 'other').items.map((i) => i.e).sort(), ['mp3', 'png']);
+  assert.strictEqual(idx.search('', 50, 'code').total, 10, '已取消的 code 类别回退全部');
+  assert.deepStrictEqual(idx.search('', 50, 'other').items.map((i) => i.e).sort(), ['html', 'mp3', 'py']);
   assert.strictEqual(idx.search('', 50, 'all').total, 10);
 });
 
@@ -86,16 +89,16 @@ test('类别筛选：与关键词叠加', () => {
   const idx = makeCategoryIndexer();
   assert.strictEqual(idx.search('客户', 50, 'sheet').total, 1, '「客户.csv」应命中表格类');
   assert.strictEqual(idx.search('客户', 50, 'doc').total, 0, '文档类不应命中');
+  assert.strictEqual(idx.search('素材', 50, 'image').total, 1, '路径关键词应命中图片类');
   assert.strictEqual(idx.search('客户', 50, 'all').total, 1);
-  assert.strictEqual(idx.search('src', 50, 'code').total, 2, '路径关键词应命中代码类');
 });
 
 test('类别筛选：counts 统计各分类且不受当前类别影响', () => {
   const idx = makeCategoryIndexer();
   const all = idx.search('', 50, 'all');
-  const code = idx.search('', 50, 'code');
-  assert.deepStrictEqual(code.counts, all.counts);
-  assert.deepStrictEqual(code.counts, { all: 10, doc: 2, sheet: 2, text: 2, code: 2, other: 2 });
+  const image = idx.search('', 50, 'image');
+  assert.deepStrictEqual(image.counts, all.counts);
+  assert.deepStrictEqual(image.counts, { all: 10, doc: 2, sheet: 2, image: 1, text: 2, other: 3 });
   assert.strictEqual(idx.search('客户', 50, 'all').counts.all, 1, 'counts 应随关键词变化');
 });
 

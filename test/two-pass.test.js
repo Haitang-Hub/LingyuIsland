@@ -12,7 +12,7 @@ const { maskFile, restoreFile } = require('../src/core/fileproc');
 const names = (text, known) => detect(text, known ? { knownEntities: known } : {})
   .items.filter((i) => i.type === 'name').map((i) => i.value);
 
-test('两遍式：人称候选须复现三次且左右上下文不唯一', () => {
+test('两遍式：人称候选须复现两次且左右上下文不唯一', () => {
   const blocks = ['被害人陈阿满到场', '我跟陈阿满说', '将陈阿满微信也删除了'];
   const known = collectEntities(blocks);
   assert.ok(known.name.has('陈阿满'), JSON.stringify([...known.name]));
@@ -26,6 +26,22 @@ test('两遍式：单一语境的长候选不猜测', () => {
   const known = collectEntities(['食堂负责人陈阿满商议']);
   assert.strictEqual(known.name.size, 0, JSON.stringify([...known.name]));
   assert.deepStrictEqual(names('食堂负责人陈阿满商议', known), []);
+});
+
+test('两遍式：简历版式锚点（姓名行 + 人口学证据）', () => {
+  // 真实简历版式：姓名行后接职位，次行以性别·出生年开头
+  const known = collectEntities([
+    '冷彻   AIGC/Agent应用开发',
+    '男  ·  2001.09  ·  安徽  |  137****4764  |  2***@qq.com  |  离职-随时到岗',
+    '▌ 教育背景  ————',
+    '冷彻毕业于某某大学',
+  ]);
+  assert.ok(known.name.has('冷彻'), JSON.stringify([...known.name]));
+  assert.deepStrictEqual(names('冷彻毕业于某某大学', known), ['冷彻']);
+  // 同行人口学证据也可闭合
+  assert.ok(collectEntities(['冷彻 男 · 2001.09 · 安徽']).name.has('冷彻'));
+  // 无人口学证据时不确认（防止任意标题/词组被收）
+  assert.ok(!collectEntities(['冷彻   AIGC/Agent应用开发', '教育背景']).name.has('冷彻'));
 });
 
 test('两遍式：文件分隔块不会拼接表格身份', () => {

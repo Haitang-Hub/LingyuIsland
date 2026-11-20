@@ -45,7 +45,7 @@
           <path d="M20 17v8m0 0l-3-3m3 3l3-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         <p class="dz-title">选择文件 自动屏蔽或还原</p>
-        <p class="dz-sub">点击下方按钮选取文件（要把文件拖到屏幕顶部的胶囊上也可以）；按内容识别：明文 → 「文件名_屏蔽」副本，含屏蔽编码的文件 → 「文件名_还原」副本，根目录只保留结果，原位置的文件不会被改动</p>
+        <p class="dz-sub">屏蔽后统一生成「文件名_屏蔽」副本，还原后生成「文件名_还原」副本；PDF / 图片为不可逆遮盖（涂黑且不支持还原，图片用 OCR 识别文字）。根目录只保留结果，原位置的文件不会被改动。</p>
         <button class="btn btn-ghost" id="pickBtn">选择文件…</button>
       </div>
 
@@ -245,7 +245,7 @@
           <button class="seg is-active" data-v="keep" role="radio" aria-checked="true">保留原文件</button>
           <button class="seg" data-v="discard" role="radio" aria-checked="false">移入回收站</button>
         </div>
-        <p class="setting-desc">直接读取拖入或选择的文件，只在根目录生成「_屏蔽」或「_还原」结果，不会复制原文件；原位置的文件不会被改动。选择「移入回收站」时，处理完成后会把根目录外的原位置文件移入系统回收站，可随时找回。</p>
+        <p class="setting-desc">直接读取拖入或选择的文件，只在根目录生成「_屏蔽」或「_还原」结果，不会复制原文件；原位置的文件不会被改动。PDF 与图片虽同样生成「_屏蔽」产物，但为不可逆遮盖，不支持还原。选择「移入回收站」时，处理完成后会把根目录外的原位置文件移入系统回收站，可随时找回。</p>
       </div>
 
       <div class="sec">

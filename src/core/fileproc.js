@@ -23,6 +23,8 @@ const {
   LEGACY_EXTS, isLegacyDoc, getConverted, converterHint,
 } = require('./docconvert');
 const pdfproc = require('./pdfproc');
+const pdfredact = require('./pdfredact');
+const imageredact = require('./imageredact');
 
 const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
 
@@ -57,6 +59,7 @@ const TEXT_EXTS = new Set([
 ]);
 const OFFICE_EXTS = new Set(['docx', 'xlsx', 'pptx']);
 const PDF_EXTS = new Set(['pdf']);
+const IMAGE_EXTS = imageredact.IMAGE_EXTS;
 
 // Office 中需要处理的 XML 文本部件
 const OFFICE_PARTS = [
@@ -221,14 +224,23 @@ function caseDirKey(caseDir) {
   return process.platform === 'win32' ? abs.toLowerCase() : abs;
 }
 
+// v6：连词「或者」的角色词尾误判把「差错」确认成姓名（「对记载有遗漏或者差错
+// 提出补充」），以及「被告人作最后陈述」把「作最后」确认成姓名，两者都写进了 v5
+// 缓存并跨文件传播；守卫补齐后旧缓存不可信，整体弃用重新积累。
+const NAMES_STORE_VERSION = 6;
+
 function readNamesStore(storeFile) {
   try {
     const data = JSON.parse(fs.readFileSync(storeFile, 'utf8'));
     // v4 起才信任缓存：旧版检测器/守卫缺口可能写入误判姓名的哈希（庭审指令
     // 「开庭/入庭」曾被确认成姓名并经哈希传播毒化全篇），修复后一律弃用重新积累。
-    if (data && data.v === 4 && data.dirs && typeof data.dirs === 'object') return data;
+    // v5：v1.12.0 的冒号字段路径仍可把「现在/当时」等时间词确认为姓名并写入
+    // 缓存（「被告人：现在，…」→ 现*〔姓名·…〕传播到「检察院现在给你做不起诉」），
+    // 时间词守卫加入后旧缓存不可信，整体弃用重新积累。
+    if (data && data.v === NAMES_STORE_VERSION
+      && data.dirs && typeof data.dirs === 'object') return data;
   } catch { /* 缺失/损坏 → 全新 */ }
-  return { v: 4, dirs: {} };
+  return { v: NAMES_STORE_VERSION, dirs: {} };
 }
 
 /**
@@ -293,13 +305,15 @@ function residualCheck(maskedText, toggles, knownNames, knownEntities) {
  * 只改 >text< 之间的内容，标签、属性、run 结构一律不动。
  */
 function maskXmlText(xml, vault, toggles, knownEntities, knownNameHashes) {
+  const counts = {};
   const r = transformXmlText(xml, (blockText, boundaries) => {
-    const { edits, items } = maskEdits(blockText, vault, {
+    const { edits, items, counts: bc } = maskEdits(blockText, vault, {
       toggles, knownEntities, knownNameHashes, boundaries,
     });
+    for (const t of Object.keys(bc || {})) counts[t] = (counts[t] || 0) + bc[t];
     return { edits, count: items.length };
   });
-  return { xml: r.xml, count: r.count };
+  return { xml: r.xml, count: r.count, counts };
 }
 
 function restoreXmlText(xml, vault) {
@@ -368,6 +382,8 @@ function isResultFileName(filePath) {
  * 被当成还原、原样写回。无法读取内容时返回 'mask'，交由 maskFile 给出明确提示。
  */
 function detectFileIntent(filePath, vault) {
+  // 图片走 OCR 不可逆遮盖，不按 vault 编码判断还原
+  if (isImage(filePath)) return 'mask';
   const text = readFileText(filePath);
   if (!text || countCodes(text) === 0) return 'mask';
   return hasRestorableCode(text, vault) || isResultFileName(filePath) ? 'restore' : 'mask';
@@ -467,12 +483,14 @@ function maskOffice(filePath, vault, toggles, outPath, knownNames, opts = {}) {
     const knownEnt = collectFileEntities(segments, toggles, inherited);
 
     let count = 0;
+    const counts = {};
     let touched = false;
     for (const p of parts) {
       let xml = p.xml;
       let c = 0;
       const r = maskXmlText(xml, vault, toggles, knownEnt, knownHashes);
       c += r.count;
+      for (const t of Object.keys(r.counts || {})) counts[t] = (counts[t] || 0) + r.counts[t];
       if (c > 0) {
         xml = r.xml;
         zip.updateFile(p.name, Buffer.from(xml, 'utf8'));
@@ -492,7 +510,7 @@ function maskOffice(filePath, vault, toggles, outPath, knownNames, opts = {}) {
       if (entry) maskedParts.push(...xmlBlockTexts(entry.getData().toString('utf8')));
     }
     const warning = residualCheck(maskedParts.join('\n'), toggles, undefined, knownEnt);
-    return { ok: true, path: filePath, maskedPath: out, count, counts: {}, ...(warning ? { warning } : {}) };
+    return { ok: true, path: filePath, maskedPath: out, count, counts, ...(warning ? { warning } : {}) };
   } catch (err) {
     return { ok: false, path: filePath, skipped: skipReasonForError(err), reason: String(err && err.message || err) };
   }
@@ -543,7 +561,8 @@ function collectPaths(inputPaths) {
     } else {
       if (isJunkFile(path.basename(p))) return;
       const ext = path.extname(p).slice(1).toLowerCase();
-      if (TEXT_EXTS.has(ext) || OFFICE_EXTS.has(ext) || PDF_EXTS.has(ext) || LEGACY_EXTS.has(ext) || ext === '') out.push(p);
+      if (TEXT_EXTS.has(ext) || OFFICE_EXTS.has(ext) || PDF_EXTS.has(ext)
+        || IMAGE_EXTS.has(ext) || LEGACY_EXTS.has(ext) || ext === '') out.push(p);
     }
   };
   for (const p of inputPaths || []) walk(p, 0);
@@ -564,11 +583,13 @@ async function readPdfText(filePath) {
   } catch { return null; }
 }
 
-/** 判断 PDF 是屏蔽产物（编码可在映射库还原）还是明文 */
-async function detectPdfIntent(filePath, vault) {
-  const text = await readPdfText(filePath);
-  if (!text || countCodes(text) === 0) return 'mask';
-  return hasRestorableCode(text, vault) || isResultFileName(filePath) ? 'restore' : 'mask';
+/**
+ * PDF 只有一种处理意图：不可逆遮盖。
+ * 旧版曾按 vault 编码判断为「还原」，PDF 改为涂黑后不再产生可还原编码，
+ * 且产品要求 PDF 永不还原，因此这里恒返回 mask。
+ */
+async function detectPdfIntent(_filePath, _vault) {
+  return 'mask';
 }
 
 /**
@@ -585,6 +606,7 @@ async function maskPdfFile(filePath, vault, toggles, outPath, opts = {}) {
     const out = outPath || maskedPathOf(filePath);
     const perPage = [];
     let count = 0;
+    const counts = {};
     const knownHashes = opts.knownNameHashes
       || (opts.namesFile ? loadKnownNameHashes(opts.namesFile, path.dirname(out)) : new Set());
     const inherited = inheritedEntities(opts.knownNames, opts);
@@ -599,6 +621,7 @@ async function maskPdfFile(filePath, vault, toggles, outPath, opts = {}) {
           knownNameHashes: knownHashes,
         });
         count += r.items.length;
+        for (const t of Object.keys(r.counts || {})) counts[t] = (counts[t] || 0) + r.counts[t];
         lines.push(r.masked);
       }
       perPage.push(lines);
@@ -609,51 +632,78 @@ async function maskPdfFile(filePath, vault, toggles, outPath, opts = {}) {
     // 质量门禁：对屏蔽产物复检
     const maskedJoined = perPage.map((l) => l.join('\n')).join('\n');
     const warning = residualCheck(maskedJoined, toggles, undefined, knownEnt);
-    return { ok: true, path: filePath, maskedPath: out, count, counts: {}, ...(warning ? { warning } : {}) };
+    return { ok: true, path: filePath, maskedPath: out, count, counts, ...(warning ? { warning } : {}) };
   } catch (err) {
     return { ok: false, path: filePath, skipped: skipReasonForError(err), reason: String((err && err.message) || err) };
   }
 }
 
-/** 还原 PDF：逐行 restoreText → 重新生成 PDF */
-async function restorePdfFile(filePath, vault, outPath) {
-  if (!isPdf(filePath)) return restoreFile(filePath, vault, outPath);
+/**
+ * PDF 不可逆遮盖：定位敏感区域 → 整页栅格化 → 黑框覆盖 → 无文本层 PDF。
+ * 与旧 maskPdfFile 的区别：不写 vault、不产生〔编码〕、不支持还原。
+ */
+async function redactPdfFile(filePath, vault, toggles, outPath, opts = {}) {
+  if (!isPdf(filePath)) return maskFile(filePath, vault, toggles, outPath, opts.knownNames, opts);
   try {
     const stat = fs.statSync(filePath);
     if (stat.size > MAX_SIZE) return { ok: false, path: filePath, skipped: 'too-large' };
-    const ex = await pdfproc.extractPdf(fs.readFileSync(filePath));
-    if (!ex.hasText) return { ok: false, path: filePath, skipped: 'pdf-no-text' };
-    const out = outPath || restoredPathOf(filePath);
-    const perPage = [];
-    let resolved = 0;
-    const missing = [];
-    for (const page of ex.pages) {
-      const lines = [];
-      for (const line of page.lines) {
-        const r = restoreText(line.text, vault);
-        resolved += r.resolved;
-        for (const c of r.missing) if (!missing.includes(c)) missing.push(c);
-        lines.push(r.text);
-      }
-      perPage.push(lines);
-    }
-    if (resolved === 0 && missing.length === 0) return { ok: false, path: filePath, skipped: 'no-codes' };
-    for (const lines of perPage) {
-      for (let i = lines.length - 1; i >= 0; i--) if (!lines[i].trim()) lines.splice(i, 1);
-    }
-    const bytes = await pdfproc.renderPdf(ex, perPage);
-    fs.writeFileSync(out, bytes);
-    return { ok: true, path: filePath, restoredPath: out, resolved, missing };
+    return await pdfredact.redactPdfFile(filePath, toggles, outPath, {
+      dpi: opts.pdfDpi || opts.dpi,
+      ocrEngineDir: opts.ocrEngineDir,
+      padding: opts.pdfPadding,
+      knownEntities: opts.knownEntities,
+      knownNameHashes: opts.knownNameHashes,
+    });
   } catch (err) {
     return { ok: false, path: filePath, skipped: skipReasonForError(err), reason: String((err && err.message) || err) };
   }
+}
+
+/** PDF 永不支持还原：核心层直接拒绝，避免任何调用方绕过限制 */
+async function restorePdfFile(filePath, _vault, _outPath) {
+  if (!isPdf(filePath)) return restoreFile(filePath, _vault, _outPath);
+  return { ok: false, path: filePath, skipped: 'pdf-restore-disabled' };
+}
+
+/* ---------------- 图片（异步：OCR 识别 + 不可逆遮盖） ---------------- */
+
+const isImage = (p) => IMAGE_EXTS.has(path.extname(p || '').slice(1).toLowerCase());
+
+/** 图片只有一种处理意图：不可逆遮盖（OCR 定位后涂黑，不写 vault） */
+function detectImageIntent() {
+  return 'mask';
+}
+
+/** 图片不可逆遮盖：OCR 定位敏感文字 → 黑框覆盖 → 重新编码（丢元数据） */
+async function redactImageFile(filePath, vault, toggles, outPath, opts = {}) {
+  if (!isImage(filePath)) return maskFile(filePath, vault, toggles, outPath, opts.knownNames, opts);
+  try {
+    const stat = fs.statSync(filePath);
+    if (stat.size > MAX_SIZE) return { ok: false, path: filePath, skipped: 'too-large' };
+    return await imageredact.redactImageFile(filePath, toggles, outPath, {
+      ocrEngineDir: opts.ocrEngineDir,
+      padding: opts.imagePadding,
+      knownEntities: opts.knownEntities,
+      knownNameHashes: opts.knownNameHashes,
+    });
+  } catch (err) {
+    return { ok: false, path: filePath, skipped: skipReasonForError(err), reason: String((err && err.message) || err) };
+  }
+}
+
+/** 图片永不支持还原 */
+async function restoreImageFile(filePath, _vault, _outPath) {
+  if (!isImage(filePath)) return restoreFile(filePath, _vault, _outPath);
+  return { ok: false, path: filePath, skipped: 'image-restore-disabled' };
 }
 
 module.exports = {
   maskFile, restoreFile, collectPaths, decodeBuffer, encodeText,
-  maskedPathOf, restoredPathOf, isJunkFile, TEXT_EXTS, OFFICE_EXTS, LEGACY_EXTS, PDF_EXTS,
+  maskedPathOf, restoredPathOf, isJunkFile, TEXT_EXTS, OFFICE_EXTS, LEGACY_EXTS, PDF_EXTS, IMAGE_EXTS,
   outputNameOf, normalizeSource, readFileText, detectFileIntent,
-  readPdfText, detectPdfIntent, maskPdfFile, restorePdfFile, isPdf,
+  readPdfText, detectPdfIntent, maskPdfFile, redactPdfFile, restorePdfFile, isPdf,
+  detectImageIntent, redactImageFile, restoreImageFile, isImage,
+  redactedPathOf: pdfredact.redactedPathOf,
   loadKnownNameHashes, saveKnownNameHashes, caseDirKey, KNOWN_NAMES_FILE,
   residualCheck, skipReasonForError,
 };
