@@ -545,9 +545,9 @@ async function runRestore() {
     els.copyRestoreBtn.disabled = true;
     return;
   }
-  // 未识别的编码标红（兼容旧格式〔ab12cd〕与新格式〔姓名·ab12cd〕）
+  // 未识别的编码标红
   const html = esc(r.text).replace(
-    /〔(?:[\u4e00-\u9fa5]{1,6}·)?([0-9a-f]{6,12})〕/g,
+    /〔[\u4e00-\u9fa5]{1,6}·[0-9a-f]{6,12}〕/g,
     (m) => `<span class="code" style="color:var(--orange)">${m}</span>`
   );
   els.restoreOut.innerHTML = html;

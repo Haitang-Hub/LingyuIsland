@@ -172,36 +172,58 @@ test('结果路径：resolveOutputPath 按内容与同名策略', () => {
 
 /* ---------------- 内容识别 ---------------- */
 
-test('内容识别：明文→屏蔽，含〔编码〕→还原', () => {
+test('内容识别：明文→屏蔽，编码可还原→还原，编码外观但库里没有→屏蔽', () => {
   const plain = path.join(TMP, 'intent-plain.txt');
   const masked = path.join(TMP, 'intent-masked.txt');
+  const fake = path.join(TMP, 'intent-fake.txt');
+  const vault = new Vault('intent-test-salt');
+  const code = vault.ensureCode('phone', '13812345678');
   fs.writeFileSync(plain, '姓名：张伟 手机：13812345678', 'utf8');
-  fs.writeFileSync(masked, '手机：138****5678〔ab12cd〕', 'utf8');
-  assert.strictEqual(detectFileIntent(plain), 'mask');
-  assert.strictEqual(detectFileIntent(masked), 'restore');
+  fs.writeFileSync(masked, `手机：138****5678〔手机号·${code}〕`, 'utf8');
+  fs.writeFileSync(fake, '姓名：〔姓名·abcdef〕', 'utf8');
+  assert.strictEqual(detectFileIntent(plain, vault), 'mask');
+  assert.strictEqual(detectFileIntent(masked, vault), 'restore');
+  // 回归：abcdef 符合编码格式，但映射库无记录，不能让整份明文走还原
+  assert.strictEqual(detectFileIntent(fake, vault), 'mask');
+  assert.strictEqual(detectFileIntent(fake, new Vault()), 'mask');
   assert.ok(readFileText(plain).includes('13812345678'));
-  assert.ok(readFileText(masked).includes('〔ab12cd〕'));
+  assert.ok(readFileText(masked).includes(`〔手机号·${code}〕`));
 });
 
-test('内容识别：GBK / docx / 无法读取回退', () => {
+test('内容识别：GBK / docx / 无法读取 / 产物文件名兜底', () => {
+  const vault = new Vault('gbk-test-salt');
+  const code = vault.ensureCode('phone', '13812345678');
   const gbk = path.join(TMP, 'intent-gbk.txt');
-  fs.writeFileSync(gbk, iconv.encode('手机：138****5678〔ab12cd〕', 'gbk'));
-  assert.strictEqual(detectFileIntent(gbk), 'restore');
+  fs.writeFileSync(gbk, iconv.encode(`手机：138****5678〔手机号·${code}〕`, 'gbk'));
+  assert.strictEqual(detectFileIntent(gbk, vault), 'restore');
+  assert.strictEqual(detectFileIntent(gbk, new Vault()), 'mask');
 
   const p = path.join(TMP, 'intent.docx');
   const zip = new AdmZip();
   zip.addFile('word/document.xml', Buffer.from(
-    '<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>手机：138****5678〔ab12cd〕</w:t></w:r></w:p></w:body></w:document>',
+    `<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>手机：138****5678〔手机号·${code}〕</w:t></w:r></w:p></w:body></w:document>`,
     'utf8'));
   zip.writeZip(p);
-  assert.ok(readFileText(p).includes('〔ab12cd〕'));
-  assert.strictEqual(detectFileIntent(p), 'restore');
+  assert.ok(readFileText(p).includes(`〔手机号·${code}〕`));
+  assert.strictEqual(detectFileIntent(p, vault), 'restore');
+
+  // 文件名明确是产物：即使映射库缺失也走还原，由 restoreFile 提示无法还原
+  const named = path.join(TMP, '阅卷笔录_屏蔽.txt');
+  fs.writeFileSync(named, '姓名：〔姓名·abcdef〕', 'utf8');
+  assert.strictEqual(detectFileIntent(named, new Vault()), 'restore');
+  const namedRestored = path.join(TMP, '阅卷笔录_还原.txt');
+  fs.writeFileSync(namedRestored, '姓名：〔姓名·abcdef〕', 'utf8');
+  assert.strictEqual(detectFileIntent(namedRestored, new Vault()), 'restore');
+  // 兜底只认 _屏蔽 / _还原 两种产物后缀
+  const namedLegacy = path.join(TMP, '阅卷笔录_脱敏.txt');
+  fs.writeFileSync(namedLegacy, '姓名：〔姓名·abcdef〕', 'utf8');
+  assert.strictEqual(detectFileIntent(namedLegacy, new Vault()), 'mask');
 
   const raw = path.join(TMP, 'raw.bin');
   fs.writeFileSync(raw, Buffer.from([0, 1, 2, 3, 255, 254, 0]));
   assert.strictEqual(readFileText(raw), null);
-  assert.strictEqual(detectFileIntent(raw), 'mask');
-  assert.strictEqual(detectFileIntent(path.join(TMP, '不存在.txt')), 'mask');
+  assert.strictEqual(detectFileIntent(raw, vault), 'mask');
+  assert.strictEqual(detectFileIntent(path.join(TMP, '不存在.txt'), vault), 'mask');
 });
 
 /* ---------------- 垃圾文件 / 收集 ---------------- */

@@ -10,7 +10,7 @@ const { app, safeStorage } = require('electron');
 const { Vault } = require('../core/masker');
 const { normalizeConflictPolicy } = require('../core/imports');
 const { BASE } = require('../core/layout');
-const { normalizeAppearance, ALPHA_DEFAULT, RADIUS_DEFAULT, FONT_SCALE_DEFAULT, PILL_X_DEFAULT, BG_DIM_DEFAULT } = require('../core/appearance');
+const { normalizeAppearance, ALPHA_DEFAULT, RADIUS_DEFAULT, FONT_SCALE_DEFAULT, PILL_X_DEFAULT } = require('../core/appearance');
 
 /** 面板自动收起时长（秒）的合法范围与默认值 */
 const COLLAPSE_MIN_SEC = 5;
@@ -49,7 +49,6 @@ const DEFAULT_SETTINGS = {
   clipboardWatch: true,           // 剪贴板自动识别可恢复内容
   autoCollapse: true,             // 灵动岛无操作自动收起为顶部线段
   autoCollapseDelay: DEFAULT_COLLAPSE_SEC, // 自动收起时长（秒），可在设置中自定义
-  uiScale: 'auto',                // 旧字段：界面缩放恒为自适应，实际面板尺寸由 appearance.panel 控制
   launchOnBoot: false,            // 开机自启
   appearance: {                   // 外观：主题 / 强调色 / 透明度 / 圆角 / 毛玻璃 / 面板尺寸 / 动效 / 背景
     theme: 'midnight',
@@ -58,7 +57,6 @@ const DEFAULT_SETTINGS = {
       radius: RADIUS_DEFAULT,       // 面板圆角 px（10~25）
       fontScale: FONT_SCALE_DEFAULT, // 字体大小系数（0.85~1.3，1=100%）：面板内所有文字统一缩放
       pillX: PILL_X_DEFAULT,        // 灵动岛水平位置比例（0~1，0.5=顶部居中）：拖动换位后持久化
-    bgDim: BG_DIM_DEFAULT,        // 旧字段：背景遮罩已合并进 alpha，仅保留以兼容旧存档
     glass: 'off',                 // 磨砂质感：off=实色 | auto=轻磨砂 | on=强磨砂（界面内模拟，非窗体级系统材质）
     panel: { w: BASE.panelW, h: BASE.panelH }, // 面板 CSS 视口尺寸（宽高独立，可细长 / 宽扁）
     motion: true,                 // 界面动效
@@ -78,40 +76,9 @@ class Store {
   init() {
     this.dir = app.getPath('userData');
     fs.mkdirSync(this.dir, { recursive: true });
-    this._migrateFromOldAppName();
     this._loadSettings();
     this._loadVault();
     this._loadHistory();
-  }
-
-  /**
-   * 旧版应用名数据目录迁移：「灵屿 · 隐私灵动岛」→「灵屿岛」（productName 变更会改变 userData 路径）。
-   * 仅当新目录里没有任何数据文件而旧目录存在时才整份拷入，避免覆盖新数据。
-   */
-  _migrateFromOldAppName() {
-    const LEGACY_DIRS = ['灵屿 · 隐私灵动岛', '灵屿-隐私灵动岛'];
-    const dataFiles = ['settings.json', 'vault.bin', 'vault.bin.sig', 'vault.json', 'history.json'];
-    try {
-      const hasData = dataFiles.some((f) => fs.existsSync(path.join(this.dir, f)));
-      if (hasData) return;
-      const base = path.dirname(this.dir);
-      for (const legacy of LEGACY_DIRS) {
-        const legacyDir = path.join(base, legacy);
-        if (!fs.existsSync(legacyDir)) continue;
-        let copied = 0;
-        for (const f of dataFiles) {
-          const src = path.join(legacyDir, f);
-          if (fs.existsSync(src)) {
-            fs.copyFileSync(src, path.join(this.dir, f));
-            copied++;
-          }
-        }
-        if (copied > 0) console.log(`[store] 已从旧目录迁移 ${copied} 个数据文件: ${legacy}`);
-        break;
-      }
-    } catch (e) {
-      console.warn('[store] 旧数据目录迁移失败（忽略，按全新安装处理）:', e && e.message || e);
-    }
   }
 
   get paths() {
@@ -136,13 +103,10 @@ class Store {
         toggles: { ...DEFAULT_SETTINGS.toggles, ...(raw.toggles || {}) },
       };
     } catch { /* 首次运行 */ }
-    // 兼容旧配置文件（无此字段）或被外部改写的非法值
+    // 缺字段或被外部改写的非法值统一规范化
     this.settings.autoCollapseDelay = normalizeCollapseDelay(this.settings.autoCollapseDelay);
     this.settings.conflictPolicy = normalizeConflictPolicy(this.settings.conflictPolicy);
-    // 界面大小手动档位入口已移除：旧存档里的 compact/standard/large 一律回到自适应，
-    // 保证窗口始终按分辨率/DPI 完整落在屏幕内。
-    this.settings.uiScale = 'auto';
-    // 外观设置逐字段规范化（旧配置缺 appearance 字段时走全局默认）
+    // 外观设置逐字段规范化（缺 appearance 字段时走全局默认）
     this.settings.appearance = normalizeAppearance(this.settings.appearance, null);
   }
 
@@ -159,8 +123,6 @@ class Store {
     if ('conflictPolicy' in patch) {
       next.conflictPolicy = normalizeConflictPolicy(patch.conflictPolicy);
     }
-    // 界面大小不再接受手动档位：即使外部传入也强制回到自适应
-    next.uiScale = 'auto';
     // 外观设置以主进程规范化结果为准（越界钳制 / 非法回退）
     if ('appearance' in patch) {
       next.appearance = normalizeAppearance(patch.appearance, this.settings.appearance);

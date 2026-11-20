@@ -1,5 +1,5 @@
 'use strict';
-/** 屏蔽引擎套件：编码格式 / 保留位 / 还原（含新旧格式兼容）/ Office XML 映射 */
+/** 屏蔽引擎套件：编码格式 / 保留位 / 还原 / Office XML 映射 */
 
 const { test, assert, ID1, ID_BAD, BANK1, SAMPLE, CODE_BRACKET_RE, assertNoLeak } = require('./helpers');
 const {
@@ -47,7 +47,7 @@ test('屏蔽→还原 完整往返', () => {
 test('从文件复制的片段也能还原（新格式）', () => {
   const v = new Vault();
   const { masked } = maskText(SAMPLE, v);
-  const frag = masked.match(/138\*\*\*\*5678〔(?:[\u4e00-\u9fa5]{1,6}·)?[0-9a-f]+〕/)[0];
+  const frag = masked.match(/138\*\*\*\*5678〔[\u4e00-\u9fa5]{1,6}·[0-9a-f]+〕/)[0];
   const r = restoreText(frag, v);
   assert.strictEqual(r.text, '13812345678');
 });
@@ -55,7 +55,7 @@ test('从文件复制的片段也能还原（新格式）', () => {
 test('编码被篡改 → 明确报告无法还原', () => {
   const v = new Vault();
   const { masked } = maskText('电话：13812345678', v);
-  const broken = masked.replace(CODE_BRACKET_RE, '〔ffff00〕');
+  const broken = masked.replace(CODE_BRACKET_RE, '〔手机号·ffff00〕');
   const r = restoreText(broken, v);
   assert.deepStrictEqual(r.missing, ['ffff00']);
 });

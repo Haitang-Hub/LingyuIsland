@@ -14,7 +14,7 @@ const crypto = require('crypto');
 const iconv = require('iconv-lite');
 const AdmZip = require('adm-zip');
 const {
-  maskText, restoreText, countCodes, maskEdits, restoreEdits, cleanEdits,
+  maskText, restoreText, countCodes, hasRestorableCode, maskEdits, restoreEdits, cleanEdits,
 } = require('./masker');
 const { detect, hashName } = require('./detector');
 const { collectEntities, createEntities, mergeEntities } = require('./entities');
@@ -153,10 +153,10 @@ function legacyUnavailable(filePath) {
 
 /* ---------------- 命名 ---------------- */
 
-// 结果后缀：_屏蔽（新）/ _脱敏（v1.1 及更早的旧产物，向后兼容）/ _还原，可带序号（_02、_03…），仅剥离位于结尾的
-const RESULT_SUFFIX_RE = /_(屏蔽|脱敏|还原)(?:_\d{1,3})*$/;
+// 结果后缀：_屏蔽 / _还原，可带序号（_02、_03…），仅剥离位于结尾的
+const RESULT_SUFFIX_RE = /_(屏蔽|还原)(?:_\d{1,3})*$/;
 
-/** 去掉结尾的 _屏蔽 / _脱敏 / _还原（含可能存在的序号），得到原始基名 */
+/** 去掉结尾的 _屏蔽 / _还原（含可能存在的序号），得到原始基名 */
 function stripResultSuffix(base) {
   let out = String(base || '');
   let prev;
@@ -355,12 +355,22 @@ function readFileText(filePath) {
 }
 
 /**
- * 按内容判断处理方式：含〔编码〕的是屏蔽产物 → 还原；其余视为明文 → 屏蔽。
- * 无法读取内容时返回 'mask'，交由 maskFile 给出「格式不支持」等明确提示。
+ * 明显的屏蔽/还原产物文件名：映射库暂时缺失时也走还原分支，
+ * 由 restoreFile 明确提示哪些编码无法还原，而不是把产物当明文二次屏蔽。
  */
-function detectFileIntent(filePath) {
+function isResultFileName(filePath) {
+  return /_(屏蔽|还原)/.test(path.basename(filePath));
+}
+
+/**
+ * 按内容 + 映射库判断处理方式：只有编码在映射库中查得到才算屏蔽产物 → 还原。
+ * 仅有编码外观（测试样例〔姓名·abcdef〕等）的明文一律 → 屏蔽，避免整份文件
+ * 被当成还原、原样写回。无法读取内容时返回 'mask'，交由 maskFile 给出明确提示。
+ */
+function detectFileIntent(filePath, vault) {
   const text = readFileText(filePath);
-  return text && countCodes(text) > 0 ? 'restore' : 'mask';
+  if (!text || countCodes(text) === 0) return 'mask';
+  return hasRestorableCode(text, vault) || isResultFileName(filePath) ? 'restore' : 'mask';
 }
 
 /* ---------------- 单文件处理 ---------------- */
@@ -387,7 +397,7 @@ function maskFile(filePath, vault, toggles, outPath, knownNames, opts = {}) {
     const buf = fs.readFileSync(n.src);
     const dec = decodeBuffer(buf);
     if (!dec) return { ok: false, path: filePath, skipped: 'binary' };
-    if (countCodes(dec.text) > 0 && /_(屏蔽|脱敏)/.test(path.basename(filePath))) {
+    if (countCodes(dec.text) > 0 && /_(屏蔽|还原)/.test(path.basename(filePath))) {
       return { ok: false, path: filePath, skipped: 'already-masked' };
     }
     const outDir = path.dirname(out);
@@ -554,10 +564,11 @@ async function readPdfText(filePath) {
   } catch { return null; }
 }
 
-/** 判断 PDF 是屏蔽产物（含编码）还是明文 */
-async function detectPdfIntent(filePath) {
+/** 判断 PDF 是屏蔽产物（编码可在映射库还原）还是明文 */
+async function detectPdfIntent(filePath, vault) {
   const text = await readPdfText(filePath);
-  return text && countCodes(text) > 0 ? 'restore' : 'mask';
+  if (!text || countCodes(text) === 0) return 'mask';
+  return hasRestorableCode(text, vault) || isResultFileName(filePath) ? 'restore' : 'mask';
 }
 
 /**

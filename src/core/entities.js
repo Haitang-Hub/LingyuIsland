@@ -3,8 +3,9 @@
  * 中文实体检测：只使用结构，不使用具体实体黑白名单。
  *
  * 1. 姓名只由身份字段、人称前缀、人口学属性、表格相邻块、冒号字段行
- *    嵌套职务名词（封闭角色表）确认；
- * 2. 人称候选至少复现三次，且左右上下文均不唯一，才可确认；
+ *    嵌套职务名词（封闭角色表）确认；锚点后 + 案卷叙述动词/罪名等后边界
+ *    也可闭合（无需标点）。普通名词/职业泛称有封闭守卫表，不误判为姓名；
+ * 2. 自由语境的人称候选至少复现三次，且左右上下文均不唯一，才可确认；
  * 3. 地址必须含道路、门牌、楼栋、村组等居住要素；
  * 4. 机构必须有机构后缀、至少 6 字且不超过 18 字，并含 省/市/县/区/镇/村
  *    层级信息（或命中固定省市词典）；无层级信息的机构不再屏蔽；
@@ -71,13 +72,30 @@ function orgLevelOf(value) {
   return '';
 }
 const HAN_RE = /^[\u4e00-\u9fa5]+$/;
-const NAME_RE = /^[\u4e00-\u9fa5]{2,4}$/;
+const NAME_RE = /^[\u4e00-\u9fa5]{2,8}(?:·[\u4e00-\u9fa5]{2,8})?$/;
 const NAME_BAD_CHAR_RE = /[的了吗呢吧啊呀嘛了着过不没]/;
 const NAME_ROLE_TAIL_RE = /[人员者师长犯告象方罪]$/;
 const ADMIN_TAIL_RE = /(?:省|自治区|自治州|地区|市|区|县|旗|盟|镇|乡|街道|苏木|村|社区)$/;
 const ADMIN_FOLLOW_RE = /^(?:省|自治区|自治州|地区|市|区|县|旗|盟|镇|乡|街道|苏木|村|社区)/;
 const PHYSICAL_END_RE = /[，,。；;、：:（）()\s]/;
 const VERB_USE_AFTER_RE = /[了着过]/;
+
+// 非人物名词守卫：这些词在「角色词 + 名词」结构里是字段值、职业或泛称，
+// 不是姓名（负责人：经理 / 证人：证言 / 婴儿，男）。用封闭词表而非词尾形态，
+// 避免误伤真实姓名（王芳、陈阿满、李长顺等均不在表内）。
+const NON_PERSON_NOUNS = new Set([
+  '经理', '总经理', '董事长', '主管', '主任', '组长', '队长', '校长', '院长', '局长', '处长', '科长',
+  '法官', '检察官', '律师', '医生', '医师', '教师', '老师', '学生', '警察', '司机', '会计', '出纳',
+  '书记', '秘书', '代表', '委员', '专家', '学者', '工人', '农民', '干部', '领导', '同事', '朋友',
+  '家人', '亲属', '亲戚', '妻子', '丈夫', '儿子', '女儿', '孩子', '儿童', '婴儿', '老人', '病人',
+  '患者', '乘客', '旅客', '顾客', '客户', '用户', '人员', '员工', '职工', '会员', '股东', '法人',
+  '情况', '意见', '主张', '职务', '身份', '地址', '电话', '姓名', '名字', '性别', '年龄', '民族',
+  '证言', '证词', '笔录', '材料', '证据', '结论', '结果', '理由', '事实', '问题', '事项', '内容',
+  '名单', '名册', '记录', '登记', '签名', '盖章', '表示', '同意', '反对', '申请', '说明',
+]);
+function isNonPersonNoun(value) {
+  return NON_PERSON_NOUNS.has(String(value || ''));
+}
 
 function validName(value) {
   return NAME_RE.test(value)
@@ -125,13 +143,20 @@ function hashName(name) {
 
 // 人称前缀只按词尾形态识别，不枚举具体角色。前缀内部允许空白，
 // 以兼容「审　判　长　张三」这类排版；角色后的序号和括注不属于姓名。
-const ROLE_PREFIX_RE = /[\u4e00-\u9fa5](?:[\t \u3000]*[\u4e00-\u9fa5]){0,10}[\t \u3000]*(?:人|员|者|师|长|告|象)[\t \u3000]*(?:[一二三四五六七八九十\d]{1,2})?[\t \u3000]*(?:[（(][^）)\n]{0,10}[）)])?[\t \u3000]*[:：]?[\t \u3000]*/g;
+const ROLE_PREFIX_RE = /[\u4e00-\u9fa5](?:[\t \u3000]*[\u4e00-\u9fa5]){0,10}[\t \u3000]*(?<![他她它其该本众各每这那])(?:人|员|者|师|长|告|象)[\t \u3000]*(?:[一二三四五六七八九十\d]{1,2})?[\t \u3000]*(?:[（(][^）)\n]{0,10}[）)])?[\t \u3000]*[:：]?[\t \u3000]*/g;
 const NAME_FIELD_RE = /(?:姓名|名字)\s*[:：]\s*/g;
 const DEMOGRAPHIC_RE = /(?:^|[\s，,。；;、：:（）()【】\[\]])([\u4e00-\u9fa5]{2,4})(?=\s*[，,]\s*(?:男|女|\d{1,3}\s*岁|\d{2,4}\s*年[^，,。]{0,20}出生|公民身份号码|居民身份号码|身份号码|身份证号码))/g;
+// 少数民族长名/带间隔号姓名：仅人口学闭合路径允许 5~8 字与「·」，
+// 且必须以分隔符或开头锚定，避免吞进「当事人李四」这类角色词+姓名。
+const DEMOGRAPHIC_LONG_RE = /(?:^|[\s，,。；;、：:（）()【】\[\]])([\u4e00-\u9fa5]{5,8}|[\u4e00-\u9fa5]{2,8}·[\u4e00-\u9fa5]{2,8})(?=\s*[，,]\s*(?:男|女|\d{1,3}\s*岁|公民身份号码|居民身份号码|身份号码|身份证号码))/g;
 const CLOSED_NAME_LIST_RE = /^、[\u4e00-\u9fa5]{2,3}(?:、[\u4e00-\u9fa5]{2,3})*(?:等人|[二两三四五六七八九十\d]{1,2}人)/;
-// 受贿类犯罪动词紧跟人称候选：legal 案卷里「负责人张罗贿赂14万元」的
-// 「张罗」只能是姓名（动词「张罗」不可能带「贿赂」宾语+金额），直接确认。
-const CRIME_FOLLOW_RE = /^(?:贿赂|受贿|行贿|索贿|贪污|挪用|侵占|私分|诈骗)/;
+// 姓名后紧跟叙述动词时视为行为人姓名，长短候选均可确认：
+// 「负责人张罗贿赂14万元」的「张罗」只能是姓名（动词「张罗」不可能带贿赂宾语+金额）。
+// 扩展为案卷高频罪名/叙述动词，修复「审判长张三宣布开庭」「被告人欧阳明盗窃财物」
+// 这类无边界句子——它们原本因 wholeRun 整段汉字超长而整段放弃。
+// 严格排除庭审动作/状态词（到庭、出庭、开庭、休庭、在场、签字…）：
+// 「原告欧阳明到庭」「村医周济世到场」「张三同意」仍是负例，动作词是句子的谓语而非姓名后叙述。
+const CRIME_FOLLOW_RE = /^(?:贿赂|受贿|行贿|索贿|贪污|挪用|侵占|私分|诈骗|盗窃|抢劫|抢夺|敲诈|勒索|故意伤害|过失致|非法拘禁|绑架|强奸|猥亵|非法吸收|集资诈骗|职务侵占|渎职|滥用职权|徇私舞弊|报复陷害|刑讯逼供|宣布|判处|辩称|供述|陈述|声称|主张|要求|拒绝|承认|否认|指认|辨认|证实|作证|提起诉讼|提出异议|提出|表示同意)/;
 
 /* ---------------- 字段行嵌套角色词：「合议庭成员：审判员李舟」 ---------------- */
 
@@ -139,7 +164,7 @@ const CRIME_FOLLOW_RE = /^(?:贿赂|受贿|行贿|索贿|贪污|挪用|侵占|�
 // 审判员出庭/书记员记录/证人：到庭是动词短语，附：证人名单是名册短语，
 // 在记录/已到庭以句首功能字开头——它们与「角色词+姓名」结构同形，一律不确认。
 const PHRASE_HEAD_BAD_RE = /^[在已正将要该各均皆无每某]/;
-const PHRASE_VERB_BAD_RE = /(?:出庭|入庭|开庭|休庭|闭庭|退庭|复庭|到庭|提审|宣判|传唤|起立|坐下|落座|肃静|安静|候审|带到|带入|记录|回避|缺席|签名|告知|会见|述职|值庭|阅卷|参与|参加|陪同|陈述|答辩|举证|质证|宣读|讯问|发问|作证|签字|盖章|捺印|到场|到案|在逃|出示|出具|展示|提供|提交|调取|负责|担任|主管|分管|兼任|任职|调任|主持|主抓|名单|名册|花名|登记|签到)$/;
+const PHRASE_VERB_BAD_RE = /(?:出庭|入庭|开庭|休庭|闭庭|退庭|复庭|到庭|提审|宣判|宣布|传唤|起立|坐下|落座|肃静|安静|候审|带到|带入|记录|回避|缺席|签名|告知|会见|述职|值庭|阅卷|参与|参加|陪同|陈述|答辩|举证|质证|宣读|讯问|发问|作证|签字|盖章|捺印|到场|到案|在逃|出示|出具|展示|提供|提交|调取|负责|担任|主管|分管|兼任|任职|调任|主持|主抓|名单|名册|花名|登记|签到|表明|说明|发表|举行|召开)$/;
 const PHRASE_TAIL_BAD_RE = /[册表簿单页栏]$/;
 
 // 嵌套角色词用封闭职务名词表精确匹配。纯词尾形态会把庭审叙述拆出伪姓名：
@@ -206,32 +231,52 @@ function roleCandidates(text) {
       const colon = field || /[:：]/.test(prefix);
       const formatted = /[\t \u3000]/.test(prefix.replace(/[:：]/g, ''));
       const personMarked = /被[\u4e00-\u9fa5]{0,4}人$/.test(compact);
-      for (let len = 2; len <= Math.min(4, raw.length); len++) {
+      const colon2 = colon;
+      const formatted2 = formatted;
+      // 候选长度上限按锚点强度区分：
+      //  - 「姓名：」字段是强锚点，允许 2~6 字（含复姓/少数民族长名），
+      //    才能确认「姓名：审判员李长顺」「姓名：阿依古丽买买提」；
+      //  - 普通人称角色词前缀保持 2~4 字，避免把「公诉人：被告人王五」
+      //    整体吞成「被告人王五」而盖掉嵌套路径的「王五」。
+      const maxLen = field ? 6 : 4;
+      for (let len = 2; len <= Math.min(maxLen, raw.length); len++) {
         const value = raw.slice(0, len);
         if (!validName(value) || value === '姓名' || value === '名字') continue;
+        if (isNonPersonNoun(value)) continue; // 经理/证言/意见/婴儿等泛称不是姓名
+        // 「姓名：审判员李长顺」：候选以嵌套角色词开头时交给 scanNestedPairs
+        // 精确剥出「李长顺」，不把整个「审判员李长顺」当姓名。
+        if (field && [...NEST_ROLES].some((role) => value.startsWith(role) && value.length > role.length)) continue;
         const end = start + len;
         const after = text[end] || '';
         if (VERB_USE_AFTER_RE.test(after) || ADMIN_FOLLOW_RE.test(text.slice(end))) continue;
         const wholeRun = len === raw.length;
         const demographicClosed = wholeRun && /^\s*[，,]\s*(?:男|女|\d{1,3}\s*岁|\d{2,4}\s*年[^，,。]{0,20}出生|公民身份号码|居民身份号码|身份号码|身份证号码)/.test(text.slice(end));
-        // 紧跟犯罪动词视为案卷叙述中的行为人姓名，长短候选均可确认。
-        const crimeClosed = CRIME_FOLLOW_RE.test(text.slice(end));
-        // 普通角色字段只直接确认 2–3 字；四字姓名须由「姓名」字段或人口学属性确认。
-        const lengthClosed = len <= 3 || field || demographicClosed;
+        // 后随案卷叙述动词/罪名即确认（锚点 + 后边界，无需整段吃掉）：
+        // 「审判长张三宣布开庭」「被告人欧阳明盗窃他人财物」。
+        const narrationClosed = CRIME_FOLLOW_RE.test(text.slice(end));
+        // 普通角色字段：默认 2~3 字；4 字以上须有字段/人口学/后随动词支撑。
+        const lengthClosed = len <= 3 || field || demographicClosed || narrationClosed;
         const listClosed = lengthClosed && wholeRun && after === '、'
-          && (colon || CLOSED_NAME_LIST_RE.test(text.slice(end)));
-        const physicallyClosed = lengthClosed && wholeRun && (colon || formatted)
+          && (colon2 || CLOSED_NAME_LIST_RE.test(text.slice(end)));
+        // 原 physicallyClosed 保留（标点/排版边界），但放宽 wholeRun 约束：
+        // 角色词 + 姓名 + 标点 即可闭合，不要求姓名吃掉后面整段汉字——
+        // 「原告：张三，南检刑诉…」里张三后接逗号也确认。
+        const physicallyClosed = lengthClosed && (colon2 || formatted2)
           && (PHYSICAL_END_RE.test(after) || !after)
           && !PHRASE_HEAD_BAD_RE.test(value)
           && !(value.length === 2 && PHRASE_VERB_BAD_RE.test(value))
           && !(value.length === 3 && PHRASE_TAIL_BAD_RE.test(value));
+        // 「姓名：审判员李长顺」这类字段后半段无标点时，字段锚点本身即强证据。
+        const fieldClosed = field && lengthClosed && !PHRASE_HEAD_BAD_RE.test(value)
+          && !(value.length === 2 && PHRASE_VERB_BAD_RE.test(value));
         const candidate = { start, end, value, raw };
-        if (listClosed || physicallyClosed || demographicClosed || crimeClosed) confirmed.push(candidate);
-        else if (!colon && len === 3 && personMarked) ambiguous.push(candidate);
+        if (listClosed || physicallyClosed || demographicClosed || narrationClosed || fieldClosed) {
+          confirmed.push(candidate);
+        } else if (!colon2 && len === 3 && personMarked) ambiguous.push(candidate);
       }
       // 冒号字段行的嵌套角色词（「合议庭成员：审判员李舟」）：嵌套处无排版边界，
       // 主扫描候选被角色尾字拒绝；在字段作用域内按「角色词+短姓名」成对解析。
-      if (colon) scanNestedPairs(text, m.index + prefix.length, confirmed);
+      if (colon2) scanNestedPairs(text, m.index + prefix.length, confirmed);
     }
   };
   scan(ROLE_PREFIX_RE, false);
@@ -241,13 +286,19 @@ function roleCandidates(text) {
 
 function demographicNames(text) {
   const out = [];
-  DEMOGRAPHIC_RE.lastIndex = 0;
-  let m;
-  while ((m = DEMOGRAPHIC_RE.exec(text)) !== null) {
-    const value = m[1];
-    if (!validName(value)) continue;
-    const start = m.index + m[0].length - value.length;
-    out.push({ start, end: start + value.length, value });
+  for (const re of [DEMOGRAPHIC_RE, DEMOGRAPHIC_LONG_RE]) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const value = m[1];
+      if (!validName(value) || isNonPersonNoun(value)) continue;
+      // 长名正则排除以人称角色词开头的捕获（「当事人李四」「被告人王五」
+      // 是角色词+姓名，不是 5 字姓名本身）。
+      if (value.length >= 5 && /^[\u4e00-\u9fa5]{1,3}(?:人|员|者|师|长|告|象)/.test(value)
+        && !value.includes('·')) continue;
+      const start = m.index + m[0].length - value.length;
+      out.push({ start, end: start + value.length, value });
+    }
   }
   return out;
 }
@@ -531,12 +582,16 @@ function addLiteralHits(out, text, type, value) {
 
 function addHashNames(out, text, hashes) {
   if (!hashes || !hashes.size) return;
+  // 最长优先：从每个起点尝试 8→2 字，命中后跳过整段，避免「张三丰」被
+  // 已知姓名「张三」截成「张三」+「丰」造成屏蔽形态与还原不一致。
+  const COVERED = new Set();
   for (let start = 0; start < text.length; start++) {
-    if (!/[\u4e00-\u9fa5]/.test(text[start])) continue;
-    for (let len = 2; len <= 4 && start + len <= text.length; len++) {
+    if (COVERED.has(start) || !/[\u4e00-\u9fa5]/.test(text[start])) continue;
+    for (let len = Math.min(8, text.length - start); len >= 2; len--) {
       const value = text.slice(start, start + len);
       if (!HAN_RE.test(value) || !hashes.has(hashName(value))) continue;
       out.push(item('name', start, start + len, value, false));
+      for (let k = start; k < start + len; k++) COVERED.add(k);
       break;
     }
   }
@@ -646,7 +701,12 @@ function collectEntities(input, options = {}) {
 
   for (let i = 1; i < blocks.length; i++) {
     const value = blocks[i].trim();
-    if (isPersonTableLabel(blocks[i - 1]) && validName(value)) known.name.add(value);
+    // 表格相邻块：标签后是姓名才收；动作词（宣布/记录）与泛称（证言/经理）
+    // 不是姓名，避免「审判长 / 宣布」被误收。
+    const tableValue = blocks[i].trim();
+    if (isPersonTableLabel(blocks[i - 1]) && validName(tableValue)
+      && !isNonPersonNoun(tableValue)
+      && !PHRASE_VERB_BAD_RE.test(tableValue)) known.name.add(tableValue);
   }
 
   // 先展开闭合并列名单，再用已知姓名排除「李贺作」这类向右扩展的伪候选。

@@ -181,10 +181,12 @@ test('R-006 盐值：不同批次同值不同码，同批次同值同码', () =>
   assert.ok(revived.lookup(c1).value === '陈阿满', '编码反查不受盐值影响');
 });
 
-test('R-006 盐值：旧版 v1 映射库（无 salt 字段）向后兼容', () => {
+test('R-006 盐值：v1 映射库（无 salt / 非 v2）不再加载', () => {
   const v = Vault.fromJSON({ v: 1, codes: { ab12cd: { v: '陈阿满', t: 'name' } } });
-  assert.strictEqual(v.lookup('ab12cd').value, '陈阿满', '历史编码仍可反查');
-  assert.strictEqual(v.ensureCode('name', '陈阿满'), 'ab12cd', '历史同值沿用历史编码');
+  assert.strictEqual(v.size, 0, '旧版映射库应被丢弃');
+  assert.strictEqual(v.lookup('ab12cd'), null, '历史编码不再反查');
+  assert.strictEqual(Vault.fromJSON(null).size, 0);
+  assert.strictEqual(Vault.fromJSON({ codes: {} }).size, 0);
 });
 
 /* ================= 保留位收紧（首尾不得同时可见） ================= */
@@ -400,7 +402,7 @@ test('一致性：任一文件漏检 → 泄漏定位且样本截断', () => {
   assert.ok(!JSON.stringify(r).includes('陈阿满'), '报告不得回显完整原值');
 });
 
-test('一致性：屏蔽产物编码与案卷映射库一致（同值同码，兼容标签格式）', () => {
+test('一致性：屏蔽产物编码与案卷映射库一致（同值同码，统一带标签）', () => {
   const origA = fs.readFileSync(path.join(__dirname, 'fixtures', 'case-a.txt'), 'utf8');
   const origB = fs.readFileSync(path.join(__dirname, 'fixtures', 'case-b.txt'), 'utf8');
   const v = new Vault();

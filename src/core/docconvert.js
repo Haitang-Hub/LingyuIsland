@@ -3,7 +3,7 @@
  * 老式 Word 二进制文档（.doc / .dot，OLE2 复合文档）自动转换
  *
  * 为什么需要转换：
- *  - 屏蔽值形如「138****5678〔a3f2b1〕」，长度大于原文；老 .doc 的文本按
+ *  - 屏蔽值形如「138****5678〔手机号·a3f2b1〕」，长度大于原文；老 .doc 的文本按
  *    WordDocument 流 + piece table(CLX) 分段存储，变长替换必须重建 CLX、FIB
  *    偏移、FAT 扇区链，极易损坏文档，因此不改写原二进制。
  *  - 项目现有的 Office 管道基于 adm-zip 解 OOXML zip 内 XML，只认 docx/xlsx/pptx。

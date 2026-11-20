@@ -3,7 +3,8 @@
 
 const { test, assert } = require('./helpers');
 const { detect } = require('../src/core/detector');
-const { collectEntities } = require('../src/core/entities');
+const { collectEntities, hashName } = require('../src/core/entities');
+const { Vault, maskText, restoreText } = require('../src/core/masker');
 
 const vals = (text, type, options) =>
   detect(text, options).items.filter((i) => i.type === type).map((i) => i.value);
@@ -80,4 +81,55 @@ test('实体结构：旧地名兼容传播要求左边界，新实体表按完�
   assert.strictEqual(vals('里石牌垌子无关', 'address', { knownPlaces: new Set(['石牌垌']) }).length, 0);
   const known = collectEntities(['住所地浙江省杭州市西湖区文三路138号']);
   assert.ok(vals('其在浙江省杭州市西湖区文三路138号出现', 'address', { knownEntities: known }).length >= 1);
+});
+
+// ---- 姓名规则重构 Golden Test（锚点+后边界、误判守卫、传播最长优先） ----
+
+test('姓名·后边界：角色词+姓名+案卷叙述动词/罪名可确认（无需标点）', () => {
+  for (const [text, name] of [
+    ['审判长张三宣布开庭。', '张三'],
+    ['被告人欧阳明盗窃他人财物。', '欧阳明'],
+    ['被告人司马相如盗窃他人财物。', '司马相如'],
+    ['证人李四作证时表示情况属实。', '李四'],
+    ['原告赵六提起诉讼。', '赵六'],
+    ['代理人钱七提出异议。', '钱七'],
+  ]) {
+    assert.ok(vals(text, 'name').includes(name), `${text} → ${JSON.stringify(vals(text, 'name'))}`);
+  }
+});
+
+test('姓名·形状：少数民族长名与间隔号姓名可确认，往返逐字一致', () => {
+  for (const [text, name] of [
+    ['阿依古丽买买提，男，30岁。', '阿依古丽买买提'],
+    ['阿依古丽·买买提，男，30岁。', '阿依古丽·买买提'],
+  ]) {
+    assert.ok(vals(text, 'name').includes(name), `${text} → ${JSON.stringify(vals(text, 'name'))}`);
+    const v = new Vault();
+    const masked = maskText(text, v).masked;
+    assert.ok(masked.includes('〔姓名·'), masked);
+    assert.strictEqual(restoreText(masked, v).text, text);
+  }
+});
+
+test('姓名·误判守卫：庭审动作词与普通名词/泛称不确认为姓名', () => {
+  for (const text of [
+    '原告欧阳明到庭', '食堂负责人张罗商议', '审判长：宣布被告人身份。',
+    '王芳女士已确认参加。', '婴儿，男，2岁，身体健康。', '负责人：经理',
+    '审判长：法官', '证人：证言', '鉴定人：意见', '负责人：情况', '原告：主张',
+  ]) {
+    assert.strictEqual(vals(text, 'name').length, 0, `${text} → ${JSON.stringify(vals(text, 'name'))}`);
+  }
+  const table = collectEntities(['姓名', '张三', '证人', '证言', '审判长', '宣布']);
+  assert.deepStrictEqual([...table.name], ['张三'], JSON.stringify([...table.name]));
+});
+
+test('姓名·传播：源头误判不入表，哈希命中遵循最长优先', () => {
+  const known = collectEntities(['婴儿，男，2岁。', '负责人：经理', '张三，男。']);
+  assert.deepStrictEqual([...known.name], ['张三'], JSON.stringify([...known.name]));
+  const hashes = new Set([hashName('张三')]);
+  const hit = detect('张三丰到场。', { knownNameHashes: hashes }).items.filter((i) => i.type === 'name');
+  assert.ok(hit.length >= 1 && hit.every((i) => i.value === '张三'), JSON.stringify(hit));
+  const v = new Vault();
+  const masked = maskText('审判长张三宣布开庭。', v).masked;
+  assert.strictEqual(restoreText(masked, v).text, '审判长张三宣布开庭。');
 });

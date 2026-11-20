@@ -128,8 +128,8 @@ function rmDir(dir) {
 
 /* ---------------- 断言助手 ---------------- */
 
-// 新格式〔姓名·ab12cd〕与旧格式〔ab12cd〕都匹配（还原兼容双格式）
-const CODE_BRACKET_RE = /〔(?:[\u4e00-\u9fa5]{1,6}·)?[0-9a-f]{6,12}〕/g;
+// 屏蔽编码：〔类型·十六进制〕
+const CODE_BRACKET_RE = /〔[\u4e00-\u9fa5]{1,6}·[0-9a-f]{6,12}〕/g;
 
 /** 泄漏消息用截断值；短值（姓名等 ≤4 字）截得更短，避免原样回显 */
 function truncValue(v) {
@@ -141,7 +141,7 @@ function truncValue(v) {
 function assertNoLeak(masked, value, label) {
   // 地址/机构采用「某X……尾字/后缀」形态，尾段会原样保留；
   // 当尾段恰好等于另一个检出实体的完整值时，不能用裸 includes 判泄漏。
-  // 规则：出现在 4 个（或旧格式 6 个）* 之后的原值属于可见尾段，不算泄漏。
+  // 规则：出现在 4 个 * 之后的原值属于可见尾段，不算泄漏。
   const s = String(masked || '');
   let from = 0;
   let leaked = false;
@@ -150,7 +150,7 @@ function assertNoLeak(masked, value, label) {
     if (idx < 0) break;
     let stars = 0;
     while (idx - stars - 1 >= 0 && s[idx - stars - 1] === '*') stars++;
-    if (stars !== 4 && stars !== 6) { leaked = true; break; }
+    if (stars !== 4) { leaked = true; break; }
     from = idx + value.length;
   }
   assert.ok(!leaked,

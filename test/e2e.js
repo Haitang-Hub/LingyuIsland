@@ -169,7 +169,6 @@ async function run({ store, island, indexer, updater }) {
     assert.ok(!fs.existsSync(path.join(rootDir, '外部文件.txt')), '根目录不应出现原文件副本');
     assert.ok(fs.existsSync(path.join(rootDir, '外部文件_屏蔽.txt')), '屏蔽结果应在根目录');
     assert.ok(fs.existsSync(outsideSrc), 'keep 模式原位置文件应保留');
-    assert.strictEqual(done1.importedCount, 0);
     const masked = fs.readFileSync(path.join(rootDir, '外部文件_屏蔽.txt'), 'utf8');
     assert.ok(masked.includes('138****5678'), '屏蔽结果应已屏蔽手机号');
     assert.ok(restoreText(masked, store.vault).text.includes('13812345678'));

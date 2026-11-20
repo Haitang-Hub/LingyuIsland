@@ -33,10 +33,10 @@ function containsPlain(masked, value) {
   while (from <= s.length) {
     const idx = s.indexOf(value, from);
     if (idx < 0) return false;
-    // 紧邻可见尾段之前的星号是屏蔽形态的一部分：新格式 4 个，旧格式 6 个。
+    // 紧邻可见尾段之前的 4 个星号是屏蔽形态的一部分。
     let stars = 0;
     while (idx - stars - 1 >= 0 && s[idx - stars - 1] === '*') stars++;
-    if (stars !== 4 && stars !== 6) return true;
+    if (stars !== 4) return true;
     from = idx + value.length;
   }
   return false;
@@ -64,7 +64,7 @@ function checkConsistency(entries, options = {}) {
   }
 
   // 2) 屏蔽产物中逐实体排查原值残留 + 编码一致性
-  const codeRe = /〔(?:[\u4e00-\u9fa5]{1,6}·)?([0-9a-f]{6,12})〕/g;
+  const codeRe = /〔[\u4e00-\u9fa5]{1,6}·([0-9a-f]{6,12})〕/g;
   for (const e of entries) {
     const masked = String(e.masked || '');
     for (const [value, meta] of entities) {

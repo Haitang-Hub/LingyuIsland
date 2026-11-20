@@ -184,8 +184,8 @@ test('自动收起时长：旧配置缺字段或非法值时自动补正', () =>
 
 const { ClipboardWatcher } = require('../src/main/clipboard');
 
-const MASKED_A = '联系人：138****5678〔ab12cd〕';
-const MASKED_B = '联系人：139****5678〔ef34ab〕';
+const MASKED_A = '联系人：138****5678〔手机号·ab12cd〕';
+const MASKED_B = '联系人：139****5678〔手机号·ef34ab〕';
 const PLAIN = '这是一段无关文本';
 
 function makeClipWatcher() {
@@ -329,7 +329,7 @@ test('外观：主题注册表与 normalizeTheme / normalizeAccent', () => {
 test('外观：normalizeAppearance 钳制 / 白名单 / 回退', () => {
   const { normalizeAppearance, ALPHA_MIN, ALPHA_MAX, RADIUS_MAX } = require('../src/core/appearance');
   const a = normalizeAppearance({
-    theme: 'nosuchtheme', accent: '#FF8C42', alpha: 0.3, radius: 99, bgDim: 0.05,
+    theme: 'nosuchtheme', accent: '#FF8C42', alpha: 0.3, radius: 99,
     glass: 'x', panel: { w: 9, h: 99999 }, motion: 0,
     bg: { type: 'video', file: 'a.png' },
   }, null);
@@ -340,7 +340,6 @@ test('外观：normalizeAppearance 钳制 / 白名单 / 回退', () => {
   assert.strictEqual(a.glass, 'off');
   assert.deepStrictEqual(a.panel, { w: 360, h: 1000 }, '面板宽高各自钳制');
   assert.strictEqual(a.motion, false);
-  assert.strictEqual(a.bgDim, 0.35, '背景遮罩低于下限钳回 0.35');
   assert.deepStrictEqual(a.bg, { type: 'video', file: '', name: '' }, '扩展名与类型不符 → 文件置空，类型保留');
 
   const b = normalizeAppearance({ alpha: 1.5, radius: 3, bg: { type: 'image' } }, null);
@@ -356,11 +355,10 @@ test('外观：normalizeAppearance 钳制 / 白名单 / 回退', () => {
   assert.strictEqual(c.glass, 'off');
   assert.deepStrictEqual(c.panel, { w: 560, h: 700 }, '默认基准尺寸');
   assert.strictEqual(c.motion, true);
-  assert.strictEqual(c.bgDim, 0.62, '背景遮罩默认 0.62');
   assert.deepStrictEqual(c.bg, { type: 'none', file: '', name: '' });
 
-  const e = normalizeAppearance({ theme: 'cloud' }, { bgDim: 0.5, bg: { type: 'image', file: 'bg-1.png' } });
-  assert.strictEqual(e.bgDim, 0.5);
+  const e = normalizeAppearance({ theme: 'cloud' }, { glass: 'on', bg: { type: 'image', file: 'bg-1.png' } });
+  assert.strictEqual(e.glass, 'on');
   assert.strictEqual(e.bg.file, 'bg-1.png');
 
   const d = normalizeAppearance({ bg: { type: 'image', file: '..\\evil.png' } }, null);
@@ -527,13 +525,13 @@ test('自适应布局：常见分辨率下窗口都完整可见且不与胶囊�
   for (const [label, area] of SCREENS) {
     const plan = computeIslandLayout(area);
     assertFits(area, plan, label);
-    assert.ok(plan.uiScale >= 0.85 && plan.uiScale <= 1.3, `${label}: 缩放超出范围`);
+    assert.ok(plan.panelScale >= 0.85 && plan.panelScale <= 1.3, `${label}: 缩放超出范围`);
   }
 });
 
 test('自适应布局：1080p 基准保持设计尺寸，缩放为 1', () => {
   const p = computeIslandLayout(wa(1920, 1040));
-  assert.strictEqual(p.uiScale, 1);
+  assert.strictEqual(p.panelScale, 1);
   assert.deepStrictEqual(p.pill, { x: 774, y: 6, width: BASE.pillW, height: BASE.pillH });
   assert.strictEqual(p.panel.y, 62);
   assert.strictEqual(p.panel.width, BASE.panelW);
@@ -543,7 +541,7 @@ test('自适应布局：1080p 基准保持设计尺寸，缩放为 1', () => {
 test('自适应布局：高分屏放大、低分屏缩小，切换分辨率会改变窗口尺寸', () => {
   const small = computeIslandLayout(wa(1366, 728));
   const big = computeIslandLayout(wa(3840, 2100));
-  assert.ok(big.uiScale > small.uiScale, '4K 应比 768p 更大');
+  assert.ok(big.panelScale > small.panelScale, '4K 应比 768p 更大');
   assert.ok(small.panel.height < big.panel.height, '小屏面板应被压缩/缩小');
   assert.ok(small.panel.y >= small.pill.y + small.pill.height, '旧公式会把面板上移与胶囊重叠');
 });

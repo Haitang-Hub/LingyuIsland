@@ -42,10 +42,9 @@ if (!window.island) {
     clipboardWatch: true,
     autoCollapse: true,
     autoCollapseDelay: 20,
-    uiScale: 'auto',
     launchOnBoot: false,
     appearance: {
-      theme: 'midnight', accent: '', alpha: 0.97, radius: 18, fontScale: 1, pillX: 0.5, glass: 'off', bgDim: 0.62,
+      theme: 'midnight', accent: '', alpha: 0.97, radius: 18, fontScale: 1, pillX: 0.5, glass: 'off',
       panel: { w: 560, h: 700 }, motion: true, bg: { type: 'none', file: '', name: '' },
     },
   };
@@ -90,7 +89,7 @@ if (!window.island) {
     results: [], total: n,
     masked: n, restored: 0, restoredTotal: 0, restoreMissing: 0,
     alreadyMasked: 0, noPii: 0, skipped: 0, locked: 0, convertFailed: 0, convertReason: '', pdfNoText: 0,
-    totalPII: n * 3, trashed: 0, importedCount: 0, overwritten: 0,
+    totalPII: n * 3, trashed: 0, overwritten: 0,
   });
 
   window.island = {

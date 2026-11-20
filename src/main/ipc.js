@@ -61,9 +61,6 @@ function register(ctx) {
     if (patch && 'launchOnBoot' in patch) {
       try { app_ref().setLoginItemSettings({ openAtLogin: !!next.launchOnBoot }); } catch { /* ignore */ }
     }
-    if (patch && 'uiScale' in patch) {
-      island.setPanelSize(next.appearance.panel); // 旧字段：仍按当前面板尺寸重排一次
-    }
     if (patch && 'appearance' in patch) {
       const app2 = next.appearance;
       // 密度变化 → 重算窗口尺寸与缩放（档位最终仍由工作区钳制）

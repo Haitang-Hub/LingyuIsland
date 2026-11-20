@@ -35,9 +35,6 @@ const PANEL_PRESETS = {
   wide: { id: 'wide', label: '宽扁', w: 820, h: 620 },
 };
 
-/** 旧存档的 density 档位 → 预设（compact/large/auto 分别映射到新形状） */
-const LEGACY_DENSITY = { auto: 'standard', compact: 'narrow', standard: 'standard', large: 'wide' };
-
 const AUTO_MIN = 0.85, AUTO_MAX = 1.3;
 
 /** 胶囊宽度跟随字体档位的系数范围（与外观页 fontScale 档位一致：0.9/1/1.15/1.3） */
@@ -45,13 +42,6 @@ const PILL_FONT_MIN = 0.85, PILL_FONT_MAX = 1.3;
 
 function clamp(v, lo, hi) {
   return Math.min(hi, Math.max(lo, v));
-}
-
-/** 旧 density 档位值 → 面板尺寸（迁移用） */
-function sizeFromDensity(value) {
-  const key = LEGACY_DENSITY[value] || 'standard';
-  const p = PANEL_PRESETS[key];
-  return { w: p.w, h: p.h };
 }
 
 /** 面板尺寸规范化：宽高各自钳制，非法值回退到上一次的有效值 / 基准尺寸 */
@@ -90,11 +80,11 @@ function autoUiScale(width, height) {
 
 /**
  * @param {{x:number,y:number,width:number,height:number}} workArea 主显示器工作区（DIP）
- * @param {{panelW?:number, panelH?:number, uiScale?:string, collapsed?:boolean, pillX?:number, fontScale?:number}} [opts]
- *   panelW/panelH = 面板 CSS 视口尺寸（宽高独立，可细长可宽扁）；uiScale 为旧档位值，仅迁移兼容用；
+ * @param {{panelW?:number, panelH?:number, collapsed?:boolean, pillX?:number, fontScale?:number}} [opts]
+ *   panelW/panelH = 面板 CSS 视口尺寸（宽高独立，可细长可宽扁）；
  *   pillX = 灵动岛中心相对工作区宽度的比例（0~1，默认 0.5 居中），拖动换位后持久化的值；
  *   fontScale = 字体档位（0.85~1.3），胶囊宽度按其等比伸缩
- * @returns {{uiScale:number, pillScale:number, panelScale:number, pill:{x,y,width,height}, panel:{x,y,width,height}}}
+ * @returns {{pillScale:number, panelScale:number, pill:{x,y,width,height}, panel:{x,y,width,height}}}
  */
 function computeIslandLayout(workArea, opts = {}) {
   const wa = {
@@ -123,11 +113,7 @@ function computeIslandLayout(workArea, opts = {}) {
 
   // 面板：目标 CSS 视口宽高 × 统一系数（该系数同时作为渲染层 zoom），
   // 系数被工作区钳制，空间不足时整体（含字号）一起缩小，绝不越出屏幕
-  const target = normalizePanelSize(
-    (opts.panelW || opts.panelH)
-      ? { w: opts.panelW, h: opts.panelH }
-      : sizeFromDensity(opts.uiScale),
-  );
+  const target = normalizePanelSize({ w: opts.panelW, h: opts.panelH });
   // 面板顶部固定在胶囊下方；高度按剩余空间裁剪，绝不靠「上移窗口」来硬塞
   const panelTopOffset = topInset + pillH + gap;
   const maxPanelH = Math.max(1, wa.height - panelTopOffset - edge);
@@ -147,7 +133,6 @@ function computeIslandLayout(workArea, opts = {}) {
   const panelX = Math.round(Math.min(Math.max(pillCenterX - panelW / 2, minXPanel), Math.max(minXPanel, maxXPanel)));
 
   return {
-    uiScale: scale,          // 兼容旧调用方：等同于 panelScale
     pillScale,
     panelScale: scale,
     target,
@@ -167,6 +152,6 @@ function computeIslandLayout(workArea, opts = {}) {
 }
 
 module.exports = {
-  BASE, PANEL_LIMITS, PANEL_PRESETS, LEGACY_DENSITY, AUTO_MIN, AUTO_MAX, PILL_FONT_MIN, PILL_FONT_MAX,
-  normalizePanelSize, sizeFromDensity, matchPreset, autoUiScale, computeIslandLayout,
+  BASE, PANEL_LIMITS, PANEL_PRESETS, AUTO_MIN, AUTO_MAX, PILL_FONT_MIN, PILL_FONT_MAX,
+  normalizePanelSize, matchPreset, autoUiScale, computeIslandLayout,
 };

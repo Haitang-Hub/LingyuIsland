@@ -4,14 +4,14 @@
  *
  * 核心设计：屏蔽值形如  138****5678〔手机号·ab12cd〕
  *  - 前后保留部分原文 + 类型标签，让用户「能判断出是什么内容」
- *  - 〔〕内 6~12 位十六进制编码（可带「类型·」前缀）是找回原文的钥匙：
+ *  - 〔〕内「类型·6~12 位十六进制编码」是找回原文的钥匙：
  *    只要编码未被改动（哪怕从文件里复制到别处），都能还原出真实内容
  *  - 同一真实值在同一映射库中对应同一编码；跨文本节点实体因还原需要
  *    按原始分段回填，分段长度参与编码键（见 maskEdits 的 boundaries）。
  *
  * 可读性约定：
  *  - 编码括号内嵌「类型·」标签（〔姓名·ab12cd〕），脱敏产物一眼可读；
- *    还原时标签随编码一并剥除。旧格式（无标签）的屏蔽文件照常解析。
+ *    还原时标签随编码一并剥除。
  *  - 跨排版 run 的实体也按完整屏蔽形态输出（「某省……室〔住址·编码〕」），
  *    屏蔽值落在首节点、其余节点清空；vault 记录原文分段长度，还原时逐段回填。
  *
@@ -29,10 +29,10 @@ const crypto = require('crypto');
 const { detect, ORG_SUFFIXES, orgLevelOf, addressLevelOf } = require('./detector');
 
 /**
- * 屏蔽编码格式：〔类型·6~12 位十六进制〕，类型标签可省略（兼容旧格式）。
+ * 屏蔽编码格式：〔类型·6~12 位十六进制〕，类型标签必填。
  * 标签只取汉字，避免吞进正文（「〔灵屿岛脱敏声明〕」等非编码括号不会误匹配）。
  */
-const CODE_RE = /〔(?:([\u4e00-\u9fa5]{1,6})·)?([0-9a-f]{6,12})〕/g;
+const CODE_RE = /〔([\u4e00-\u9fa5]{1,6})·([0-9a-f]{6,12})〕/g;
 
 /** 编码括号内的类型标签：脱敏产物「张*〔姓名·ab12cd〕」一眼可知原内容类型 */
 const CODE_LABEL = {
@@ -41,10 +41,7 @@ const CODE_LABEL = {
   org: '机构', landline: '电话', im: '账号', hkmt: '证件', uscc: '信用代码', meta: '元数据',
 };
 
-const codeBracket = (type, code) => {
-  const label = CODE_LABEL[type];
-  return label ? `〔${label}·${code}〕` : `〔${code}〕`;
-};
+const codeBracket = (type, code) => `〔${CODE_LABEL[type] || type}·${code}〕`;
 
 const TYPE_LABEL = {
   phone: '手机号', idCard: '身份证', bank: '银行卡', email: '邮箱',
@@ -74,7 +71,6 @@ class Vault {
    *  - 同一批次（同一个 Vault 实例）内同值同码，保证批内一致性；
    *  - 跨批次（不同 Vault 实例）同值不同码，阻断「跨文档拼合还原」；
    *  - 还原不依赖盐值（按 codeMap 反查），持久化时随 JSON 保存盐值即可续用。
-   *  旧版映射库（JSON 无 salt 字段）回落为空盐，历史编码保持有效。
    */
   constructor(salt) {
     this.codeMap = new Map();   // code -> { v: 原文, t: 类型 }
@@ -146,22 +142,22 @@ class Vault {
   }
 
   static fromJSON(data) {
-    // 旧版（v1）无 salt 字段 → 空盐，历史编码值保持有效
-    const vault = new Vault(data && typeof data.salt === 'string' ? data.salt : '');
-    if (data && data.codes) {
-      for (const [code, meta] of Object.entries(data.codes)) {
-        if (meta && typeof meta.v === 'string' && typeof meta.t === 'string') {
-          const lens = Array.isArray(meta.l) && meta.l.length > 1
-            ? meta.l.map((n) => Math.max(0, n | 0)) : null;
-          const entry = lens
-            ? { v: meta.v, t: meta.t, l: lens } : { v: meta.v, t: meta.t };
-          if (typeof meta.h === 'string' && meta.h) entry.h = meta.h;
-          else if (Array.isArray(meta.h) && meta.h.length
-            && meta.h.every((x) => typeof x === 'string' && x)) entry.h = meta.h;
-          vault.codeMap.set(code, entry);
-          const key = meta.t + '\x00' + meta.v + (lens ? '\x00#' + lens.join(',') : '');
-          vault.valueMap.set(key, code);
-        }
+    // 只接受当前 v2 格式（含 salt）；旧版 v1 映射库不再加载
+    if (!data || data.v !== 2 || typeof data.salt !== 'string'
+      || !data.codes || typeof data.codes !== 'object') return new Vault();
+    const vault = new Vault(data.salt);
+    for (const [code, meta] of Object.entries(data.codes)) {
+      if (meta && typeof meta.v === 'string' && typeof meta.t === 'string') {
+        const lens = Array.isArray(meta.l) && meta.l.length > 1
+          ? meta.l.map((n) => Math.max(0, n | 0)) : null;
+        const entry = lens
+          ? { v: meta.v, t: meta.t, l: lens } : { v: meta.v, t: meta.t };
+        if (typeof meta.h === 'string' && meta.h) entry.h = meta.h;
+        else if (Array.isArray(meta.h) && meta.h.length
+          && meta.h.every((x) => typeof x === 'string' && x)) entry.h = meta.h;
+        vault.codeMap.set(code, entry);
+        const key = meta.t + '\x00' + meta.v + (lens ? '\x00#' + lens.join(',') : '');
+        vault.valueMap.set(key, code);
       }
     }
     return vault;
@@ -414,13 +410,12 @@ function decorFor(hit) {
 
 /**
  * 只计算还原编辑，不改文本。
- * 第一层：按类型匹配「修饰部分 + 编码」整体还原（编码括号可为
- * 「〔ab12cd〕」旧格式或「〔姓名·ab12cd〕」新格式）；
+ * 第一层：按类型匹配「修饰部分 + 编码」整体还原；
  * 第二层：修饰部分被改动 / 丢弃时，按实际出现的括号整段兜底替换
  * （标签随编码一并剥除）。
  */
 function restoreEdits(text, vault) {
-  // 收集文档中出现的编码括号：同一编码可能以不同形态（带/不带标签）出现
+  // 收集文档中出现的编码括号，供整段兜底替换
   const byCode = new Map(); // hex -> [实际出现的括号全文]
   CODE_RE.lastIndex = 0;
   let m;
@@ -518,8 +513,23 @@ function countCodes(text) {
   return n;
 }
 
+/**
+ * 文本中是否至少有一个编码能在映射库中查到，即「真正可还原」。
+ * 仅凭编码外观判断上传意图会把测试样例〔姓名·abcdef〕之类误认成屏蔽产物，
+ * 导致整份明文文件被当成还原处理、原样写出。
+ */
+function hasRestorableCode(text, vault) {
+  if (!vault || typeof vault.lookup !== 'function') return false;
+  CODE_RE.lastIndex = 0;
+  let m;
+  while ((m = CODE_RE.exec(text)) !== null) {
+    if (vault.lookup(m[2])) return true;
+  }
+  return false;
+}
+
 module.exports = {
-  Vault, buildMasked, maskText, restoreText, hasCodes, countCodes,
+  Vault, buildMasked, maskText, restoreText, hasCodes, countCodes, hasRestorableCode,
   maskEdits, restoreEdits, applyEdits, cleanEdits,
   CODE_RE, CODE_LABEL, TYPE_LABEL, codeBracket,
 };
