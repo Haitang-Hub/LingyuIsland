@@ -2,7 +2,8 @@
 /**
  * 中文实体检测：只使用结构，不使用具体实体黑白名单。
  *
- * 1. 姓名只由身份字段、人称前缀、人口学属性、表格相邻块确认；
+ * 1. 姓名只由身份字段、人称前缀、人口学属性、表格相邻块、冒号字段行
+ *    嵌套职务名词（封闭角色表）确认；
  * 2. 人称候选至少复现三次，且左右上下文均不唯一，才可确认；
  * 3. 地址必须含道路、门牌、楼栋、村组等居住要素；
  * 4. 机构必须有机构后缀、至少 6 字且不超过 18 字，并含 省/市/县/区/镇/村
@@ -138,8 +139,22 @@ const CRIME_FOLLOW_RE = /^(?:贿赂|受贿|行贿|索贿|贪污|挪用|侵占|�
 // 审判员出庭/书记员记录/证人：到庭是动词短语，附：证人名单是名册短语，
 // 在记录/已到庭以句首功能字开头——它们与「角色词+姓名」结构同形，一律不确认。
 const PHRASE_HEAD_BAD_RE = /^[在已正将要该各均皆无每某]/;
-const PHRASE_VERB_BAD_RE = /(?:出庭|到庭|记录|回避|缺席|签名|告知|会见|述职|值庭|阅卷|参与|参加|陪同|陈述|答辩|举证|质证|宣读|讯问|发问|作证|签字|盖章|捺印|到场|到案|在逃|出示|出具|展示|提供|提交|调取|负责|担任|主管|分管|兼任|任职|调任|主持|主抓|名单|名册|花名|登记|签到)$/;
+const PHRASE_VERB_BAD_RE = /(?:出庭|入庭|开庭|休庭|闭庭|退庭|复庭|到庭|提审|宣判|传唤|起立|坐下|落座|肃静|安静|候审|带到|带入|记录|回避|缺席|签名|告知|会见|述职|值庭|阅卷|参与|参加|陪同|陈述|答辩|举证|质证|宣读|讯问|发问|作证|签字|盖章|捺印|到场|到案|在逃|出示|出具|展示|提供|提交|调取|负责|担任|主管|分管|兼任|任职|调任|主持|主抓|名单|名册|花名|登记|签到)$/;
 const PHRASE_TAIL_BAD_RE = /[册表簿单页栏]$/;
+
+// 嵌套角色词用封闭职务名词表精确匹配。纯词尾形态会把庭审叙述拆出伪姓名：
+// 「请公诉人及其他诉讼参与人入庭」→「入庭」、「核对被告人身份」→「身份」
+// （2026-11-20 开庭笔录审计两轮实证，毒哈希曾入缓存）。角色词是文书封闭
+// 词汇，与 ADDRESS_GUIDE_RE 同理按表识别；仅限本嵌套路径，主扫描词尾形态不变。
+const NEST_ROLES = new Set([
+  '审判长', '审判员', '人民陪审员', '陪审员', '书记员', '公诉人', '检察员', '检察官',
+  '原告', '原告人', '被告', '被告人', '原审原告', '原审原告人', '原审被告', '原审被告人',
+  '上诉人', '被上诉人', '申诉人', '被申诉人', '申请执行人', '被执行人',
+  '申请人', '被申请人', '复议申请人', '第三人', '诉讼代理人',
+  '法定代表人', '法定代理人', '代表人', '负责人', '代理人',
+  '委托代理人', '委托诉讼代理人', '辩护人', '被害人', '自诉人', '监护人',
+  '证人', '鉴定人', '翻译人', '附带民事诉讼原告人', '附带民事诉讼被告人',
+]);
 
 // 字段作用域止于句末标点/换行；段间以顿号、逗号、空白分隔
 //（「审判员李舟、人民陪审员王五」「审判员李舟 审判员王五」）。
@@ -155,16 +170,18 @@ function scanNestedPairs(text, from, confirmed) {
     while (i < end && NEST_SEG_BREAK.has(text[i])) i++;
     const segStart = i;
     while (i < end && !NEST_SEG_BREAK.has(text[i])) i++;
-    // 角色词=段内以尾字结束的前缀（≥2 字）；余段 2~3 字整段为姓名候选。
-    // 「王告石」类姓名在尾字后余段不足 2 字，不会被拆错。
+    // 角色词=段首起、精确命中职务名词表的紧凑名词；余段 2~3 字整段为姓名候选。
+    // 守卫失败即止（更靠前的尾字只会得到更长的余段），避免「带被告人入庭」
+    // 在「入庭」被拦后退而确认伪姓名「人入庭」。
     for (let j = i - 1; j >= segStart + 2; j--) {
-      if (!/[人员者师长告象]/.test(text[j - 1])) continue;
+      if (!NEST_ROLES.has(text.slice(segStart, j))) continue;
       const value = text.slice(j, i);
-      if (value.length < 2 || value.length > 3) continue;
-      if (!validName(value) || value === '姓名' || value === '名字') continue;
-      if (PHRASE_HEAD_BAD_RE.test(value)) continue;
-      if (value.length === 2 && PHRASE_VERB_BAD_RE.test(value)) continue;
-      if (value.length === 3 && PHRASE_TAIL_BAD_RE.test(value)) continue;
+      if (value.length < 2) continue;
+      if (value.length > 3) break;
+      if (!validName(value) || value === '姓名' || value === '名字') break;
+      if (PHRASE_HEAD_BAD_RE.test(value)) break;
+      if (value.length === 2 && PHRASE_VERB_BAD_RE.test(value)) break;
+      if (value.length === 3 && PHRASE_TAIL_BAD_RE.test(value)) break;
       confirmed.push({ start: j, end: i, value, raw: value });
       break;
     }

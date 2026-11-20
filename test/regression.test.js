@@ -303,12 +303,15 @@ test('knownNames：缓存读写幂等且损坏文件安全回退（Windows 路�
     // 损坏存储文件安全回退
     fs.writeFileSync(namesFile, '{broken', 'utf8');
     assert.strictEqual(loadKnownNameHashes(namesFile, caseDir).size, 0, '损坏缓存应回退为空集');
-    // v1/v2 均弃用；v3 非法条目被过滤。
+    // v1/v2/v3 均弃用；v4 非法条目被过滤。
     fs.writeFileSync(namesFile,
       JSON.stringify({ v: 2, dirs: { [caseDirKey(caseDir)]: { hashes: [hashName('李四')] } } }), 'utf8');
     assert.strictEqual(loadKnownNameHashes(namesFile, caseDir).size, 0, 'v2 缓存不得吸收');
     fs.writeFileSync(namesFile,
-      JSON.stringify({ v: 3, dirs: { [caseDirKey(caseDir)]: { hashes: ['bad', hashName('李四')] } } }), 'utf8');
+      JSON.stringify({ v: 3, dirs: { [caseDirKey(caseDir)]: { hashes: [hashName('李四')] } } }), 'utf8');
+    assert.strictEqual(loadKnownNameHashes(namesFile, caseDir).size, 0, 'v3 缓存不得吸收');
+    fs.writeFileSync(namesFile,
+      JSON.stringify({ v: 4, dirs: { [caseDirKey(caseDir)]: { hashes: ['bad', hashName('李四')] } } }), 'utf8');
     const set = loadKnownNameHashes(namesFile, caseDir);
     assert.strictEqual(set.size, 1);
     assert.ok(set.has(hashName('李四')));
@@ -318,7 +321,7 @@ test('knownNames：缓存读写幂等且损坏文件安全回退（Windows 路�
   }
 });
 
-test('knownNames：旧版案卷内 .mask-names.json 直接清除（毒哈希不吸收）+ 缓存 v3', () => {
+test('knownNames：旧版案卷内 .mask-names.json 直接清除（毒哈希不吸收）+ 缓存 v4', () => {
   const caseDir = tempDir('lingyu-regress-case-');
   const storeDir = tempDir('lingyu-regress-store-');
   try {
@@ -334,10 +337,10 @@ test('knownNames：旧版案卷内 .mask-names.json 直接清除（毒哈希不�
     // 旧文件被删除，案卷目录不留任何缓存
     assert.ok(!fs.existsSync(path.join(caseDir, '.mask-names.json')), '案卷目录内旧缓存应被删除');
     const store = JSON.parse(fs.readFileSync(namesFile, 'utf8'));
-    assert.strictEqual(store.v, 3, '存储格式应为 v3');
+    assert.strictEqual(store.v, 4, '存储格式应为 v4');
     const entry = store.dirs[caseDirKey(caseDir)];
     // v1 旧缓存出自旧版检测器（含「执行/文件」等毒哈希），不吸收
-    assert.ok(!entry.hashes.includes(legacyHash), 'v1 旧哈希不得进入 v3 缓存');
+    assert.ok(!entry.hashes.includes(legacyHash), 'v1 旧哈希不得进入 v4 缓存');
     // 本批确认姓名正常入库
     assert.ok(entry.hashes.includes(hashName('张三')), '本批确认姓名应入缓存');
   } finally {

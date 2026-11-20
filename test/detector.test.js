@@ -701,12 +701,40 @@ test('新增·字段行嵌套角色词：合议庭成员行姓名确认（审判
   assert.strictEqual(vals('附：证人名单。', 'name').length, 0, '名册短语不应确认');
   assert.strictEqual(vals('书记员：在记录，请稍候。', 'name').length, 0, '功能字开头不应确认');
   assert.strictEqual(vals('证人：到庭。', 'name').length, 0, '证人：到庭不应确认');
+  // 反例：庭审指令短语不得确认为姓名（开庭笔录毒哈希回归）
+  assert.strictEqual(vals('书记员：请公诉人及其他诉讼参与人入庭。', 'name').length, 0, '伪角色词带功能字');
+  assert.strictEqual(vals('审判长：开庭。', 'name').length, 0, '开庭是庭审指令');
+  assert.strictEqual(vals('书记员：请审判长开庭。', 'name').length, 0, '请字开头是指令句');
+  assert.strictEqual(vals('审判长：休庭。', 'name').length, 0, '休庭是庭审指令');
+  assert.strictEqual(vals('书记员：请旁听人员退庭。', 'name').length, 0, '退庭是庭审指令');
+  assert.strictEqual(vals('审判长：带被告人入庭。', 'name').length, 0, '守卫拦截后不得回退确认伪姓名');
+  assert.strictEqual(vals('合议庭成员：审判长开庭审理本案', 'name').length, 0, '余段过长不拆');
   // 反例：无冒号的紧凑连写维持不确认（检定员回归不放宽）
   assert.strictEqual(vals('检定员李四负责检测工作', 'name').length, 0);
   // 屏蔽往返
   const v = new Vault();
   const m = maskText('合议庭成员：审判员李舟', v);
   assert.ok(/李\*〔姓名·/.test(m.masked), m.masked);
+});
+
+test('新增·庭审指令短语不确认为姓名（开庭笔录毒哈希审计）', () => {
+  const negs = [
+    '书记员：请公诉人及其他诉讼参与人入庭。',
+    '审判长：开庭。传被告人到庭。',
+    '书记员：请审判长开庭。',
+    '审判长：休庭。',
+    '书记员：请旁听人员退庭。',
+    '审判长：带被告人入庭。',
+    '审判长：现在核对被告人身份。',
+    '审判长：宣布被告人身份。',
+    '合议庭成员：审判长开庭审理本案',
+  ];
+  for (const t of negs) {
+    assert.strictEqual(vals(t, 'name').length, 0, `${t} → 误遮姓名`);
+  }
+  // 正例成对：真实合议庭/诉讼地位行仍确认
+  assert.ok(hasValue('合议庭成员：书记员陈芳', 'name', '陈芳'));
+  assert.ok(hasValue('公诉人：被告人王五，男', 'name', '王五'));
 });
 
 test('审计·地址负例：行政区划 / 括号中的「号」不误判为地址', () => {

@@ -224,11 +224,11 @@ function caseDirKey(caseDir) {
 function readNamesStore(storeFile) {
   try {
     const data = JSON.parse(fs.readFileSync(storeFile, 'utf8'));
-    // v3 起才信任缓存：旧版检测器可能写入误判姓名的哈希，
-    // 结构规则重设计后一律弃用旧缓存并重新积累。
-    if (data && data.v === 3 && data.dirs && typeof data.dirs === 'object') return data;
+    // v4 起才信任缓存：旧版检测器/守卫缺口可能写入误判姓名的哈希（庭审指令
+    // 「开庭/入庭」曾被确认成姓名并经哈希传播毒化全篇），修复后一律弃用重新积累。
+    if (data && data.v === 4 && data.dirs && typeof data.dirs === 'object') return data;
   } catch { /* 缺失/损坏 → 全新 */ }
-  return { v: 3, dirs: {} };
+  return { v: 4, dirs: {} };
 }
 
 /**
