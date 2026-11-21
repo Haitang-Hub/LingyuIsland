@@ -180,7 +180,7 @@ function createUpdater({ appDir, currentVersion, onBroadcast, isPackaged = false
     } catch (err) {
       setState('idle');
       const message = String(err && err.message || err);
-      broadcast('update:error', { message });
+      // 只通过 IPC 返回值上报，界面统一 toast 一次
       return { ok: false, reason: message };
     }
   }

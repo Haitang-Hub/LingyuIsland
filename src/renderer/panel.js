@@ -1259,6 +1259,16 @@ setDetectExpanded((() => {
 let updateState = { state: 'idle', latest: null, depsChanged: false, hasUpdate: false };
 let updateCurrentVersion = '';
 
+// 同一次失败可能从异步事件与 IPC 返回值各来一次；5 秒内同文案只提示一条。
+let lastUpdateError = { message: '', at: 0 };
+function notifyUpdateError(message) {
+  const text = '更新失败：' + (message || '未知原因');
+  const now = Date.now();
+  if (lastUpdateError.message === text && now - lastUpdateError.at < 5000) return;
+  lastUpdateError = { message: text, at: now };
+  toast(text, 'err');
+}
+
 function renderUpdateUI() {
   const st = updateState;
   els.updateBox.hidden = !(st.hasUpdate || st.state === 'staged');
@@ -1323,7 +1333,7 @@ els.updateInstallBtn.addEventListener('click', async () => {
   if (!r.ok) {
     updateState.state = 'idle';
     renderUpdateUI();
-    toast('更新失败：' + (r.reason || '未知原因'), 'err');
+    notifyUpdateError(r.reason || '未知原因');
   }
 });
 
@@ -1358,7 +1368,7 @@ window.island.on('update:staged', (info) => {
 window.island.on('update:error', (info) => {
   updateState.state = 'idle';
   renderUpdateUI();
-  toast('更新失败：' + (info && info.message || '未知原因'), 'err');
+  notifyUpdateError(info && info.message);
 });
 
 /* ---------------- 事件同步 ---------------- */

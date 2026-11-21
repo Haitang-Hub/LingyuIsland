@@ -40,11 +40,10 @@ function createAutoUpdater({ currentVersion, onBroadcast, feedUrl } = {}) {
     setState('staged');
     broadcast('update:staged', { latest: info.version, depsChanged: false });
   });
-  autoUpdater.on('error', (err) => {
-    if (state === 'downloading') {
-      setState('idle');
-      broadcast('update:error', { message: String(err && err.message || err) });
-    }
+  autoUpdater.on('error', () => {
+    // 事件里的原始错误只负责复位状态；统一由 install() 的 catch 用友好文案上报一次，
+    // 否则同一次失败会在「事件 + catch + IPC 返回值」三处各弹一条 toast。
+    if (state === 'downloading') setState('idle');
   });
   autoUpdater.on('update-available', (info) => {
     // 事件侧兜底记录 latest（checkForUpdates 的 Promise 也会带）
@@ -115,7 +114,7 @@ function createAutoUpdater({ currentVersion, onBroadcast, feedUrl } = {}) {
     } catch (err) {
       setState('idle');
       const message = friendlyError(err);
-      broadcast('update:error', { message });
+      // 只通过 IPC 返回值上报，界面统一 toast 一次
       return { ok: false, reason: message, packaged: true };
     }
   }
