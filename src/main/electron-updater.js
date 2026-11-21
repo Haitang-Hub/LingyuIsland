@@ -20,6 +20,7 @@ function createAutoUpdater({ currentVersion, onBroadcast, feedUrl } = {}) {
   // state: idle → available → downloading → staged（与源码后端状态机一致）
   let state = 'idle';
   let lastCheck = null;
+  let lastProgressPct = 0;
 
   const broadcast = (ch, payload) => { try { onBroadcast && onBroadcast(ch, payload); } catch { /* ignore */ } };
   const setState = (s) => { state = s; };
@@ -32,9 +33,16 @@ function createAutoUpdater({ currentVersion, onBroadcast, feedUrl } = {}) {
   autoUpdater.autoDownload = false;        // 点「立即更新」才下载
   autoUpdater.autoInstallOnAppQuit = false; // 只走「重启完成安装」按钮
   autoUpdater.allowPrerelease = false;
+  // 关闭差量下载：它会先按 blockmap 拼出「新包」并播报到 100%，
+  // 一旦本地缓存的旧安装包或旧 blockmap 过期，sha512 校验失败后 electron-updater
+  // 会静默回退到全量下载，界面看起来就是「下载到 100% 又从头再来」。
+  // 安装版本身体积不大，直接全量下载更稳定，进度也真实反映当前下载。
+  autoUpdater.disableDifferentialDownload = true;
 
   autoUpdater.on('download-progress', (p) => {
-    broadcast('update:progress', { phase: 'download', pct: Math.round(p.percent || 0) });
+    const pct = Math.max(lastProgressPct, Math.round(p.percent || 0));
+    lastProgressPct = pct;
+    broadcast('update:progress', { phase: 'download', pct });
   });
   autoUpdater.on('update-downloaded', (info) => {
     setState('staged');
@@ -104,6 +112,7 @@ function createAutoUpdater({ currentVersion, onBroadcast, feedUrl } = {}) {
       return { ok: true, staged: state === 'staged', depsChanged: false, packaged: true };
     }
     setState('downloading');
+    lastProgressPct = 0;
     try {
       await autoUpdater.downloadUpdate(); // update-downloaded 事件负责置 staged 并广播
       if (state !== 'staged') { // 事件竞态兜底

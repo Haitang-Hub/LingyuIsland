@@ -1355,9 +1355,14 @@ window.island.on('update:found', announceUpdateFound);
 
 window.island.on('update:progress', (p) => {
   updateState.state = p.phase === 'extract' ? 'extract' : 'downloading';
-  els.updateStatusText.textContent = p.phase === 'extract'
-    ? '正在解压校验…'
-    : `正在下载新版本… ${p.pct != null ? p.pct + '%' : ''}`;
+  if (p.phase === 'extract') {
+    els.updateStatusText.textContent = '正在解压校验…';
+  } else if (p.pct >= 100) {
+    // 100% 只是字节下载完成，后面还有 sha512 校验与暂存，给出明确状态避免误以为在重下
+    els.updateStatusText.textContent = '下载完成，正在校验…';
+  } else {
+    els.updateStatusText.textContent = `正在下载新版本… ${p.pct != null ? p.pct + '%' : ''}`;
+  }
 });
 
 window.island.on('update:staged', (info) => {
