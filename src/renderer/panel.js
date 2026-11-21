@@ -302,7 +302,10 @@ function showMaskResult(done) {
   const pdfNoText = done.pdfNoText || 0;
   if (pdfNoText > 0) problems.push(`${pdfNoText} 份 PDF 无文本层且未配置 OCR 引擎`);
   const otherSkipped = (done.skipped || 0) - convertFailed - pdfNoText;
-  if (otherSkipped > 0) problems.push(`${otherSkipped} 份文件无法处理（格式不支持或过大）`);
+  if (otherSkipped > 0) {
+    const reason = String(done.firstSkipReason || '').trim();
+    problems.push(`${otherSkipped} 份文件无法处理（格式不支持或过大）${reason ? `：${reason}` : ''}`);
+  }
 
   // 错误（编码失效/已屏蔽）用红色 err；仅跳过类失败用橙色 warn
   const hasErr = done.restoreMissing > 0 || done.alreadyMasked > 0;

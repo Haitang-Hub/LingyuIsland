@@ -23,6 +23,7 @@ const {
   LEGACY_EXTS, isLegacyDoc, getConverted, converterHint,
 } = require('./docconvert');
 const pdfproc = require('./pdfproc');
+const pdfflow = require('./pdfflow');
 const pdfredact = require('./pdfredact');
 const imageredact = require('./imageredact');
 
@@ -579,7 +580,10 @@ async function readPdfText(filePath) {
     const stat = fs.statSync(filePath);
     if (stat.size > MAX_SIZE) return null;
     const ex = await pdfproc.extractPdf(fs.readFileSync(filePath));
-    return ex.hasText ? ex.text : null;
+    if (!ex.hasText) return null;
+    // 预扫文本与涂黑检测同源：段落流让跨行实体可被第一遍收集，
+    // 剥除文本层空格噪声，避免 knownEntities 传播表里只有被截断的残值
+    return pdfflow.flowTextFromPages(ex.pages);
   } catch { return null; }
 }
 

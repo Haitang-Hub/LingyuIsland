@@ -7,6 +7,7 @@
  *  - 面板窗口：胶囊下方展开的主面板（概览/查找/恢复/设置）
  *  - 面板始终为「点击面板外任意位置即收起」模式（blur → 隐藏）
  *  - 收起/展开的过渡动画由渲染端 CSS 完成，主进程只负责状态切换与命中区域
+ *  - 置顶看门狗：Windows 偶发把置顶窗踢出顶层带，心跳检查发现丢失立即补回
  */
 
 const { BrowserWindow, screen } = require('electron');
@@ -23,6 +24,13 @@ function isGone(win) {
 // 设计基准尺寸（实际窗口尺寸由 computeIslandLayout 按当前工作区动态计算）
 const PILL_W = BASE.pillW, PILL_H = BASE.pillH;
 const PANEL_W = BASE.panelW, PANEL_H = BASE.panelH;
+
+// 悬停纠偏看门狗轮询间隔（按状态分档，见 startPillHoverWatch 注释）：
+// 收起态唤回按 ~30ms 停留判定，轮询必须明显更密；展开态仅兜底丢 mouseleave；
+// 窗口不可见时 1Hz 心跳（启动加载期），可见性恢复自动换挡。
+const HOVER_POLL_COLLAPSED_MS = 30;
+const HOVER_POLL_EXPANDED_MS = 200;
+const HOVER_POLL_HIDDEN_MS = 1000;
 
 class Island {
   constructor() {
@@ -44,6 +52,9 @@ class Island {
     this._peekHold = false;
     // 最近一次 layout() 算出的胶囊缩放（DIP/CSS px），供命中区判定免重复布局计算
     this._pillScale = null;
+    // 悬停纠偏看门狗（自适应轮询）：当前定时器句柄与生效间隔
+    this._hoverWatch = null;
+    this._hoverMs = null;
     // 拖动换位结束后的持久化钩子（main.js 注入：写设置 + 广播）
     this.onPillOffsetChange = null;
     this.panelSize = { w: BASE.panelW, h: BASE.panelH }; // 面板 CSS 视口尺寸（宽高独立，可细长 / 宽扁）
@@ -135,6 +146,8 @@ class Island {
 
     // Windows 透明置顶窗偶发丢 mouseleave → 渲染端悬停态卡住，主进程轮询兜底
     this.startPillHoverWatch();
+    // 置顶看门狗：Windows 偶发踢掉置顶，发现丢失立即补回（见 ensureTopmost 注释）
+    this.startTopmostWatch();
   }
 
   /** 面板尺寸变化 → 立即重新布局（宽高独立：可细长 / 宽扁） */
@@ -188,6 +201,7 @@ class Island {
     this._pillScale = plan.pillScale;
     this._apply(this.pill, plan.pill, plan.pillScale);
     this._apply(this.panel, plan.panel, plan.panelScale);
+    this.ensureTopmost(); // 尺寸/位置调整会惊动 z 序，顺手补一次置顶
   }
 
   showPanel(tab) {
@@ -209,6 +223,7 @@ class Island {
     if (!reopening) this._sendPanelPhase('enter');
     if (!wasVisible) this._fadeIn();
     this._notifyPanel(true); // 面板打开期间胶囊暂停空闲收起计时
+    this.ensureTopmost();    // 激活面板会带动前后台切换，补一次置顶
   }
 
   /** 通知渲染层播放开合动画（面板内的缩放/位移由 CSS 负责，窗口透明度由主进程负责） */
@@ -300,6 +315,7 @@ class Island {
     this.layout();    // 窗口贴到屏幕顶边
     try { this.pill.setIgnoreMouseEvents(true, { forward: true }); } catch { /* ignore */ }
     this.pill.webContents.send('pill:state', 'collapsed');
+    this._restartHoverWatch(); // 换挡到收起态 30ms（唤回判定需要）
     // 收起瞬间光标若就停在命中区（自动收起/右键隐藏时光标未动）→ 抑制兜底展开，
     // 防止「光标停在原地 → 自动收起 → 立刻自动展开」的原地开合循环
     this._peekHold = this._cursorInPeekZone();
@@ -317,6 +333,7 @@ class Island {
     this.layout();
     if (!this.pill.isVisible()) this.pill.showInactive();
     this.pill.webContents.send('pill:state', 'expanded');
+    this._restartHoverWatch(); // 换挡到展开态 200ms（仅兜底丢 mouseleave）
     this._notify();
   }
 
@@ -343,9 +360,10 @@ class Island {
     }
   }
 
-  /* 悬停纠偏看门狗：Windows 上透明无边框窗口指针快速移出时 WM_MOUSELEAVE 偶发丢失，
+  /* 悬停纠偏看门狗（自适应轮询，模式切换在 tick 内自动换挡）：
+     Windows 上透明无边框窗口指针快速移出时 WM_MOUSELEAVE 偶发丢失，
      渲染端拿不到 mouseleave，:hover 悬停效果会一直挂着。
-     这里轮询光标位置，发现光标从胶囊窗口内→外就发 pill:hover-sync(false)，
+     轮询光标位置，发现光标从胶囊窗口内→外就发 pill:hover-sync(false)，
      由渲染端强制清除悬停态（仅在跳变瞬间发一次，不重复刷 IPC）。
 
      收起态兜底：setIgnoreMouseEvents(forward:true) 的鼠标转发对前台窗口敏感
@@ -353,43 +371,70 @@ class Island {
      转发一断渲染端收不到 mousemove，线段永远唤不回。因此收起时改为光标轮询
      （30ms 间隔）：光标进入命中区停留约 50ms 才展开，快速扫过不触发；收起瞬间
      指针就停在命中区（自动收起/右键隐藏）则先离开再回来才允许展开，避免原地开合
-     循环；右键隐藏后光标不离开线段区就绝不重新打开，与渲染端 hideGuard 同语义。 */
+     循环；右键隐藏后光标不离开线段区就绝不重新打开，与渲染端 hideGuard 同语义。
+
+     后台开销：这是灵动岛常驻期间唯一的密集定时器，按状态分档——
+     收起态 30ms（唤回判定需要）、展开态 200ms（仅兜底丢事件，正常悬停
+     由渲染端 DOM 事件覆盖）；胶囊窗口不可见（启动加载期）降为 1Hz 心跳，
+     只探测可见性恢复，恢复后自动换挡——不做完全停表，免得 show 路径
+     漏挂重启钩子导致看门狗永久停摆。 */
   startPillHoverWatch() {
-    if (this._hoverWatch) return;
     this._cursorInPill = false;
-    // 30ms 轮询：收起态兜底唤回按 50ms 停留判定，轮询间隔必须明显小于停留阈值
+    this._restartHoverWatch();
+  }
+
+  /** 当前应有的轮询间隔（不可见时 1Hz 心跳，仅探测恢复） */
+  _hoverPollMs() {
+    const w = this.pill;
+    try {
+      if (!w || w.isDestroyed() || !w.isVisible()) return HOVER_POLL_HIDDEN_MS;
+    } catch { return HOVER_POLL_HIDDEN_MS; }
+    return this.pillCollapsed ? HOVER_POLL_COLLAPSED_MS : HOVER_POLL_EXPANDED_MS;
+  }
+
+  /** 按当前状态换挡；间隔不变则什么都不做 */
+  _restartHoverWatch() {
+    const ms = this._hoverPollMs();
+    if (this._hoverWatch && this._hoverMs === ms) return;
+    if (this._hoverWatch) { clearInterval(this._hoverWatch); this._hoverWatch = null; }
+    this._hoverMs = ms;
     this._hoverWatch = setInterval(() => {
-      const w = this.pill;
-      if (!w || w.isDestroyed() || !w.isVisible()) return;
-      if (this.pillCollapsed) {
-        const inZone = this._cursorInPeekZone();
-        if (!inZone) {
-          this._peekEnterAt = 0;      // 离开命中区 → 停留计时清零，重新进入重新计时
-          this._peekHold = false;     // 指针离开命中区 → 「收起时指针就在区内」保护解除
-        } else if (this._peekHold) {
-          // 收起瞬间指针就停在区内（自动收起/右键隐藏时光标未动）：必须先离开
-          // 再回来才允许兜底展开，否则光标停在原地会形成「收起→展开→收起」循环
-        } else if (!this._cursorInPill) {
-          this._peekEnterAt = Date.now(); // 刚进入命中区，开始停留计时
-        } else if (this._peekEnterAt && Date.now() - this._peekEnterAt >= 28) {
-          this.expandPill();
-        }
-        this._cursorInPill = inZone;
-        return;
+      if (this._hoverPollMs() !== this._hoverMs) return this._restartHoverWatch(); // 状态切换：换挡
+      this._hoverTick();
+    }, ms);
+  }
+
+  _hoverTick() {
+    const w = this.pill;
+    if (!w || w.isDestroyed() || !w.isVisible()) return; // 下一 tick 由换挡检查接管
+    if (this.pillCollapsed) {
+      const inZone = this._cursorInPeekZone();
+      if (!inZone) {
+        this._peekEnterAt = 0;      // 离开命中区 → 停留计时清零，重新进入重新计时
+        this._peekHold = false;     // 指针离开命中区 → 「收起时指针就在区内」保护解除
+      } else if (this._peekHold) {
+        // 收起瞬间指针就停在区内（自动收起/右键隐藏时光标未动）：必须先离开
+        // 再回来才允许兜底展开，否则光标停在原地会形成「收起→展开→收起」循环
+      } else if (!this._cursorInPill) {
+        this._peekEnterAt = Date.now(); // 刚进入命中区，开始停留计时
+      } else if (this._peekEnterAt && Date.now() - this._peekEnterAt >= 28) {
+        this.expandPill();
       }
-      let c, b;
-      try {
-        c = screen.getCursorScreenPoint();
-        b = w.getContentBounds();
-      } catch { return; }
-      const inside = c.x >= b.x && c.x < b.x + b.width && c.y >= b.y && c.y < b.y + b.height;
-      if (inside !== this._cursorInPill) {
-        this._cursorInPill = inside;
-        if (!inside) {
-          try { w.webContents.send('pill:hover-sync', false); } catch { /* ignore */ }
-        }
+      this._cursorInPill = inZone;
+      return;
+    }
+    let c, b;
+    try {
+      c = screen.getCursorScreenPoint();
+      b = w.getContentBounds();
+    } catch { return; }
+    const inside = c.x >= b.x && c.x < b.x + b.width && c.y >= b.y && c.y < b.y + b.height;
+    if (inside !== this._cursorInPill) {
+      this._cursorInPill = inside;
+      if (!inside) {
+        try { w.webContents.send('pill:hover-sync', false); } catch { /* ignore */ }
       }
-    }, 30);
+    }
   }
 
   /** 光标是否处于收起态线段命中区（与渲染端 peek 区一致：窗口中心 ±60、y≤6 CSS px，
@@ -404,6 +449,42 @@ class Island {
       return Math.abs(c.x - (b.x + b.width / 2)) <= 60 * s
         && c.y >= b.y && c.y <= b.y + 6 * s;
     } catch { return false; }
+  }
+
+  /* ---------------- 置顶看门狗 ----------------
+   * Win11（24H2/25H2 实测）会冲乱置顶窗的 z 序，有两种坏法：
+   *   1. 样式位被踢：WS_EX_TOPMOST 丢失 → isAlwaysOnTop() 为 false，可检测，
+   *      setAlwaysOnTop 补回即可（原生对话框关闭、前后台切换等时机高发）；
+   *   2. 样式位还在、z 序却被压到后激活的窗口（哪怕是普通窗）之下——胶囊
+   *      focusable:false 无法靠被激活爬回来，且 isAlwaysOnTop() 对此是盲的。
+   *   隔离实验验证：moveTop() 能把被压的置顶窗抬回带顶，不改样式位、不抢
+   *   焦点，效果稳定；「先摘再戴 setAlwaysOnTop(false→true)」反而引起带内
+   *   扰动。应用自身只在 create() 设置过一次置顶，不存在「故意关掉」的路径，
+   *   所以无脑补抬总是正确的。
+   * 心跳 600ms：实测沉底在窗口激活后 ~1s 内发生，600ms 保证最坏被压半秒级；
+   * moveTop 每窗每次一条原生 SetWindowPos，两窗合计 ~3 次/秒，远低于既有
+   * 30ms 悬停轮询，开销可忽略。 */
+
+  /** 补回置顶：样式位丢了 → setAlwaysOnTop 重设（顺带抬回带顶）；
+   *  样式位在 → moveTop 把 z 序抬回带顶（不动样式、不抢焦点） */
+  ensureTopmost() {
+    for (const w of [this.pill, this.panel]) {
+      if (!w || isGone(w) || typeof w.isAlwaysOnTop !== 'function') continue;
+      try {
+        if (!w.isVisible()) continue;
+        if (!w.isAlwaysOnTop()) {
+          w.setAlwaysOnTop(true, 'screen-saver');
+        } else if (typeof w.moveTop === 'function') {
+          w.moveTop();
+        }
+      } catch { /* ignore */ }
+    }
+  }
+
+  /** 心跳兜底：覆盖无明确时机的偶发沉底（前后台切换 / DPI 事件 / 全屏进出等） */
+  startTopmostWatch() {
+    if (this._topmostWatch) return;
+    this._topmostWatch = setInterval(() => this.ensureTopmost(), 600);
   }
 
   /* ---------------- 灵动岛拖动换位 ----------------

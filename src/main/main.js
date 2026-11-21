@@ -153,5 +153,8 @@ app.on('before-quit', () => {
   try {
     if (store) store.persistVault();
     if (indexer) indexer._closeWatch();
+    // 遮盖工作进程与常驻 OCR 引擎随退出释放
+    require('./redactpool').getRedactPool().dispose();
+    require('../core/pdfredact').disposeOcrEngine();
   } catch { /* ignore */ }
 });

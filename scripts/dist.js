@@ -5,7 +5,7 @@
  * 灵屿岛打包入口。
  *
  * 约定：所有构建产物按版本放进 release/v<version>/，release 根目录不再散落
- * exe / zip / latest.yml / win-unpacked。每次打包前自动清理历史产物，只留当前版本。
+ * exe / blockmap / latest.yml / win-unpacked。每次打包前自动清理历史产物，只留当前版本。
  * 复用本地 Electron 并走国内镜像，避免 electron-builder 去 GitHub 下载超时。
  *
  * 用法：
@@ -94,7 +94,6 @@ function build() {
 
 function verify() {
   const expected = [
-    `LingyuIsland-${version}-win.zip`,
     `LingyuIsland-Setup-${version}.exe`,
     `LingyuIsland-Setup-${version}.exe.blockmap`,
     'latest.yml',

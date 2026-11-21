@@ -117,7 +117,7 @@ function register(ctx) {
       return { ok: true, file, name: path.basename(src) };
     } catch (err) {
       return { ok: false, reason: String(err && err.message || err) };
-    } finally { island.dialogOpen = false; }
+    } finally { island.dialogOpen = false; island.ensureTopmost(); }
   });
 
   // 清除背景：切回「无」并删除背景文件
@@ -141,7 +141,7 @@ function register(ctx) {
       indexer.setRoot(r.filePaths[0]);
       island.broadcast('settings:changed', store.settings);
       return r.filePaths[0];
-    } finally { island.dialogOpen = false; }
+    } finally { island.dialogOpen = false; island.ensureTopmost(); }
   });
 
   ipc_handle('dialog:pick-files', async (e) => {
@@ -153,7 +153,7 @@ function register(ctx) {
       });
       if (r.canceled) return [];
       return importer.importAndMask(r.filePaths, ctx, e.sender);
-    } finally { island.dialogOpen = false; }
+    } finally { island.dialogOpen = false; island.ensureTopmost(); }
   });
 
   /* ---------------- 屏蔽 / 恢复 ---------------- */

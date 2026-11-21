@@ -242,3 +242,28 @@ test('姓名·律师表述：连续谓语后取宾语，所有格结构取姓名
     assert.strictEqual(vals(text, 'name').length, 0, `${text} → ${JSON.stringify(vals(text, 'name'))}`);
   }
 });
+
+test('姓名·委托所有格：代理词/委托书高频句式（申请人X的委托）', () => {
+  for (const [text, name] of [
+    ['本案申请人（劳动者）杨素侠的委托，担任其与某公司劳动争议一案的仲裁代理人', '杨素侠'],
+    ['律师接受杨素侠的委托', '杨素侠'],
+    ['受王东的委托出具法律意见书', '王东'],
+    ['杨素侠的委托诉讼代理人', '杨素侠'],
+  ]) {
+    assert.ok(vals(text, 'name').includes(name), `${text} → ${JSON.stringify(vals(text, 'name'))}`);
+  }
+  // 委托主体是非人名词时不得确认
+  for (const text of ['接受公司的委托后立即开展工作。', '受单位的委托出庭。', '该公司的委托代理人。']) {
+    assert.strictEqual(vals(text, 'name').length, 0, `${text} → ${JSON.stringify(vals(text, 'name'))}`);
+  }
+  // 「X与被Y」并列结构：连词尾候选不得借 passiveClosed 闭合
+  assert.strictEqual(vals('申请人杨素侠与被申请人阜南华文针织服饰有限公司', 'name').join(','), '',
+    '杨素侠与 不应被确认为姓名');
+  // 否定副词开头（被申请人未足额支付…）不得经两遍式候选误确认
+  const corpus = [
+    '根据申请人提交的证据银行流水及劳动合同，银行流水显示，被申请人自2025年9月起，未足额、按时向申请人发放工资，至今累计拖欠5852元。',
+    '综上所述，被申请人未足额支付加班工资的行为已违反法律强制性规定。',
+  ];
+  assert.strictEqual(collectEntities(corpus, { toggles: {} }).name.has('未足额'), false,
+    '未足额 不应进入案卷实体表');
+});

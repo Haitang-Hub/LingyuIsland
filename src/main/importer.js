@@ -16,9 +16,9 @@ const {
   collectPaths, maskFile, restoreFile,
   maskedPathOf, restoredPathOf, outputNameOf, detectFileIntent, readFileText,
   LEGACY_EXTS, PDF_EXTS, IMAGE_EXTS, isPdf, isImage, detectPdfIntent, detectImageIntent,
-  redactPdfFile, redactImageFile, readPdfText,
-  skipReasonForError,
+  readPdfText, skipReasonForError,
 } = require('../core/fileproc');
+const { getRedactPool } = require('./redactpool');
 const { preconvert } = require('../core/docconvert');
 const { collectEntities, createEntities } = require('../core/entities');
 const { isInsideRoot, resolveConflictName } = require('../core/imports');
@@ -107,6 +107,7 @@ async function importAndMask(inputPaths, ctx, sender) {
     let r;
     let pdf = false;
     let image = false;
+    let nameAction = ''; // 同名策略的实际动作（overwrite/keep）：成功块在 try 外也要用
     try {
       pdf = isPdf(src);
       image = isImage(src);
@@ -115,6 +116,7 @@ async function importAndMask(inputPaths, ctx, sender) {
       const resolved = resolveOutputPath(rootNorm, src, intent, conflictPolicy);
       let { out } = resolved;
       const { base, action } = resolved;
+      nameAction = action;
 
       // 不跳过任何文件：若结果路径恰好与源文件重合，改用一个不冲突的序号名继续处理，
       // 保证「原位置文件永不改动」的同时，每次拖入都会真正重新处理。
@@ -127,17 +129,20 @@ async function importAndMask(inputPaths, ctx, sender) {
         out = path.join(dir, alt.name);
       }
 
-      if (action === 'overwrite') overwritten++;
       if (pdf || image) {
         const cfg = store.settings.pdfRedact || {};
         const redactOpts = {
           knownEntities,
           ocrEngineDir: cfg.ocrEngineDir,
         };
-        r = pdf
-          ? await redactPdfFile(src, store.vault, store.settings.toggles, out,
-            { ...redactOpts, pdfDpi: cfg.dpi })
-          : await redactImageFile(src, store.vault, store.settings.toggles, out, redactOpts);
+        // 交给独立工作进程：渲染 / 编码不再阻塞主进程（界面保持可交互）
+        r = await getRedactPool().run({
+          kind: pdf ? 'pdf' : 'image',
+          filePath: src,
+          toggles: store.settings.toggles,
+          outPath: out,
+          opts: pdf ? { ...redactOpts, dpi: cfg.dpi } : redactOpts,
+        });
       } else if (intent === 'restore') {
         r = restoreFile(src, store.vault, out);
       } else {
@@ -163,6 +168,9 @@ async function importAndMask(inputPaths, ctx, sender) {
     }
 
     if (r.ok && r.count > 0) {
+      // 「已覆盖」只统计真实写盘成功：同名策略选了覆盖但处理失败/未产出的文件，
+      // 不能进绿色提示（否则会出现「已完成：覆盖 1 份」+「未完成」的自相矛盾轮播）
+      if (nameAction === 'overwrite') overwritten++;
       totalPII += r.count;
       // PDF / 图片遮盖不写 vault、不产生可还原编码，因此无需持久化映射库
       if (!pdf && !image) vaultDirty = true;
@@ -196,6 +204,14 @@ async function importAndMask(inputPaths, ctx, sender) {
     irreversible: results.filter((r) => r.ok && r.irreversible && r.count > 0).length,
     noPii: results.filter((r) => r.ok && r.skipped === 'no-pii').length,
     skipped: results.filter((r) => r.skipped && !['no-pii', 'already-masked'].includes(r.skipped)).length,
+    // 首条失败原因透传给胶囊/面板：skip 类的兜底文案（「不支持或过大」）
+    // 会吞掉真实错误，没有原因线索就无法定位问题
+    firstSkipReason: (() => {
+      const hit = results.find((r) => r.skipped && r.reason
+        && !['no-pii', 'already-masked'].includes(r.skipped));
+      const reason = hit && hit.reason ? String(hit.reason) : '';
+      return reason.length > 160 ? reason.slice(0, 160) + '…' : reason;
+    })(),
     pdfNoText: results.filter((r) => r.skipped === 'pdf-no-text').length,
     locked: results.filter((r) => r.skipped === 'locked').length,
     convertFailed: results.filter((r) => r.skipped === 'legacy-convert').length,

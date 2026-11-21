@@ -364,6 +364,12 @@ function roleCandidates(text) {
         if (!validName(value) || value === '姓名' || value === '名字') continue;
         if (isNonPersonNoun(value)) continue; // 经理/证言/意见/婴儿等泛称不是姓名
         if (isFieldPhrase(value)) continue; // 日出生/出生日期/身份证号等字段词
+        // 姓名不以连词收尾：「杨素侠与被申请人」的 4 字候选会借 passiveClosed
+        // 闭合（下一字恰是「被」），「X与被Y」是并列结构信号，姓名止于连字之前。
+        if (/[与和及或同跟]$/.test(value)) continue;
+        // 否定副词/诉讼负面词开头不是姓名：「被申请人未足额支付」曾借 personMarked
+        // 进入两遍式候选，再因子串复现凑齐统计被误确认成姓名「未足额」。
+        if (NEGATIVE_HEAD_RE.test(value)) continue;
         // 「姓名：审判员李长顺」：字段值以嵌套角色词开头时，角色词本身及其
         // 片段都不是姓名（否则会把「审判」遮掉）；整段交给 scanNestedPairs
         // 按「角色词 + 姓名」精确剥出「李长顺」。
@@ -390,9 +396,10 @@ function roleCandidates(text) {
         const narrationClosed = CRIME_FOLLOW_RE.test(text.slice(end));
         // 「姓名 + 的 + 身份/亲属名词」是文书里的所有格结构
         // （「本律师担任张三的辩护人」）：「的」紧贴姓名即为右边界。
+        // 「杨素侠的委托」同样是强结构（委托人是当事人），代理词高频句式；
         // 后接必须是身份/亲属/权属类名词，「原告肖像的照片」这类普通名词组合不算。
         const possessiveClosed = len <= 3 && after === '的'
-          && /^的(?:辩护人|代理人|诉讼代理人|委托代理人|律师|家属|亲属|监护人|法定代表人|代表人|近亲属|意见|陈述|供述|辩解|行为|身份|账户|卡|卡号|账号|银行卡|存折|工资卡|社保卡|手机号|身份证|财产|住所|联系方式|授权|[\u4e00-\u9fa5]{0,6}(?:卡号|银行卡|工资卡|社保卡|存折|账号))/.test(text.slice(end));
+          && /^的(?:辩护人|代理人|诉讼代理人|委托代理人|律师|家属|亲属|监护人|法定代表人|代表人|近亲属|意见|陈述|供述|辩解|行为|身份|账户|卡|卡号|账号|银行卡|存折|工资卡|社保卡|手机号|身份证|财产|住所|联系方式|授权|委托|[\u4e00-\u9fa5]{0,6}(?:卡号|银行卡|工资卡|社保卡|存折|账号))/.test(text.slice(end));
         // 「姓名 + 逗号 + 叙述动词」（「本律师会见裴钱，了解案件情况」）。
         const commaClosed = len <= 3
           && /^[，,]\s*(?:了解|询问|核实|听取|查阅|复制|会见|提出|要求|表示|陈述|辩称|供述|承认|否认|交代)/.test(text.slice(end));
@@ -506,14 +513,22 @@ function suspicionNames(text) {
 // 「本律师担任张三的辩护人」里角色词正则会从「本律师」一路贪心到句尾的
 // 「辩护人」，姓名不在前缀之后，主扫描取不到。这条锚点直接按
 // 「（谓词）+ 姓名 + 的 + 身份名词」定位，结构封闭、不查姓氏表。
-const POSSESSIVE_ANCHOR_RE = /(?:^|[\s，,。；;、：:（）()【】\[\]“”"'‘’]|担任|指派|委托|聘请|接受|系)([\u4e00-\u9fa5]{2,4})的((?:辩护人|诉讼代理人|委托代理人|代理人|律师|家属|亲属|监护人|法定代表人|代表人|近亲属))/g;
+// 「杨素侠的委托」同构（委托人是当事人），代理词/委托书高频句式。
+const POSSESSIVE_ANCHOR_RE = /(?:^|[\s，,。；;、：:（）()【】\[\]“”"'‘’]|担任|指派|委托|聘请|接受|系)([\u4e00-\u9fa5]{2,4})的((?:辩护人|诉讼代理人|委托代理人|代理人|律师|家属|亲属|监护人|法定代表人|代表人|近亲属|委托))/g;
 
 function possessiveNames(text) {
   const out = [];
   POSSESSIVE_ANCHOR_RE.lastIndex = 0;
   let m;
   while ((m = POSSESSIVE_ANCHOR_RE.exec(text)) !== null) {
-    const value = m[1];
+    let value = m[1];
+    // 介词/动词首字会混进捕获（「受王东的委托」贪心成「受王东」——X 与 的 同为
+    // 汉字，{2,4} 贪婪把受字吃进去），剥离后才是真姓名位。
+    const stripped = value.replace(/^[受给让被把将向从为和与及或在由对当以了]+/, '');
+    if (stripped && stripped !== value) {
+      value = stripped;
+    }
+    if (value.length < 2) continue;
     if (!validName(value) || isNonPersonNoun(value) || isFieldPhrase(value)) continue;
     if (ANAPHOR_HEAD_RE.test(value) || NEGATIVE_HEAD_RE.test(value)) continue;
     const start = m.index + m[0].length - m[2].length - 1 - value.length;

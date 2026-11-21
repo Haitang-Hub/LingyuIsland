@@ -66,6 +66,40 @@ test('批量摘要：编码无法识别红字带原因，无 title 明细', () =
   assertWithinBudget(s);
 });
 
+test('批量摘要：otherSkipped 附首条原因，按宽度分块跨行轮播', () => {
+  const s = buildBatchSummary({
+    total: 1, overwritten: 1, skipped: 1,
+    firstSkipReason: 'No "GlobalWorkerOptions.workerSrc" specified.',
+  });
+  assert.ok(s.lines.some((l) =>
+    l.text === '未完成：1 份不支持或过大' && l.tone === TONE.ERR), JSON.stringify(s.lines));
+  const reasonLines = s.lines.filter((l) => l.tone === TONE.ERR
+    && !l.text.startsWith('未完成：'));
+  assert.ok(reasonLines.length >= 2, `长原因应分块多行：${JSON.stringify(s.lines)}`);
+  assert.ok(reasonLines[0].text.startsWith('原因：No "Global'), '首块带「原因：」前缀');
+  assertEndsWithDone(s);
+  assertWithinBudget(s);
+});
+
+test('批量摘要：处理失败时 overwritten 不进绿色行（先覆盖后未完成的矛盾修复）', () => {
+  // 同名策略选了覆盖但处理失败：overwritten 不计数（importer 只在真实写盘成功时计），
+  // 轮播只有红色未完成，不再出现自相矛盾的「已完成：覆盖 1 份」
+  const s = buildBatchSummary({ total: 1, skipped: 1 });
+  assert.ok(!s.lines.some((l) => l.text.includes('覆盖')), JSON.stringify(s.lines));
+  assert.strictEqual(s.hasSuccess, false);
+  assertEndsWithDone(s);
+  assertWithinBudget(s);
+});
+
+test('批量摘要：无 firstSkipReason 时原因行不出现', () => {
+  const s = buildBatchSummary({ total: 1, skipped: 1 });
+  assert.ok(!s.lines.some((l) => l.text.startsWith('原因：')));
+  assert.ok(s.lines.some((l) =>
+    l.text === '未完成：1 份不支持或过大' && l.tone === TONE.ERR));
+  assertEndsWithDone(s);
+  assertWithinBudget(s);
+});
+
 test('批量摘要：其他提示为绿色；空结果也以处理完成收尾', () => {
   const s = buildBatchSummary({ total: 1, noPii: 1 });
   assert.strictEqual(s.lines[0].text, '未检出敏感信息 1 份');

@@ -51,7 +51,7 @@ npm run dist            # 打包当前版本，产物统一放进 release/v<vers
 npm run clean:release   # 只整理 release：删除历史产物，保留当前版本目录
 ```
 
-- `scripts/dist.js` 按 `package.json` 的版本号生成 `release/v<version>/`，复用本地 Electron 并走国内镜像；安装包、zip、blockmap、`latest.yml`、`win-unpacked` 全部留在该目录内，**`release` 根目录不再散落文件**。
+- `scripts/dist.js` 按 `package.json` 的版本号生成 `release/v<version>/`，复用本地 Electron 并走国内镜像；安装包、blockmap、`latest.yml`、`win-unpacked` 全部留在该目录内，**`release` 根目录不再散落文件**。
 - 每次打包前会清理历史产物，只保留当前版本；被进程占用而删不掉的文件会跳过并打印路径，重启后执行 `npm run clean:release` 即可清掉。
 - 不要直接运行 `npx electron-builder --win`，否则会按 `build.directories.output` 把产物倒进 `release` 根目录。
 

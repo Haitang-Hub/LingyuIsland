@@ -8,6 +8,7 @@
  *  - test/two-pass.test.js   案卷级实体确认、传播与文件往返
  *  - test/masker.test.js     屏蔽引擎（编码格式 / 保留位 / 还原 / Office XML 映射）
  *  - test/fileproc.test.js   文件管道（编码识别 / txt-docx / 老式 .doc / PDF）
+ *  - test/pdfflow.test.js    PDF 文本流规范化（段落拼接 / 空格剥除 / 字符级框）
  *  - test/image.test.js      图片 OCR 不可逆遮盖
  *  - test/app-units.test.js  应用单元（导入 / 索引 / 设置 / 剪贴板 / 灵动岛 / 布局 / 更新）
  *  - test/batch-summary.test.js 批量结果摘要（仅胶囊轮播文案）
@@ -27,6 +28,7 @@ require('./two-pass.test.js');
 require('./masker.test.js');
 const registerPdfTests = require('./fileproc.test.js');
 const registerImageTests = require('./image.test.js');
+require('./pdfflow.test.js');
 require('./app-units.test.js');
 require('./batch-summary.test.js');
 require('./regression.test.js');

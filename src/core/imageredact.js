@@ -15,6 +15,8 @@ const {
   redactedPathOf, resolveEngineDir, runOcr, REDACTED_SUFFIX_RE,
 } = require('./pdfredact');
 const { detect } = require('./detector');
+const { collectEntities, mergeEntities } = require('./entities');
+const pdfflow = require('./pdfflow');
 
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'tif', 'tiff']);
 
@@ -22,32 +24,38 @@ function isImage(filePath) {
   return IMAGE_EXTS.has(path.extname(String(filePath)).slice(1).toLowerCase());
 }
 
-/** OCR 文本 + 每字符对应的像素框（与 pdfredact.ocrTextWithBoxes 一致） */
+/** OCR 文本 → 检测流（pdfflow）：块内剥空格、字符框块内等宽内插 */
 function ocrTextWithBoxes(blocks) {
-  let text = '';
-  const chars = [];
-  for (const b of blocks) {
-    for (const ch of b.text) { text += ch; chars.push({ ch, box: b.box }); }
-    text += '\n';
-    chars.push({ ch: '\n', box: null });
-  }
-  return { text, chars };
+  return pdfflow.buildFlowFromBlocks(blocks);
 }
 
-/** 命中区间 → 像素框并集 */
+/** 命中区间 → 像素区域：pdfflow 统一实现，跨块命中按行拆分（并集会横盖整行） */
 function boxesFromHits(hits, chars) {
-  const boxes = [];
-  for (const hit of hits) {
-    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
-    for (let i = Math.max(0, hit.start); i < Math.min(hit.end, chars.length); i++) {
-      const b = chars[i].box;
-      if (!b) continue;
-      x1 = Math.min(x1, b.x1); y1 = Math.min(y1, b.y1);
-      x2 = Math.max(x2, b.x2); y2 = Math.max(y2, b.y2);
-    }
-    if (Number.isFinite(x1) && x2 > x1 && y2 > y1) boxes.push({ x1, y1, x2, y2 });
+  return pdfflow.boxesFromHits(hits, chars);
+}
+
+/**
+ * 命中区域绘制：矩形组走 mergeBoxes 合并后填充；quad 组（倾斜 OCR 文字）按
+ * 扫掠四边形外扩 padding 后以多边形填充——轴对齐矩形会在倾斜行的低端吃进相邻行。
+ */
+function drawRedactBoxes(ctx, groups, padding) {
+  const rects = [];
+  const quads = [];
+  for (const g of groups || []) {
+    if (Array.isArray(g.quad)) quads.push(g.quad);
+    else rects.push(g);
   }
-  return boxes;
+  ctx.fillStyle = '#000000';
+  for (const b of mergeBoxes(rects, padding)) {
+    ctx.fillRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+  }
+  for (const q of quads) {
+    const poly = pdfflow.expandQuad(q, padding);
+    ctx.beginPath();
+    poly.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+    ctx.closePath();
+    ctx.fill();
+  }
 }
 
 /** padding 扩展并合并重叠框 */
@@ -199,9 +207,15 @@ async function redactImageFile(filePath, toggles, outPath, opts = {}) {
     let boxes = [];
     if (blocks.length) {
       const info = ocrTextWithBoxes(blocks);
+      // 两遍式自收集：图片没有文本层，导入预扫读不出内容（knownEntities 为空），
+      // 紧连式身份候选（「申请人杨素侠」这类锚点候选）需要案卷级复现统计才确认。
+      // 用本图 OCR 文本自收集实体表，与批处理传入的实体表合并后再检测——
+      // 与 DOCX 通道「先收集再屏蔽」的语义对齐。
+      const self = collectEntities(info.text.split('\n'), { toggles });
+      const known = mergeEntities(opts.knownEntities, self);
       const res = detect(info.text, {
         toggles,
-        knownEntities: opts.knownEntities,
+        knownEntities: known,
         knownNameHashes: opts.knownNameHashes,
       });
       boxes = boxesFromHits(res.items, info.chars);
@@ -215,10 +229,7 @@ async function redactImageFile(filePath, toggles, outPath, opts = {}) {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(img, 0, 0);
     const padding = Math.max(1, Number(opts.padding) || 3);
-    for (const b of mergeBoxes(boxes, padding)) {
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
-    }
+    drawRedactBoxes(ctx, boxes, padding);
 
     const enc = outputEncoding(filePath);
     let outBytes;

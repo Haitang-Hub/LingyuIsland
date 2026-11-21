@@ -413,6 +413,47 @@ async function pdfSuite() {
       assert.ok(sm.count > 0, '应检出敏感信息');
       assert.ok(fs.existsSync(sm.redactedPath), '应生成遮盖产物');
     });
+
+    // 引擎常驻复用：此前每次识别都 spawn 一次，扫描件逐页冷启动（0.5~1.7s/页）
+    const before = pdfredact.ocrEngineStats().spawnCount;
+    const png = canvas.toBuffer('image/png');
+    for (let i = 0; i < 4; i++) await pdfredact.runOcr(png, { ocrEngineDir: engineDir });
+    const after = pdfredact.ocrEngineStats().spawnCount;
+    test('OCR·引擎进程有界复用，不逐张冷启动', () => {
+      // 首张冷启动 + 最多一次有界回收；不能退化成「每张图都 spawn 一次」
+      assert.ok(after - before <= 2, `4 次识别最多启动 2 次引擎，实际 ${after - before}`);
+    });
+  }
+
+  // 性能守卫：干净页不渲染、不重编码，只有命中页变成图片（此前整篇 10 页重渲染需 6s+）
+  const mixedDoc = await PDFDocument.create();
+  mixedDoc.registerFontkit(fontkit);
+  const mfont = await mixedDoc.embedFont(fs.readFileSync(fp), { subset: true });
+  mixedDoc.addPage([595, 842])
+    .drawText('第一页只有普通正文，没有任何敏感信息。', { x: 50, y: 760, size: 14, font: mfont });
+  mixedDoc.addPage([595, 842])
+    .drawText('姓名：李四  手机：13812345678', { x: 50, y: 760, size: 14, font: mfont });
+  mixedDoc.addPage([595, 842])
+    .drawText('第三页同样只有普通正文。', { x: 50, y: 760, size: 14, font: mfont });
+  const mixedPath = path.join(dir, 'pdf-mixed.pdf');
+  fs.writeFileSync(mixedPath, await mixedDoc.save());
+  const mm = await redactPdfFile(mixedPath, new Vault(), {}, null, { dpi: 120 });
+  if (mm.ok && mm.redactedPath) {
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const rd = await pdfjs.getDocument({ data: new Uint8Array(fs.readFileSync(mm.redactedPath)) }).promise;
+    const pageText = async (n) => (await (await rd.getPage(n)).getTextContent())
+      .items.map((i) => i.str).join('');
+    const t1 = await pageText(1);
+    const t2 = await pageText(2);
+    const t3 = await pageText(3);
+    test('PDF·只栅格化命中页，干净页保留原页与文本层', () => {
+      assert.strictEqual(mm.ok, true, JSON.stringify(mm));
+      assert.strictEqual(rd.numPages, 3, '页数应保持不变');
+      assert.ok(t1.includes('第一页'), '干净页应保留可复制文本');
+      assert.strictEqual(t2.trim(), '', '命中页应为纯图像、无文本层');
+      assert.ok(t3.includes('第三页'), '尾页应保留可复制文本');
+    });
+    await rd.destroy();
   }
 }
 

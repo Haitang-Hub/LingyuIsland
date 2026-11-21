@@ -15,7 +15,10 @@
 
 const fs = require('fs');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const fontkit = require('@pdf-lib/fontkit');
+const pdfflow = require('./pdfflow');
+const { NapiCanvasFactory } = pdfflow;
 
 let _pdfjsPromise = null;
 function loadPdfjs() {
@@ -28,7 +31,21 @@ function loadPdfjs() {
         return { promise, resolve, reject };
       };
     }
-    _pdfjsPromise = import('pdfjs-dist/legacy/build/pdf.mjs');
+    _pdfjsPromise = import('pdfjs-dist/legacy/build/pdf.mjs').then((pdfjs) => {
+      // Electron utility 进程（遮盖任务池）里 pdfjs 不再命中 Node 兜底路径：
+      //  1) 不指定 worker 会在 getDocument 时抛
+      //     「No "GlobalWorkerOptions.workerSrc" specified」；
+      //  2) 渲染所需的 DOMMatrix/ImageData/Path2D 全局不会被 pdfjs 自补；
+      //  3) 默认 DOM 画布/过滤器工厂需要 document。
+      // 三处都在这里补齐（isNodeJS 检查显式排除了 Electron 非 browser 进程），
+      // 主进程 / 纯 node 下这些步骤幂等无副作用。
+      pdfflow.ensurePdfjsCanvasGlobals();
+      try {
+        const workerPath = require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs');
+        pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).href;
+      } catch { /* worker 文件缺失时维持原状（主进程/Node 有兜底路径） */ }
+      return pdfjs;
+    });
   }
   return _pdfjsPromise;
 }
@@ -65,7 +82,15 @@ function findFontPath() {
  */
 async function extractPdf(data) {
   const pdfjs = await loadPdfjs();
-  const task = pdfjs.getDocument({ data: new Uint8Array(data), useSystemFonts: true, isEvalSupported: false });
+  const task = pdfjs.getDocument({
+    data: new Uint8Array(data),
+    useSystemFonts: true,
+    isEvalSupported: false,
+    // 与 pdfredact 同理：utility 进程里 pdfjs 的默认 DOM 工厂无 DOM 可用
+    CanvasFactory: pdfflow.NapiCanvasFactory,
+    FilterFactory: pdfflow.NapiFilterFactory,
+    disableFontFace: true, // 与 pdfredact 同理：FontFace 路线在 @napi-rs/canvas 上画不出字形
+  });
   const pdf = await task.promise;
   const pages = [];
   const allText = [];

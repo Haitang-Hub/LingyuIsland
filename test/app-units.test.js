@@ -492,6 +492,94 @@ test('灵动岛：悬停线段展开回胶囊', () => {
   assert.strictEqual(island._lastSent, null);
 });
 
+/* ---------------- 置顶看门狗（island.js ensureTopmost） ---------------- */
+
+function makeTopWin(opts) {
+  // opts.visible / opts.onTop 可读写，测试中途可改状态
+  const calls = [];
+  const win = {
+    isDestroyed: () => false,
+    isVisible: () => opts.visible,
+    isAlwaysOnTop: () => opts.onTop,
+    setAlwaysOnTop(flag, level) {
+      calls.push(['set', flag, level]);
+      opts.onTop = flag;
+    },
+    moveTop() {
+      calls.push(['moveTop']);
+    },
+  };
+  return { win, calls };
+}
+
+test('置顶看门狗：样式位被系统踢掉 → 立即补回 screen-saver 级别', () => {
+  const island = new Island();
+  const pill = makeTopWin({ visible: true, onTop: false });   // 已沉底
+  const panel = makeTopWin({ visible: false, onTop: false }); // 隐藏时不理会
+  island.pill = pill.win;
+  island.panel = panel.win;
+  island.ensureTopmost();
+  assert.deepStrictEqual(pill.calls, [['set', true, 'screen-saver']], '可见窗口丢了置顶必须补回');
+  assert.deepStrictEqual(panel.calls, [], '隐藏的面板等 showPanel 时再补，不做无谓调用');
+
+  island.ensureTopmost();
+  assert.deepStrictEqual(pill.calls, [['set', true, 'screen-saver'], ['moveTop']], '补回后下一拍转入 moveTop 维护');
+});
+
+test('置顶看门狗：样式位完好但被压 → moveTop 抬回带顶，不动样式不重设', () => {
+  const island = new Island();
+  const pill = makeTopWin({ visible: true, onTop: true });
+  const panel = makeTopWin({ visible: true, onTop: true });
+  island.pill = pill.win;
+  island.panel = panel.win;
+  island.ensureTopmost();
+  assert.deepStrictEqual(pill.calls, [['moveTop']], '只抬 z 序，不折腾样式位');
+  assert.deepStrictEqual(panel.calls, [['moveTop']]);
+});
+
+test('置顶看门狗：窗口替身缺 isAlwaysOnTop 时静默跳过', () => {
+  const island = new Island();
+  island.pill = { isDestroyed: () => false, isVisible: () => true };
+  island.panel = null;
+  assert.doesNotThrow(() => island.ensureTopmost());
+});
+
+test('置顶看门狗：心跳幂等，不会叠加多个定时器', () => {
+  const island = new Island();
+  island.startTopmostWatch();
+  const first = island._topmostWatch;
+  island.startTopmostWatch();
+  assert.strictEqual(island._topmostWatch, first, '重复调用必须复用同一心跳');
+  clearInterval(island._topmostWatch);
+});
+
+test('悬停看门狗：按状态自适应换挡（收起 30 / 展开 200 / 不可见 1000）', () => {
+  const island = new Island();
+  const win = { isDestroyed: () => false, isVisible: () => true };
+  island.pill = win;
+  island.startPillHoverWatch();
+  assert.strictEqual(island._hoverMs, 200, '展开态 200ms（仅兜底丢 mouseleave，无需 30ms 密度）');
+  island.pillCollapsed = true;
+  island._restartHoverWatch();
+  assert.strictEqual(island._hoverMs, 30, '收起态 30ms（唤回停留判定需要）');
+  win.isVisible = () => false;
+  island._restartHoverWatch();
+  assert.strictEqual(island._hoverMs, 1000, '胶囊窗口不可见降为 1Hz 心跳');
+  clearInterval(island._hoverWatch);
+});
+
+test('悬停看门狗：心跳幂等，状态不变不重建定时器', () => {
+  const island = new Island();
+  island.pill = { isDestroyed: () => false, isVisible: () => true };
+  island.startPillHoverWatch();
+  const first = island._hoverWatch;
+  island.startPillHoverWatch();
+  island._restartHoverWatch();
+  assert.strictEqual(island._hoverWatch, first, '同状态必须复用同一心跳，不叠加');
+  assert.strictEqual(island._hoverMs, 200);
+  clearInterval(island._hoverWatch);
+});
+
 /* ---------------- 多分辨率 / DPI 自适应布局 ---------------- */
 
 const {

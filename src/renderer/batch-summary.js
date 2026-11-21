@@ -21,6 +21,28 @@
     return Number.isFinite(x) && x > 0 ? x : 0;
   }
 
+  /** 显示宽度估算（与 pill.js clampText 同口径）：全角 1、半角 0.5 */
+  function dispWidth(s) {
+    let w = 0;
+    for (const ch of String(s)) w += ch.codePointAt(0) >= 0x80 ? 1 : 0.5;
+    return w;
+  }
+
+  /** 按显示宽度切块（超长原因跨多条轮播行，不丢信息） */
+  function chunkByWidth(text, maxUnits) {
+    const chunks = [];
+    let cur = '';
+    let u = 0;
+    for (const ch of String(text)) {
+      const w = ch.codePointAt(0) >= 0x80 ? 1 : 0.5;
+      if (u + w > maxUnits && cur) { chunks.push(cur); cur = ''; u = 0; }
+      cur += ch;
+      u += w;
+    }
+    if (cur) chunks.push(cur);
+    return chunks.length ? chunks : [''];
+  }
+
   /**
    * 从 mask:done 构造胶囊轮播行。
    * @returns {{lines: Array<{text: string, tone: string}>, hasSuccess: boolean,
@@ -58,7 +80,14 @@
     if (restoreMissing) unfinished.push(`编码无法识别 ${restoreMissing} 个`);
     if (convertFailed) unfinished.push(`.doc 转换失败 ${convertFailed} 份`);
     if (pdfNoText) unfinished.push(`扫描件 ${pdfNoText} 份（无文本层）`);
-    if (otherSkipped) unfinished.push(`${otherSkipped} 份不支持或过大`);
+    // otherSkipped 是兜底桶（格式不支持/过大/内部错误混在一起），把首条真实
+    // 原因按宽度分块、紧随未完成行单独轮播（不加「未完成：」前缀，免得超预算）
+    const reasonChunks = [];
+    if (otherSkipped) {
+      unfinished.push(`${otherSkipped} 份不支持或过大`);
+      const reason = String(d.firstSkipReason || '').trim();
+      if (reason) chunkByWidth(reason, 12).forEach((chunk, i) => reasonChunks.push(i ? chunk : `原因：${chunk}`));
+    }
 
     // 其他提示：绿色
     const notices = [];
@@ -70,20 +99,21 @@
     const hasUnfinished = unfinished.length > 0;
     const lines = [];
 
-    if (hasSuccess) {
-      // 最多拼两段，避免三位数场景下整行超宽被截断
-      lines.push({
-        text: `已完成：${doneParts.concat(outputParts).slice(0, 2).join(' · ')}`,
-        tone: TONE.OK,
-      });
-      if (outputParts.length && total > 1 && doneParts.length) {
-        // 产物逐行展开，一行放不下两个信息
-        outputParts.forEach((p) => lines.push({ text: `副本已生成 · ${p}`, tone: TONE.OK }));
-      }
+  if (hasSuccess) {
+    // 最多拼两段，避免三位数场景下整行超宽被截断
+    lines.push({
+      text: `已完成：${doneParts.concat(outputParts).slice(0, 2).join(' · ')}`,
+      tone: TONE.OK,
+    });
+    if (outputParts.length && total > 1 && doneParts.length) {
+      // 产物逐行展开，一行放不下两个信息
+      outputParts.forEach((p) => lines.push({ text: `副本已生成 · ${p}`, tone: TONE.OK }));
     }
+  }
 
-    unfinished.forEach((text) => lines.push({ text: `未完成：${text}`, tone: TONE.ERR }));
-    notices.forEach((text) => lines.push({ text, tone: TONE.OK }));
+  unfinished.forEach((text) => lines.push({ text: `未完成：${text}`, tone: TONE.ERR }));
+  reasonChunks.forEach((text) => lines.push({ text, tone: TONE.ERR }));
+  notices.forEach((text) => lines.push({ text, tone: TONE.OK }));
 
     if (!hasSuccess && !hasUnfinished && !notices.length) {
       lines.push({ text: '未生成新副本', tone: TONE.OK });
