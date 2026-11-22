@@ -440,6 +440,8 @@ function setBusy(text, poolKey) {
   stopBusyHints();
   labelIdle.textContent = clampText(text);
   glanceAtText(); // 看向进度文字
+  // 用时每秒跳一次；阶段文案（带文件名）不带后缀，避免把进度信息挤出胶囊
+  busyTickTimer = setInterval(renderBusyHint, 1000);
   // 同一提示停留超过 4 秒（单文件内部 OCR/逐页重绘等静默长耗时）→ 开始轮换安抚提示
   busyTimer = setTimeout(() => rotateBusyHint(poolKey || 'generic'), BUSY_HOLD_MS);
 }
@@ -453,7 +455,9 @@ const BUSY_HOLD_MS = 4000;   // 停留多久后开始轮换
 const BUSY_ROTATE_MS = 3500; // 轮换间隔
 
 let busySince = 0;  // 本轮忙碌开始时刻（「已用 X 秒」按它累计）
-let busyTimer = 0;  // 轮换定时器
+let busyTimer = 0;  // 文案轮换定时器
+let busyTickTimer = 0; // 用时每秒刷新定时器（文案不换，只跳秒）
+let currentHintLine = ''; // 当前轮换到的正文，供每秒重绘后缀
 let lastHint = '';
 
 /* 忙碌提示是小家伙「边干活边自言自语」：正文 ≤10 字位，
@@ -486,8 +490,15 @@ const BUSY_HINTS = {
 
 function elapsedText() {
   const s = Math.max(0, Math.floor((Date.now() - busySince) / 1000));
-  // 分钟档只报分不报秒：压住 16 字位预算（否则长提示 + 长后缀会被截断）
-  return s >= 60 ? `${Math.floor(s / 60)} 分` : `${s} 秒`;
+  // 始终按秒累计，不切分钟档：秒数每秒都在跳，一眼能看出还在干活。
+  // 「（已 N 秒）」后缀最多约 6.5 个全角字位（N 到四位数时），仍在预算内。
+  return `${s} 秒`;
+}
+
+/** 统一渲染轮换提示：正文每秒不变，只把用时后缀往前推 */
+function renderBusyHint() {
+  if (!currentHintLine) return;
+  labelIdle.textContent = clampText(`${currentHintLine}（已 ${elapsedText()}）`);
 }
 
 /** 文案轻滑浮入（与空闲轮换同款动画） */
@@ -506,8 +517,9 @@ function rotateBusyHint(poolKey) {
     line = pool[Math.floor(Math.random() * pool.length)];
   }
   lastHint = line;
-  // 正文 ≤10 字位 + 后缀 ≈6 字位，卡进 16 位预算（超了也会被 clampText 兜底）
-  labelIdle.textContent = clampText(`${line}（已 ${elapsedText()}）`);
+  currentHintLine = line;
+  // 正文 ≤10 字位 + 后缀按秒累计（最多约 6.5 字位），卡进 16 位预算（超了也会被 clampText 兜底）
+  renderBusyHint();
   swapLabel();
   glanceAtText();
   busyTimer = setTimeout(() => rotateBusyHint(poolKey), BUSY_ROTATE_MS);
@@ -515,7 +527,10 @@ function rotateBusyHint(poolKey) {
 
 function stopBusyHints() {
   clearTimeout(busyTimer);
+  clearInterval(busyTickTimer);
   busyTimer = 0;
+  busyTickTimer = 0;
+  currentHintLine = '';
   lastHint = '';
 }
 
