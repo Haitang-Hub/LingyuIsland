@@ -15,7 +15,8 @@ const {
   redactedPathOf, resolveEngineDir, runOcr, REDACTED_SUFFIX_RE,
 } = require('./pdfredact');
 const { detect } = require('./detector');
-const { collectEntities, mergeEntities } = require('./entities');
+const { collectEntities } = require('./entities');
+const { residualCheckDetailed } = require('./residual');
 const pdfflow = require('./pdfflow');
 
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'tif', 'tiff']);
@@ -205,19 +206,15 @@ async function redactImageFile(filePath, toggles, outPath, opts = {}) {
     const count = 0;
     const counts = {};
     let boxes = [];
+    let detectOpts = null;
+    let known = null;
     if (blocks.length) {
       const info = ocrTextWithBoxes(blocks);
-      // 两遍式自收集：图片没有文本层，导入预扫读不出内容（knownEntities 为空），
-      // 紧连式身份候选（「申请人杨素侠」这类锚点候选）需要案卷级复现统计才确认。
-      // 用本图 OCR 文本自收集实体表，与批处理传入的实体表合并后再检测——
-      // 与 DOCX 通道「先收集再屏蔽」的语义对齐。
+      // 文件独立：只用本图 OCR 文本自收集实体表再检测，不读账本/缓存/其他文件。
       const self = collectEntities(info.text.split('\n'), { toggles });
-      const known = mergeEntities(opts.knownEntities, self);
-      const res = detect(info.text, {
-        toggles,
-        knownEntities: known,
-        knownNameHashes: opts.knownNameHashes,
-      });
+      known = self;
+      detectOpts = { toggles, knownEntities: known };
+      const res = detect(info.text, detectOpts);
       boxes = boxesFromHits(res.items, info.chars);
       for (const it of res.items) counts[it.type] = (counts[it.type] || 0) + 1;
     }
@@ -254,10 +251,36 @@ async function redactImageFile(filePath, toggles, outPath, opts = {}) {
       out = path.join(path.dirname(out), path.basename(out, path.extname(out)) + '.' + enc.ext);
     }
     fs.writeFileSync(out, outBytes);
-    return {
+    const result = {
       ok: true, path: filePath, redactedPath: out, count: total, counts,
       irreversible: true, ocr: true,
     };
+    // 交付前复核：对产物重新 OCR，确认黑框没有错位/漏盖
+    if (opts.verifyOutput !== false) {
+      try {
+        const outBlocks = await runOcr(outBytes, opts);
+        const report = outBlocks.length
+          ? residualCheckDetailed(ocrTextWithBoxes(outBlocks).text, detectOpts.toggles,
+            undefined, detectOpts.knownEntities)
+          : null;
+        if (report) {
+          if (opts.strictResidual) {
+            try { fs.rmSync(out, { force: true }); } catch { /* 锁定时仅阻断 */ }
+            return {
+              ok: false, path: filePath, skipped: 'residual-pii',
+              reason: '图片产物复核仍检出敏感信息，已阻断交付',
+              warning: report.code, residual: report,
+            };
+          }
+          result.warning = report.code;
+          result.residual = report;
+        }
+      } catch (err) {
+        result.verification = 'unavailable';
+        result.verificationReason = String((err && err.message) || err);
+      }
+    }
+    return result;
   } catch (err) {
     return {
       ok: false,

@@ -9,6 +9,7 @@ const pdfproc = require('../src/core/pdfproc');
 const pdfredact = require('../src/core/pdfredact');
 const imageredact = require('../src/core/imageredact');
 const { redactImageFile, restoreImageFile, detectImageIntent } = require('../src/core/fileproc');
+const { hashName } = require('../src/core/detector');
 
 module.exports = async function imageSuite() {
   const dir = tempDir('lingyu-image-');
@@ -125,6 +126,22 @@ module.exports = async function imageSuite() {
   test('图片·fileproc 入口正常调用', () => {
     assert.strictEqual(fr.ok, true, JSON.stringify(fr));
     assert.ok(fr.count > 0);
+  });
+
+  // 文件独立：即使调用方传入其他文件的账本/哈希，图片通道也只认本图内容。
+  const nameCanvas = createCanvas(500, 120);
+  const nctx = nameCanvas.getContext('2d');
+  nctx.fillStyle = '#fff'; nctx.fillRect(0, 0, 500, 120);
+  nctx.fillStyle = '#000'; nctx.font = '40px ImageTestCJK';
+  nctx.fillText('李敬舟', 30, 75);
+  const namePath = path.join(dir, 'hash-name.png');
+  fs.writeFileSync(namePath, nameCanvas.toBuffer('image/png'));
+  const isolated = await imageredact.redactImageFile(namePath, {}, null,
+    { ...opts, knownNameHashes: new Set([hashName('李敬舟')]), verifyOutput: false });
+  test('OCR·不接收跨文件姓名哈希（文件独立）', () => {
+    assert.strictEqual(isolated.ok, true, JSON.stringify(isolated));
+    assert.strictEqual(isolated.count, 0, '无语境姓名不应被其他文件的哈希传播命中');
+    assert.ok(!isolated.entityBook, '结果不再回传跨文件账本');
   });
 
   // 可选：真实测试图（存在时验证，不作硬性断言以免环境差异）

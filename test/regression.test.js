@@ -2,7 +2,7 @@
 /**
  * 回归测试套件：锁定「屏蔽系统短板归因与修复方案」中的 R-001..R-006，
  * 并落实方法论要求（原值泄漏断言 / 正负例成对 / 跨文档不可关联 /
- * knownNames 哈希缓存 / 声明注入 / 残留门禁 / 交叉一致性）。
+ * 声明注入 / 残留门禁 / 交叉一致性）。文件之间互相独立，不做跨文件姓名缓存。
  *
  * fixtures 全部为合成值（test/fixtures/），真实案卷由 test/real-files.test.js 门控。
  */
@@ -14,10 +14,7 @@ const AdmZip = require('adm-zip');
 const { detect, hashName } = require('../src/core/detector');
 const { collectEntities } = require('../src/core/entities');
 const { Vault, maskText, restoreText, buildMasked } = require('../src/core/masker');
-const {
-  maskFile, restoreFile, residualCheck, loadKnownNameHashes, saveKnownNameHashes,
-  KNOWN_NAMES_FILE, caseDirKey,
-} = require('../src/core/fileproc');
+const { maskFile, restoreFile, residualCheck } = require('../src/core/fileproc');
 const { checkConsistency } = require('../src/core/consistency');
 
 const vals = (text, type, options) =>
@@ -240,123 +237,6 @@ test('泄漏断言：全类型屏蔽后原值零残留', () => {
 
 /* ================= knownNames 跨文件持久化（哈希缓存） ================= */
 
-test('knownNames：分次处理第二份文件可命中无语境重名，缓存存应用数据目录且不含明文', () => {
-  const dir = tempDir('lingyu-regress-');
-  const storeDir = tempDir('lingyu-regress-store-');
-  try {
-    const a = path.join(dir, 'case-a.txt');
-    const b = path.join(dir, 'case-b.txt');
-    fs.writeFileSync(a, fs.readFileSync(path.join(__dirname, 'fixtures', 'case-a.txt'), 'utf8'), 'utf8');
-    fs.writeFileSync(b, fs.readFileSync(path.join(__dirname, 'fixtures', 'case-b.txt'), 'utf8'), 'utf8');
-
-    const namesFile = path.join(storeDir, KNOWN_NAMES_FILE);
-    const v = new Vault();
-    const ma = maskFile(a, v, undefined, undefined, undefined, { namesFile });
-    assert.strictEqual(ma.ok, true);
-    const mb = maskFile(b, v, undefined, undefined, undefined, { namesFile });
-    assert.strictEqual(mb.ok, true);
-
-    const maskedB = fs.readFileSync(mb.maskedPath, 'utf8');
-    assertNoLeak(maskedB, '陈阿满', 'knownNames 跨文件');
-    assertNoLeak(maskedB, '周济民', 'knownNames 跨文件');
-    // 缓存在应用数据目录（namesFile），案卷目录内不留任何缓存文件
-    assert.ok(fs.existsSync(namesFile), '应在应用数据目录生成 mask-names.json');
-    assert.ok(!fs.existsSync(path.join(dir, '.mask-names.json')),
-      '案卷目录内不得出现 .mask-names.json');
-    const store = JSON.parse(fs.readFileSync(namesFile, 'utf8'));
-    const entry = store.dirs[caseDirKey(dir)];
-    assert.ok(entry && Array.isArray(entry.hashes) && entry.hashes.length > 0, '应按案卷目录存哈希');
-    for (const h of entry.hashes) assert.ok(/^[0-9a-f]{64}$/.test(h), '缓存只能是哈希');
-    const raw = fs.readFileSync(namesFile, 'utf8');
-    assert.ok(!raw.includes('陈阿满') && !raw.includes('周济民') && !raw.includes('梁月华'),
-      '缓存不得包含明文姓名');
-    assert.ok(entry.hashes.includes(hashName('陈阿满')), '确认姓名的哈希应入缓存');
-    // 不传 namesFile（未注入存储路径）时跳过持久化：不产生任何缓存文件
-    const otherDir = tempDir('lingyu-regress-case2-');
-    try {
-      const c = path.join(otherDir, 'case-c.txt');
-      fs.writeFileSync(c, '原告：张三，手机 13812345678。', 'utf8');
-      const mc = maskFile(c, new Vault());
-      assert.strictEqual(mc.ok, true);
-      assert.ok(!fs.existsSync(path.join(otherDir, '.mask-names.json')),
-        '未注入 namesFile 时案卷目录不应出现缓存文件');
-    } finally {
-      rmDir(otherDir);
-    }
-  } finally {
-    rmDir(dir);
-    rmDir(storeDir);
-  }
-});
-
-test('knownNames：缓存读写幂等且损坏文件安全回退（Windows 路径大小写不敏感）', () => {
-  const storeDir = tempDir('lingyu-regress-store-');
-  const caseDir = tempDir('lingyu-regress-case-');
-  try {
-    const namesFile = path.join(storeDir, KNOWN_NAMES_FILE);
-    assert.strictEqual(saveKnownNameHashes(namesFile, caseDir, ['张三']), true);
-    assert.strictEqual(saveKnownNameHashes(namesFile, caseDir, ['张三']), false, '重复保存应无变化');
-    assert.ok(loadKnownNameHashes(namesFile, caseDir).has(hashName('张三')));
-    // Windows 下路径大小写/分隔符差异命中同一条目
-    const alt = process.platform === 'win32'
-      ? caseDir.toLowerCase().replace(/\\/g, '/')
-      : caseDir;
-    assert.ok(loadKnownNameHashes(namesFile, alt).has(hashName('张三')), '路径键应归一化');
-    // 损坏存储文件安全回退
-    fs.writeFileSync(namesFile, '{broken', 'utf8');
-    assert.strictEqual(loadKnownNameHashes(namesFile, caseDir).size, 0, '损坏缓存应回退为空集');
-    // v1/v2/v3/v4/v5 均弃用；v6 非法条目被过滤。
-    fs.writeFileSync(namesFile,
-      JSON.stringify({ v: 2, dirs: { [caseDirKey(caseDir)]: { hashes: [hashName('李四')] } } }), 'utf8');
-    assert.strictEqual(loadKnownNameHashes(namesFile, caseDir).size, 0, 'v2 缓存不得吸收');
-    fs.writeFileSync(namesFile,
-      JSON.stringify({ v: 3, dirs: { [caseDirKey(caseDir)]: { hashes: [hashName('李四')] } } }), 'utf8');
-    assert.strictEqual(loadKnownNameHashes(namesFile, caseDir).size, 0, 'v3 缓存不得吸收');
-    fs.writeFileSync(namesFile,
-      JSON.stringify({ v: 4, dirs: { [caseDirKey(caseDir)]: { hashes: [hashName('李四')] } } }), 'utf8');
-    assert.strictEqual(loadKnownNameHashes(namesFile, caseDir).size, 0, 'v4 缓存不得吸收（v1.12.0 时间词毒哈希）');
-    fs.writeFileSync(namesFile,
-      JSON.stringify({ v: 5, dirs: { [caseDirKey(caseDir)]: { hashes: [hashName('李四')] } } }), 'utf8');
-    assert.strictEqual(loadKnownNameHashes(namesFile, caseDir).size, 0, 'v5 缓存不得吸收（连词/谓语毒哈希）');
-    fs.writeFileSync(namesFile,
-      JSON.stringify({ v: 6, dirs: { [caseDirKey(caseDir)]: { hashes: ['bad', hashName('李四')] } } }), 'utf8');
-    const set = loadKnownNameHashes(namesFile, caseDir);
-    assert.strictEqual(set.size, 1);
-    assert.ok(set.has(hashName('李四')));
-  } finally {
-    rmDir(storeDir);
-    rmDir(caseDir);
-  }
-});
-
-test('knownNames：旧版案卷内 .mask-names.json 直接清除（毒哈希不吸收）+ 缓存 v6', () => {
-  const caseDir = tempDir('lingyu-regress-case-');
-  const storeDir = tempDir('lingyu-regress-store-');
-  try {
-    const legacyHash = hashName('陈阿满');
-    fs.writeFileSync(path.join(caseDir, '.mask-names.json'),
-      JSON.stringify({ v: 1, hashes: [legacyHash] }), 'utf8');
-    const src = path.join(caseDir, 'case.txt');
-    fs.writeFileSync(src, '原告：张三，手机 13812345678。', 'utf8');
-    const namesFile = path.join(storeDir, KNOWN_NAMES_FILE);
-
-    const m = maskFile(src, new Vault(), undefined, undefined, undefined, { namesFile });
-    assert.strictEqual(m.ok, true);
-    // 旧文件被删除，案卷目录不留任何缓存
-    assert.ok(!fs.existsSync(path.join(caseDir, '.mask-names.json')), '案卷目录内旧缓存应被删除');
-    const store = JSON.parse(fs.readFileSync(namesFile, 'utf8'));
-    assert.strictEqual(store.v, 6, '存储格式应为 v6');
-    const entry = store.dirs[caseDirKey(caseDir)];
-    // v1 旧缓存出自旧版检测器（含「执行/文件」等毒哈希），不吸收
-    assert.ok(!entry.hashes.includes(legacyHash), 'v1 旧哈希不得进入 v6 缓存');
-    // 本批确认姓名正常入库
-    assert.ok(entry.hashes.includes(hashName('张三')), '本批确认姓名应入缓存');
-  } finally {
-    rmDir(caseDir);
-    rmDir(storeDir);
-  }
-});
-
 test('时间词不得成为姓名种子：「被告人：现在，…」不毒化「检察院现在给你做不起诉」', () => {
   const { collectEntities } = require('../src/core/entities');
   // 冒号字段 + 逗号边界的笔录句式曾把「现在」确认为姓名，经原值/哈希传播后
@@ -522,6 +402,65 @@ test('身份锚点补强：头衔/关系名词、弱字段、被字句（校长�
   ]) {
     assert.deepStrictEqual(vals(t, 'name'), [], `${t} → 不得检出姓名（实际 ${JSON.stringify(vals(t, 'name'))}）`);
   }
+});
+
+test('格式边界：案号六角括号〔〕/﹝﹞ 与 15 位老身份证（关键词路径）', () => {
+  // 公文与检察文书的案号用六角括号（「南检刑诉〔2026〕15号」），此前整类漏遮。
+  for (const [t, want] of [
+    ['南检刑诉〔2026〕15号', '南检刑诉〔2026〕15号'],
+    ['南检刑诉〔2026〕15号之三', '南检刑诉〔2026〕15号之三'],
+    ['（2026）粤0882刑初123号', '（2026）粤0882刑初123号'],
+    ['南检刑诉【2026】15号', '南检刑诉【2026】15号'],
+  ]) {
+    const got = detect(t).items.filter((i) => i.type === 'caseNo').map((i) => i.value);
+    assert.deepStrictEqual(got, [want], `${t} → ${JSON.stringify(got)}`);
+  }
+  // 15 位老身份证只在「身份证号」关键词后确认；裸 15 位数字不猜。
+  assert.ok(detect('身份证号440882900101123').items.some((i) => i.type === 'idCard'));
+  assert.strictEqual(detect('编号 440882900101123').items.filter((i) => i.type === 'idCard').length, 0);
+});
+
+test('地址：引导动词不被吞进地址值（案发地点位于X）', () => {
+  const value = (t) => detect(t).items.filter((i) => i.type === 'address').map((i) => i.value);
+  assert.deepStrictEqual(value('案发地点位于涟水县岔庙镇祥源公园城花园里小区地下车库。'),
+    ['涟水县岔庙镇祥源公园城花园里小区地下车库']);
+  assert.deepStrictEqual(value('现场在临江市清河区人民路12号。'), ['临江市清河区人民路12号']);
+  // 以介词同形字开头的真实地名不被切坏
+  assert.ok(value('于都县贡江镇红军大道1号').some((v) => v.includes('贡江镇')));
+});
+
+test('姓名：助动词主谓闭合、精确角色锚点、标题整段、财产方位锚点', () => {
+  const names = (t) => detect(t).items.filter((i) => i.type === 'name').map((i) => i.value);
+  // 助动词只能接在主语后：姓名 + 应当/可以/如实 应确认
+  for (const [t, who] of [
+    ['被告人张三应当如实供述。', '张三'],
+    ['被告人张三可以委托辩护人。', '张三'],
+    ['被告人张三依法行使权利。', '张三'],
+    // 贪婪角色锚点被句末「辩护人」抢走时，精确角色词表仍能取到姓名
+    ['被告人张三委托辩护人。', '张三'],
+    ['被害人张三的诉讼代理人王芳。', '张三'],
+    // 起诉书首部「角色词 + 姓名」独占一行
+    ['被告人张伟', '张伟'],
+    ['证人李四', '李四'],
+    // 侵财句式：姓名无角色词，靠「车内/名下」等财产方位闭合
+    ['将李长生车内2000元现金盗走。', '李长生'],
+    ['李长生名下房产。', '李长生'],
+    ['裴钱、柳如烟二人以拉车门的方式将李长生车内2000元现金盗走。', '柳如烟'],
+    ['谈话对象：裴伊万（裴钱爷爷）', '裴钱'],
+  ]) {
+    assert.ok(names(t).includes(who), `${t} → ${JSON.stringify(names(t))}`);
+  }
+  // 负例成对：助动词/动词短语本身不是姓名
+  for (const t of [
+    '被告人应当如实供述。', '证人应当如实作证。', '被告人同意。', '被告人要求赔偿。',
+    '被告人认罪认罚', '被告人到庭', '被告人上诉', '食堂负责人张罗商议',
+    '自己车内现金被盗。', '单位名下车辆。', '公司名下的房产。',
+    '被告人父亲到庭。', '被告人妻子到庭。', '与被害人达成谅解协议。',
+  ]) {
+    assert.deepStrictEqual(names(t), [], `${t} → 不得检出姓名（实际 ${JSON.stringify(names(t))}）`);
+  }
+  // 助动词成对：动词短语被后随助动词闭合曾把「沟通」当姓名
+  assert.deepStrictEqual(names('跟检察官沟通是否能做酌定不诉'), []);
 });
 
 /* ================= 残留自检（质量门禁） ================= */

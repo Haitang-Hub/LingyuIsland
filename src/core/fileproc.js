@@ -16,7 +16,7 @@ const AdmZip = require('adm-zip');
 const {
   maskText, restoreText, countCodes, hasRestorableCode, maskEdits, restoreEdits, cleanEdits,
 } = require('./masker');
-const { detect, hashName } = require('./detector');
+const { detect } = require('./detector');
 const { collectEntities, createEntities, mergeEntities } = require('./entities');
 const { xmlBlockTexts, transformXmlText } = require('./xmltext');
 const {
@@ -26,6 +26,7 @@ const pdfproc = require('./pdfproc');
 const pdfflow = require('./pdfflow');
 const pdfredact = require('./pdfredact');
 const imageredact = require('./imageredact');
+const { residualCheckDetailed, residualGate } = require('./residual');
 
 const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
 
@@ -69,8 +70,45 @@ const OFFICE_PARTS = [
   /^xl\/sharedStrings\.xml$/, /^xl\/worksheets\/sheet\d+\.xml$/,
   /^xl\/comments\d*\.xml$/,
   /^ppt\/slides\/slide\d+\.xml$/, /^ppt\/notesSlides\/notesSlide\d+\.xml$/,
-  /^docProps\/core\.xml$/, /^docProps\/app\.xml$/,
+  /^docProps\/core\.xml$/, /^docProps\/app\.xml$/, /^docProps\/custom\.xml$/,
 ];
+
+// 元数据不走正文检测：正文规则会把 app.xml 里的模板编号当电话遮成
+// 「087****8263〔电话·…〕」，而作者/标题/时间又只被部分命中。这里按字段清洗。
+const CORE_CLEAR_FIELDS = [
+  'dc:title', 'dc:subject', 'dc:creator', 'dc:description',
+  'cp:keywords', 'cp:lastModifiedBy', 'cp:category', 'cp:contentStatus',
+];
+const CORE_DATE_FIELDS = ['dcterms:created', 'dcterms:modified', 'cp:lastPrinted'];
+const APP_CLEAR_FIELDS = ['Company', 'Manager', 'Template', 'Category'];
+const CUSTOM_VALUE_RE = /(<vt:(?:lpstr|bstr)>)[^<>]*(<\/vt:(?:lpstr|bstr)>)/gi;
+
+function isMetadataPart(name) {
+  return /^docProps\/(?:core|app|custom)\.xml$/.test(String(name || ''));
+}
+
+/** 字段级清洗 OOXML 元数据：清空身份/标题字段、归一化时间戳 */
+function scrubOfficeMetadata(xml, name) {
+  let out = String(xml || '');
+  const clear = name === 'docProps/core.xml' ? CORE_CLEAR_FIELDS
+    : name === 'docProps/app.xml' ? APP_CLEAR_FIELDS : null;
+  if (clear) {
+    for (const tag of clear) {
+      const pair = new RegExp(`(<${tag}(?:\\s[^>]*)?>)[\\s\\S]*?(</${tag}>)`, 'gi');
+      out = out.replace(pair, (_, a, b) => a + b);
+      const self = new RegExp(`<${tag}(?:\\s[^>]*)?\\/>`, 'gi');
+      out = out.replace(self, `<${tag}></${tag}>`);
+    }
+  }
+  if (name === 'docProps/core.xml') {
+    for (const tag of CORE_DATE_FIELDS) {
+      const pair = new RegExp(`(<${tag}(?:\\s[^>]*)?>)[\\s\\S]*?(</${tag}>)`, 'gi');
+      out = out.replace(pair, (_, a, b) => a + '2000-01-01T00:00:00Z' + b);
+    }
+  }
+  if (name === 'docProps/custom.xml') out = out.replace(CUSTOM_VALUE_RE, (_, a, b) => a + b);
+  return out;
+}
 
 /* ---------------- 编码识别 ---------------- */
 
@@ -199,7 +237,12 @@ function inheritedEntities(knownNames, opts = {}) {
   const legacy = createEntities();
   if (knownNames) for (const value of knownNames) legacy.name.add(value);
   if (opts.knownPlaces) for (const value of opts.knownPlaces) legacy.address.add(value);
-  return mergeEntities(legacy, opts.knownEntities);
+  return legacy;
+}
+
+/** 姓名哈希：仅接受调用方显式传入，不读账本/缓存 */
+function knownHashesFor(opts = {}) {
+  return opts.knownNameHashes ? new Set(opts.knownNameHashes) : new Set();
 }
 
 function collectFileEntities(segments, toggles, inherited) {
@@ -211,121 +254,11 @@ function collectFileEntities(segments, toggles, inherited) {
   return collectEntities(segments, { toggles, knownEntities: inherited });
 }
 
-/* ---------------- 跨文件已知姓名缓存（应用数据目录，只存哈希，不存明文） ---------------- */
-
-// 缓存统一存放在应用数据目录（store.paths.knownNames），案卷目录内不留任何文件；
-// 按案卷目录路径区分条目，案卷文件夹拷贝/移动不带走姓名记忆。
-const KNOWN_NAMES_FILE = 'mask-names.json';
-
-const HASH_RE = /^[0-9a-f]{64}$/;
-
-/** 案卷目录的存储键：绝对路径，Windows 下大小写不敏感 */
-function caseDirKey(caseDir) {
-  const abs = path.resolve(String(caseDir || ''));
-  return process.platform === 'win32' ? abs.toLowerCase() : abs;
-}
-
-// v6：连词「或者」的角色词尾误判把「差错」确认成姓名（「对记载有遗漏或者差错
-// 提出补充」），以及「被告人作最后陈述」把「作最后」确认成姓名，两者都写进了 v5
-// 缓存并跨文件传播；守卫补齐后旧缓存不可信，整体弃用重新积累。
-const NAMES_STORE_VERSION = 6;
-
-// mask-names.json 的进程内缓存：批量处理时每个文件的 load/save 都会经
-// readNamesStore 重读并解析整个 JSON，N 个文件 = N 次重复读盘。文件由本应用
-// 独占写入，stat（mtimeMs+size）不变即视为与磁盘一致；外部改动（旧版毒缓存
-// 重置、手工编辑、测试注入）会使 stat 变化而自动失效回源。
-let namesCache = null; // { key, mtimeMs, size, data }
-
-function namesCacheKey(storeFile) {
-  const abs = path.resolve(String(storeFile));
-  return process.platform === 'win32' ? abs.toLowerCase() : abs;
-}
-
-function readNamesStore(storeFile) {
-  let st = null;
-  try { st = fs.statSync(storeFile); } catch { /* 缺失 → 全新 */ }
-  if (!st) return { v: NAMES_STORE_VERSION, dirs: {} };
-  const key = namesCacheKey(storeFile);
-  if (namesCache && namesCache.key === key
-    && namesCache.mtimeMs === st.mtimeMs && namesCache.size === st.size) {
-    return namesCache.data;
-  }
-  let data = null;
-  try {
-    data = JSON.parse(fs.readFileSync(storeFile, 'utf8'));
-  } catch { /* 损坏 → 全新 */ }
-  // v4 起才信任缓存：旧版检测器/守卫缺口可能写入误判姓名的哈希（庭审指令
-  // 「开庭/入庭」曾被确认成姓名并经哈希传播毒化全篇），修复后一律弃用重新积累。
-  // v5：v1.12.0 的冒号字段路径仍可把「现在/当时」等时间词确认为姓名并写入
-  // 缓存（「被告人：现在，…」→ 现*〔姓名·…〕传播到「检察院现在给你做不起诉」），
-  // 时间词守卫加入后旧缓存不可信，整体弃用重新积累。
-  const store = data && data.v === NAMES_STORE_VERSION
-    && data.dirs && typeof data.dirs === 'object'
-    ? data : { v: NAMES_STORE_VERSION, dirs: {} };
-  namesCache = { key, mtimeMs: st.mtimeMs, size: st.size, data: store };
-  return store;
-}
-
-/**
- * 读取某案卷目录的已确认姓名哈希。
- * @param {string} storeFile 应用数据目录下的缓存文件（store.paths.knownNames）
- * @param {string} caseDir 案卷目录
- * 上一批文档确认过的姓名（原告陈阿满 → 后文「陈阿满」无语境）在本批文档里
- * 也能命中；缓存只存 sha256 哈希，泄露缓存不会泄露姓名本身。
- * 兼容清理：旧版曾把 .mask-names.json 放在案卷目录内，且内容出自旧版检测器
- * （可能含毒哈希）——读取时直接删除案卷内旧文件，不吸收其内容。
- */
-function loadKnownNameHashes(storeFile, caseDir) {
-  const set = new Set();
-  if (!storeFile || !caseDir) return set;
-  const store = readNamesStore(storeFile);
-  const key = caseDirKey(caseDir);
-  const entry = store.dirs[key];
-  if (entry && Array.isArray(entry.hashes)) {
-    for (const h of entry.hashes) if (HASH_RE.test(h)) set.add(h);
-  }
-  // 旧版案卷内缓存：直接删除（内容出自旧版检测器，不可信），案卷目录不留文件
-  const legacy = path.join(path.resolve(caseDir), '.mask-names.json');
-  try {
-    if (fs.existsSync(legacy)) fs.rmSync(legacy, { force: true });
-  } catch { /* 清理失败不阻塞主流程 */ }
-  return set;
-}
-
-/** 把本批确认姓名的哈希合并写回应用数据目录缓存（幂等） */
-function saveKnownNameHashes(storeFile, caseDir, names) {
-  if (!storeFile || !caseDir) return false;
-  try {
-    const store = readNamesStore(storeFile);
-    const key = caseDirKey(caseDir);
-    const entry = store.dirs[key] && Array.isArray(store.dirs[key].hashes)
-      ? store.dirs[key].hashes.filter((h) => HASH_RE.test(h)) : [];
-    const merged = new Set(entry);
-    for (const n of names) if (n) merged.add(hashName(n));
-    if (merged.size === entry.length) return false;
-    store.dirs[key] = { hashes: [...merged] };
-    fs.mkdirSync(path.dirname(storeFile), { recursive: true });
-    fs.writeFileSync(storeFile, JSON.stringify(store), 'utf8');
-    // 写后同步缓存：同批下一文件的 load/save 直接命中，不再重读磁盘
-    try {
-      const st = fs.statSync(storeFile);
-      namesCache = { key: namesCacheKey(storeFile), mtimeMs: st.mtimeMs, size: st.size, data: store };
-    } catch { /* stat 失败则留空，下次读盘自愈 */ }
-    return true;
-  } catch { return false; }
-}
-
 /* ---------------- 质量门禁：残留自检 ---------------- */
 
-/**
- * 用同一套检测器对屏蔽产物复检：如仍有敏感信息检出，
- * 返回 'residual-pii'（warning 标记，不阻断流程）。
- */
+/** 兼容旧调用：只返回 warning 字符串；详细报告用 residualCheckDetailed */
 function residualCheck(maskedText, toggles, knownNames, knownEntities) {
-  try {
-    const { items } = detect(maskedText, { toggles, knownNames, knownEntities });
-    return items.length ? 'residual-pii' : undefined;
-  } catch { return undefined; }
+  return residualCheckDetailed(maskedText, toggles, knownNames, knownEntities)?.code;
 }
 
 /**
@@ -379,6 +312,8 @@ function readFileText(filePath) {
       const parts = [];
       for (const entry of zip.getEntries()) {
         if (!OFFICE_PARTS.some((re) => re.test(entry.entryName))) continue;
+        // 元数据不当正文语料：作者/模板号会污染案卷实体表
+        if (isMetadataPart(entry.entryName)) continue;
         const xml = entry.getData().toString('utf8');
         // 段落级拼接：跨 run 的关键词、地址、机构名、姓名语境在此恢复
         const blocks = xmlBlockTexts(xml);
@@ -444,9 +379,8 @@ function maskFile(filePath, vault, toggles, outPath, knownNames, opts = {}) {
     if (countCodes(dec.text) > 0 && /_(屏蔽|还原)/.test(path.basename(filePath))) {
       return { ok: false, path: filePath, skipped: 'already-masked' };
     }
-    const outDir = path.dirname(out);
-    // 跨文件已知姓名缓存（应用数据目录，按案卷目录区分；opts.namesFile 未传则跳过持久化）
-    const knownHashes = opts.namesFile ? loadKnownNameHashes(opts.namesFile, outDir) : new Set();
+    // 文件独立：实体只从本文件内容自收集，不读写跨文件缓存。
+    const knownHashes = knownHashesFor(opts);
     const inherited = inheritedEntities(knownNames, opts);
     const knownEnt = collectFileEntities([dec.text], toggles, inherited);
     const r = maskText(dec.text, vault, {
@@ -454,11 +388,10 @@ function maskFile(filePath, vault, toggles, outPath, knownNames, opts = {}) {
     });
     if (r.items.length === 0) return { ok: true, path: filePath, count: 0, counts: {}, skipped: 'no-pii' };
     fs.writeFileSync(out, encodeText(r.masked, dec.encoding, dec.bom));
-    // 本文件确认的姓名并入跨文件缓存（只存哈希），供后续批次命中无语境重名
-    if (opts.namesFile) saveKnownNameHashes(opts.namesFile, outDir, [...knownEnt.name]);
-    // 质量门禁：对屏蔽产物复检，残留敏感信息则以 warning 标记
-    const warning = residualCheck(r.masked, toggles, undefined, knownEnt);
-    return { ok: true, path: filePath, maskedPath: out, count: r.items.length, counts: r.counts, ...(warning ? { warning } : {}) };
+    // 质量门禁：对屏蔽产物复检；严格模式下删除产物并阻断交付
+    const gate = residualGate(r.masked, toggles, opts, out);
+    if (gate.ok === false) return { ok: false, path: filePath, ...gate };
+    return { ok: true, path: filePath, maskedPath: out, count: r.items.length, counts: r.counts, ...(gate.warning ? gate : {}) };
   }
   return { ok: false, path: filePath, skipped: 'unsupported', reason: n.ext };
 }
@@ -502,11 +435,13 @@ function maskOffice(filePath, vault, toggles, outPath, knownNames, opts = {}) {
       parts.push({ name: entry.entryName, xml: entry.getData().toString('utf8') });
     }
     const out = outPath || maskedPathOf(filePath);
-    // 跨文件已知姓名缓存（应用数据目录，按案卷目录区分；opts.namesFile 未传则跳过持久化）
-    const knownHashes = opts.namesFile ? loadKnownNameHashes(opts.namesFile, path.dirname(out)) : new Set();
+    const knownHashes = knownHashesFor(opts);
     // 先按逻辑块确认实体，再把完整实体表套用到全部段落和表格单元格。
+    // 元数据不进语料：作者、模板号、时间戳不是案卷实体。
     const segments = [];
-    for (const p of parts) segments.push(...xmlBlockTexts(p.xml));
+    for (const p of parts) {
+      if (!isMetadataPart(p.name)) segments.push(...xmlBlockTexts(p.xml));
+    }
     const inherited = inheritedEntities(knownNames, opts);
     const knownEnt = collectFileEntities(segments, toggles, inherited);
 
@@ -514,6 +449,14 @@ function maskOffice(filePath, vault, toggles, outPath, knownNames, opts = {}) {
     const counts = {};
     let touched = false;
     for (const p of parts) {
+      if (isMetadataPart(p.name)) {
+        const cleaned = scrubOfficeMetadata(p.xml, p.name);
+        if (cleaned !== p.xml) {
+          zip.updateFile(p.name, Buffer.from(cleaned, 'utf8'));
+          touched = true;
+        }
+        continue;
+      }
       let xml = p.xml;
       let c = 0;
       const r = maskXmlText(xml, vault, toggles, knownEnt, knownHashes);
@@ -528,17 +471,17 @@ function maskOffice(filePath, vault, toggles, outPath, knownNames, opts = {}) {
     }
     if (!touched) return { ok: true, path: filePath, count: 0, counts: {}, skipped: 'no-pii' };
     zip.writeZip(out);
-    // 本文件确认的姓名并入跨文件缓存（只存哈希）
-    if (opts.namesFile) saveKnownNameHashes(opts.namesFile, path.dirname(out), [...knownEnt.name]);
     // 质量门禁：对屏蔽产物（段落级拼接）复检
     const maskedZip = new AdmZip(out);
     const maskedParts = [];
     for (const p of parts) {
+      if (isMetadataPart(p.name)) continue;
       const entry = maskedZip.getEntry(p.name);
       if (entry) maskedParts.push(...xmlBlockTexts(entry.getData().toString('utf8')));
     }
-    const warning = residualCheck(maskedParts.join('\n'), toggles, undefined, knownEnt);
-    return { ok: true, path: filePath, maskedPath: out, count, counts, ...(warning ? { warning } : {}) };
+    const gate = residualGate(maskedParts.join('\n'), toggles, opts, out);
+    if (gate.ok === false) return { ok: false, path: filePath, ...gate };
+    return { ok: true, path: filePath, maskedPath: out, count, counts, ...(gate.warning ? gate : {}) };
   } catch (err) {
     return { ok: false, path: filePath, skipped: skipReasonForError(err), reason: String(err && err.message || err) };
   }
@@ -638,8 +581,7 @@ async function maskPdfFile(filePath, vault, toggles, outPath, opts = {}) {
     const perPage = [];
     let count = 0;
     const counts = {};
-    const knownHashes = opts.knownNameHashes
-      || (opts.namesFile ? loadKnownNameHashes(opts.namesFile, path.dirname(out)) : new Set());
+    const knownHashes = knownHashesFor(opts);
     const inherited = inheritedEntities(opts.knownNames, opts);
     const blocks = ex.pages.flatMap((page) => page.lines.map((line) => line.text));
     const knownEnt = collectFileEntities(blocks, toggles, inherited);
@@ -662,8 +604,9 @@ async function maskPdfFile(filePath, vault, toggles, outPath, opts = {}) {
     fs.writeFileSync(out, bytes);
     // 质量门禁：对屏蔽产物复检
     const maskedJoined = perPage.map((l) => l.join('\n')).join('\n');
-    const warning = residualCheck(maskedJoined, toggles, undefined, knownEnt);
-    return { ok: true, path: filePath, maskedPath: out, count, counts, ...(warning ? { warning } : {}) };
+    const gate = residualGate(maskedJoined, toggles, opts, out);
+    if (gate.ok === false) return { ok: false, path: filePath, ...gate };
+    return { ok: true, path: filePath, maskedPath: out, count, counts, ...(gate.warning ? gate : {}) };
   } catch (err) {
     return { ok: false, path: filePath, skipped: skipReasonForError(err), reason: String((err && err.message) || err) };
   }
@@ -678,12 +621,12 @@ async function redactPdfFile(filePath, vault, toggles, outPath, opts = {}) {
   try {
     const stat = fs.statSync(filePath);
     if (stat.size > MAX_SIZE) return { ok: false, path: filePath, skipped: 'too-large' };
+    const out = outPath || pdfredact.redactedPathOf(filePath);
     return await pdfredact.redactPdfFile(filePath, toggles, outPath, {
       dpi: opts.pdfDpi || opts.dpi,
       ocrEngineDir: opts.ocrEngineDir,
       padding: opts.pdfPadding,
-      knownEntities: opts.knownEntities,
-      knownNameHashes: opts.knownNameHashes,
+      strictResidual: opts.strictResidual,
     });
   } catch (err) {
     return { ok: false, path: filePath, skipped: skipReasonForError(err), reason: String((err && err.message) || err) };
@@ -714,8 +657,7 @@ async function redactImageFile(filePath, vault, toggles, outPath, opts = {}) {
     return await imageredact.redactImageFile(filePath, toggles, outPath, {
       ocrEngineDir: opts.ocrEngineDir,
       padding: opts.imagePadding,
-      knownEntities: opts.knownEntities,
-      knownNameHashes: opts.knownNameHashes,
+      strictResidual: opts.strictResidual,
     });
   } catch (err) {
     return { ok: false, path: filePath, skipped: skipReasonForError(err), reason: String((err && err.message) || err) };
@@ -735,6 +677,6 @@ module.exports = {
   readPdfText, detectPdfIntent, maskPdfFile, redactPdfFile, restorePdfFile, isPdf,
   detectImageIntent, redactImageFile, restoreImageFile, isImage,
   redactedPathOf: pdfredact.redactedPathOf,
-  loadKnownNameHashes, saveKnownNameHashes, caseDirKey, KNOWN_NAMES_FILE,
-  residualCheck, skipReasonForError,
+  scrubOfficeMetadata, isMetadataPart,
+  residualCheck, residualCheckDetailed, residualGate, skipReasonForError,
 };

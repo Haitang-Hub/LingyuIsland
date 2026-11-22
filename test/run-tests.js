@@ -32,6 +32,7 @@ require('./pdfflow.test.js');
 require('./app-units.test.js');
 require('./batch-summary.test.js');
 require('./regression.test.js');
+require('./leakage-fixes.test.js');
 
 (async () => {
   try {

@@ -14,13 +14,12 @@ const path = require('path');
 const { shell } = require('electron');
 const {
   collectPaths, maskFile, restoreFile,
-  maskedPathOf, restoredPathOf, outputNameOf, detectFileIntent, readFileText,
+  maskedPathOf, restoredPathOf, outputNameOf, detectFileIntent,
   LEGACY_EXTS, PDF_EXTS, IMAGE_EXTS, isPdf, isImage, detectPdfIntent, detectImageIntent,
-  readPdfText, skipReasonForError,
+  skipReasonForError,
 } = require('../core/fileproc');
 const { getRedactPool } = require('./redactpool');
 const { preconvert } = require('../core/docconvert');
-const { collectEntities, createEntities } = require('../core/entities');
 const { isInsideRoot, resolveConflictName } = require('../core/imports');
 const { TYPE_LABEL } = require('../core/masker');
 
@@ -75,29 +74,13 @@ async function importAndMask(inputPaths, ctx, sender) {
   let totalPII = 0, vaultDirty = false, trashed = 0, overwritten = 0;
 
   // 老式 .doc（OLE2 二进制）批量预转换：一次启动转换器，结果缓存供后续
-  // 内容读取、姓名预扫、屏蔽/还原共用。失败不中断其它文件，由 maskFile 给出明确提示。
+  // 内容读取与屏蔽/还原共用。失败不中断其它文件，由 maskFile 给出明确提示。
   const legacyCount = files.filter((f) => LEGACY_EXTS.has(path.extname(f).slice(1).toLowerCase())).length;
   if (legacyCount > 0) island.broadcast('mask:converting', { count: legacyCount });
   const conversion = await preconvert(files);
 
-  // 第一遍只看结构并收集实体，第二遍把同一张实体表套用到全案卷。
-  // 文件间放入分隔块，避免上一文件的表头误配下一文件的首个单元格。
-  const scanBlocks = [];
-  let scanBudget = 8 * 1024 * 1024;
-  for (const f of files) {
-    if (scanBudget <= 0) break;
-    try {
-      const size = fs.statSync(f).size;
-      if (size > 512 * 1024) continue;
-      const text = isPdf(f) ? await readPdfText(f) : readFileText(f);
-      if (!text) continue;
-      scanBudget -= size;
-      scanBlocks.push(...text.split(/\r?\n/), '\u0000');
-    } catch { /* 读不出就跳过，不影响主流程 */ }
-  }
-  const knownEntities = scanBlocks.length
-    ? collectEntities(scanBlocks, { toggles: store.settings.toggles })
-    : createEntities();
+  // 文件之间互相独立：各通道只从自身内容确认实体，不预扫、不共享账本、不读写跨文件缓存。
+  // 同一批拖入的文书与随笔互不污染，A 文件确认的人名不会传播到 B 文件。
 
   for (let i = 0; i < files.length; i++) {
     const src = files[i];
@@ -132,7 +115,7 @@ async function importAndMask(inputPaths, ctx, sender) {
       if (pdf || image) {
         const cfg = store.settings.pdfRedact || {};
         const redactOpts = {
-          knownEntities,
+          strictResidual: !!store.settings.strictResidual,
           ocrEngineDir: cfg.ocrEngineDir,
         };
         // 交给独立工作进程：渲染 / 编码不再阻塞主进程（界面保持可交互）
@@ -147,7 +130,7 @@ async function importAndMask(inputPaths, ctx, sender) {
         r = restoreFile(src, store.vault, out);
       } else {
         r = maskFile(src, store.vault, store.settings.toggles, out, undefined,
-          { knownEntities, namesFile: store.paths.knownNames });
+          { strictResidual: !!store.settings.strictResidual });
       }
       r.action = intent;
       r.origPath = src;

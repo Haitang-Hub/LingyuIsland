@@ -344,7 +344,10 @@ test('扩展·姓名：复姓 / 2 字 / 3 字均由结构确认', () => {
   assert.ok(hasValue('原告：欧阳明。', 'name', '欧阳明'));
   assert.ok(hasValue('原告：张三。', 'name', '张三'));
   assert.ok(hasValue('原告：陈阿满。', 'name', '陈阿满'));
-  assert.strictEqual(vals('原告欧阳明到庭', 'name').length, 0, '无分隔单句不猜测');
+  // 「角色词 + 姓名 + 到庭/出庭」是证人、当事人到庭陈述的固定句式；
+  // 到庭/出庭本身也在动词排除表里，因此「原告到庭」不会把动词当姓名。
+  assert.ok(hasValue('原告欧阳明到庭', 'name', '欧阳明'), '到庭前的姓名应确认');
+  assert.strictEqual(vals('原告到庭', 'name').length, 0, '到庭是动词，不是姓名');
 });
 
 test('扩展·姓名：谓语不靠动作词识别，已确认姓名可传播', () => {
@@ -777,4 +780,72 @@ test('审计·同文档地名传播：石牌垌下房亲邻群', () => {
   const r2 = detect('里石牌垌子无关', { knownPlaces: new Set(['石牌垌']) });
   assert.strictEqual(r2.items.filter((i) => i.type === 'address').length, 0,
     '紧贴汉字无边界不应扩散');
+});
+
+/* ---------------- 补强：格式边界 / 全国性机构 / 裸所有格 ---------------- */
+
+test('补强·车牌：字母与序号间带间隔号/空格（实务排版）', () => {
+  const one = (t) => detect(t).items.filter((i) => i.type === 'plate').map((i) => i.value);
+  assert.deepStrictEqual(one('悬挂粤B·88888号牌'), ['粤B·88888']);
+  assert.deepStrictEqual(one('车牌号粤B 88666'), ['粤B 88666']);
+  assert.deepStrictEqual(one('涉事车辆粤B-12345'), ['粤B-12345']);
+  // 负例成对：序号位数不合（4 位 / 8 位）与纯编号仍不误判
+  assert.deepStrictEqual(one('编号粤B1234 已登记'), []);
+  assert.deepStrictEqual(one('编号粤B12345678 已作废'), []);
+  assert.deepStrictEqual(one('电源B·88888型号'), []);
+});
+
+test('补强·社交账号：裸 wxid 自带格式前缀，无需「微信号：」标签', () => {
+  const t = '其微信 wxid_ab12cd34ef 已被冻结';
+  assert.strictEqual(vals(t, 'im').length, 0, '微信/QQ 开关默认关闭');
+  assert.deepStrictEqual(vals(t, 'im', { toggles: { im: true } }), ['wxid_ab12cd34ef']);
+  // 负例成对：无前缀 / 前缀后过短 / 中文「微信号」不误判为裸 ID
+  assert.deepStrictEqual(vals('wxid_abc', 'im', { toggles: { im: true } }), []);
+  assert.deepStrictEqual(vals('账号 wxid 未绑定', 'im', { toggles: { im: true } }), []);
+});
+
+test('补强·机构：银行支行名的层级字不被当叙述前缀裁掉', () => {
+  assert.deepStrictEqual(vals('在中国农业银行雷州市支行开立账户', 'org'), ['中国农业银行雷州市支行']);
+  assert.deepStrictEqual(vals('中国工商银行股份有限公司涟水县支行', 'org'),
+    ['中国工商银行股份有限公司涟水县支行']);
+  // 负例成对：众人皆知的全国性机构无层级信息，按设计仍不单独屏蔽
+  assert.deepStrictEqual(vals('中国建设银行', 'org'), []);
+  assert.deepStrictEqual(vals('交通银行', 'org'), []);
+  // 叙述前缀仍被裁掉，不因放行专名而吞进整句
+  assert.deepStrictEqual(vals('我先后通过中国农业银行雷州市支行转账', 'org'), ['中国农业银行雷州市支行']);
+});
+
+test('补强·姓名：无角色词的「X的+随身财物」占有结构可确认', () => {
+  const pos = [
+    ['将张三的手机拿走', '张三'],
+    ['李四的车辆被盗', '李四'],
+    ['王芳的银行卡里存有赃款', '王芳'],
+    ['陈阿满的房屋内起获现金', '陈阿满'],
+    ['赵敏的身份证件在内', '赵敏'],
+  ];
+  for (const [text, name] of pos) {
+    assert.ok(hasValue(text, 'name', name), `${text} → 漏遮 ${name}`);
+  }
+});
+
+test('补强·姓名负例：定语/动词修饰的「的+财物」不确认姓名', () => {
+  const negs = [
+    '崭新的车辆停放路边', '黑色的轿车停在门口', '我开设的银行卡', '使用的手机被扣押',
+    '驾驶的车辆系借用', '购买的车辆已经过户', '该房屋的窗户破损', '单位的车辆已登记',
+    '被害人的手机被拿走', '丈夫的手机被拿走', '涉案的现金被扣押', '在他的手机里发现',
+    '对共同使用的手机进行检查',
+  ];
+  for (const t of negs) {
+    const got = vals(t, 'name');
+    assert.strictEqual(got.length, 0, `${t} → 误遮 ${JSON.stringify(got)}`);
+  }
+});
+
+test('补强·姓名：候选内部夹连词/代词不确认（十修遗留误遮）', () => {
+  assert.strictEqual(vals('被害人损失并获谅解', 'name').length, 0, '损失并获');
+  assert.strictEqual(vals('开一张其名下的银行卡', 'name').length, 0, '一张其');
+  assert.strictEqual(vals('我叫戴沐白，是本案辩护人', 'name').length, 0, '我叫戴沐白');
+  // 正例成对：同类结构里真名仍检出
+  assert.ok(hasValue('受援人王芳因涉嫌犯盗窃罪', 'name', '王芳'));
+  assert.ok(hasValue('（裴钱爷爷）到场', 'name', '裴钱'));
 });

@@ -58,6 +58,32 @@ const ORG_LEVEL_SCAN_RE = /[省市县区镇村]/g;
 const ORG_CITY_RE = /(?:北京|天津|上海|重庆|石家庄|太原|呼和浩特|沈阳|长春|哈尔滨|南京|杭州|合肥|福州|南昌|济南|郑州|武汉|长沙|广州|南宁|海口|成都|贵阳|昆明|拉萨|西安|兰州|西宁|银川|乌鲁木齐|深圳|苏州|青岛|大连|厦门|宁波|无锡|佛山|东莞|珠海|温州|常州|南通|烟台|潍坊|泉州|漳州|绍兴|嘉兴|金华|台州|中山|惠州|汕头|湛江|江门|湖州|洛阳|襄阳|宜昌|唐山|保定|徐州|扬州|镇江|盐城|淮安|连云港|临沂|济宁|淄博|威海|九江|赣州|宜春|衡阳|株洲|岳阳|常德)/;
 const ORG_PROVINCE_RE = /(?:河北|山西|辽宁|吉林|黑龙江|江苏|浙江|安徽|福建|江西|山东|河南|湖北|湖南|广东|广西|海南|四川|贵州|云南|陕西|甘肃|青海|宁夏|新疆|西藏|内蒙古|香港|澳门|台湾)/;
 
+// 全国性机构的名称本身不含行政区划层级（「中国建设银行」「中国移动通信集团」），
+// 统一「须含省/市/县…」的前提会把它们整段漏掉。这里补的是**封闭的专名集合**：
+// 全国性银行、电信运营商、能源央企与寿险/财险总公司，数量有限且名称唯一，
+// 与姓名侧的「不使用具体实体清单」原则不冲突（机构侧本来就靠后缀表这类封闭表）。
+// 命中后仍走同一套机构屏蔽形态（某X……后缀），只是不再要求层级字。
+const KNOWN_ORG_NAMES = [
+  // 银行（含政策性/国有大行/股份行总行）
+  '中国工商银行', '中国农业银行', '中国银行', '中国建设银行', '交通银行', '中国邮政储蓄银行',
+  '招商银行', '上海浦东发展银行', '中信银行', '中国光大银行', '华夏银行', '中国民生银行',
+  '兴业银行', '广发银行', '平安银行', '恒丰银行', '浙商银行', '渤海银行', '中国人民银行',
+  '国家开发银行', '中国进出口银行', '中国农业发展银行',
+  // 电信 / 能源 / 保险总公司
+  '中国移动通信', '中国联合网络通信', '中国电信', '中国铁塔', '国家电网', '中国南方电网',
+  '中国石油天然气', '中国石油化工', '中国人民财产保险', '中国人寿保险',
+  '中国太平洋财产保险', '中国平安财产保险',
+];
+const KNOWN_ORG_LONGEST = KNOWN_ORG_NAMES.slice().sort((a, b) => b.length - a.length);
+
+/** 机构值是否以某个全国性机构专名开头（允许后缀差异：股份有限公司/支行…） */
+function isKnownOrgName(value) {
+  const s = String(value || '');
+  if (s.length < 4) return false;
+  return KNOWN_ORG_LONGEST.some((name) => s.startsWith(name));
+}
+
+
 function orgLevelOf(value) {
   const s = String(value || '');
   const suffix = findOrgSuffixOf(s);
@@ -78,7 +104,13 @@ const NAME_ROLE_TAIL_RE = /[人员者师长犯告象方罪]$/;
 const ADMIN_TAIL_RE = /(?:省|自治区|自治州|地区|市|区|县|旗|盟|镇|乡|街道|苏木|村|社区)$/;
 // 单字虚词（介词/连词/副词）作尾：三字以上的姓名不会这样收尾，命中即不是姓名。
 // 只作用于 ≥3 字候选，2 字姓名（张和、李向）不受影响。
-const NAME_TAIL_PARTICLE_RE = /[因由被系向对经从给替把将并而则就都也还又再已未没不很更最]$/;
+// v7 补齐「在/和/与/时/后」：缓存曾把「戴沐白在」当作姓名，传播后留下
+// 「戴*在〔姓名·…〕」与真名两套编码。这些虚词收尾的候选一律不进缓存。
+const NAME_TAIL_PARTICLE_RE = /[因由被系向对经从给替把将并而则就都也还又再已未没不很更最在和与时后]$/;
+// 姓名字符串内部不可能出现连词/指示代词：「被害人损失并获谅解」曾被当作
+// 「损失并获」、「开一张其名下的银行卡」曾被当作「一张其」。这是封闭的虚词类，
+// 只对 ≥3 字候选生效（两字名「张其」这类不受影响）。
+const NAME_INNER_FUNCTION_RE = /[并而且及或则其该此各每本我你他她它]/;
 const ADMIN_FOLLOW_RE = /^(?:省|自治区|自治州|地区|市|区|县|旗|盟|镇|乡|街道|苏木|村|社区)/;
 const PHYSICAL_END_RE = /[，,。；;、：:（）()\s]/;
 const VERB_USE_AFTER_RE = /[了着过]/;
@@ -91,6 +123,9 @@ const NON_PERSON_NOUNS = new Set([
   '法官', '检察官', '律师', '医生', '医师', '教师', '老师', '学生', '警察', '司机', '会计', '出纳',
   '书记', '秘书', '代表', '委员', '专家', '学者', '工人', '农民', '干部', '领导', '同事', '朋友',
   '家人', '亲属', '亲戚', '妻子', '丈夫', '儿子', '女儿', '孩子', '儿童', '婴儿', '老人', '病人',
+  // 亲属称谓本身是关系名词，不会充当姓名（「被告人父亲到庭」曾把「父亲」遮掉）。
+  '父亲', '母亲', '爸爸', '妈妈', '爷爷', '奶奶', '外公', '外婆', '父母', '子女',
+  '哥哥', '姐姐', '弟弟', '妹妹', '叔叔', '舅舅', '姑姑', '姨妈', '兄弟', '姐妹',
   '患者', '乘客', '旅客', '顾客', '客户', '用户', '人员', '员工', '职工', '会员', '股东', '法人',
   '情况', '意见', '主张', '职务', '身份', '地址', '电话', '姓名', '名字', '性别', '年龄', '民族',
   '证言', '证词', '笔录', '材料', '证据', '结论', '结果', '理由', '事实', '问题', '事项', '内容',
@@ -112,6 +147,11 @@ const NON_PERSON_NOUNS = new Set([
   '案件', '案卷', '案情', '卷宗',
   // 状态副词：修饰后面的谓语（「辩护人详细查阅卷宗」），不能指称自然人。
   '详细', '仔细', '认真', '逐一', '反复', '多次', '亲自', '主动', '积极', '及时', '按时', '共同', '分别',
+  // 双字动词：常紧跟在角色词后作谓语（「跟检察官沟通是否能做酌定不诉」），
+  // 再被后随的助动词闭合，曾把「沟通」确认为姓名。属封闭的言语/动作动词类。
+  '沟通', '协商', '联系', '汇报', '研究', '讨论', '谈话', '交流', '交涉', '处理', '解决',
+  '答复', '回复', '反馈', '请示', '反映', '解释', '建议', '提议', '争取', '签字', '核实',
+  '达成', '签订', '签署', '履行', '遵守', '违反', '承担', '享有', '行使', '缴纳', '支付', '收取',
   // 序数/时间副词：属于封闭的语法副词类，不能指称某个人
   // （「被告人最后陈述」曾被确认为姓名「最后」）。
   '最后', '首先', '其次', '再次', '起初', '最初', '之后', '之前', '以后', '以前',
@@ -162,7 +202,22 @@ function validName(value) {
     && !ORG_TAIL_RE.test(s)
     // 单字虚词不能收尾：三字以上的姓名不会以介词/连词/副词结尾。
     // 「受援人因涉嫌犯盗窃罪」的「受援人因」（角色词+介词）曾被子句锚点确认。
-    && !(s.length >= 3 && NAME_TAIL_PARTICLE_RE.test(s));
+    && !(s.length >= 3 && NAME_TAIL_PARTICLE_RE.test(s))
+    // 内部夹连词/代词同样不是姓名（「损失并获」「一张其」）。
+    && !(s.length >= 3 && NAME_INNER_FUNCTION_RE.test(s));
+}
+
+/**
+ * 写入跨文件姓名缓存前的统一守卫：形状 + 功能词 + 叙述动词 + 虚词收尾。
+ * 传播会放大误判种子，缓存入口比普通候选更严格。
+ */
+function isSafeNameForCache(value) {
+  const s = String(value || '');
+  return validName(s)
+    && !isNonPersonNoun(s)
+    && !isFieldPhrase(s)
+    && !PHRASE_VERB_BAD_RE.test(s)
+    && !PHRASE_TAIL_BAD_RE.test(s);
 }
 
 function item(type, start, end, value, confident) {
@@ -237,7 +292,7 @@ const CLOSED_NAME_LIST_RE = /^、[\u4e00-\u9fa5]{2,3}(?:、[\u4e00-\u9fa5]{2,3})
 // 这类无边界句子——它们原本因 wholeRun 整段汉字超长而整段放弃。
 // 严格排除庭审动作/状态词（到庭、出庭、开庭、休庭、在场、签字…）：
 // 「原告欧阳明到庭」「村医周济世到场」「张三同意」仍是负例，动作词是句子的谓语而非姓名后叙述。
-const CRIME_FOLLOW_RE = /^(?:贿赂|受贿|行贿|索贿|贪污|挪用|侵占|私分|诈骗|盗窃|抢劫|抢夺|敲诈|勒索|故意伤害|过失致|非法拘禁|绑架|强奸|猥亵|非法吸收|集资诈骗|职务侵占|渎职|滥用职权|徇私舞弊|报复陷害|刑讯逼供|涉嫌|伙同|纠集|结伙|窜至|途经|翻墙|入户|盗走|窃得|骗取|销赃|分赃|退赔|退还|到案|归案|抓获|羁押|逮捕|移送|侦查|立案|取保|担任|接受|指派|承办|办理|会见|查阅|复制|通知|告知|决定|批准|审理|审查|核实|确认|宣布|判处|辩称|供述|陈述|声称|主张|要求|拒绝|承认|否认|指认|辨认|证实|作证|提起诉讼|提出异议|提出|表示同意|作最后|作陈述|作无罪|作有罪)/;
+const CRIME_FOLLOW_RE = /^(?:贿赂|受贿|行贿|索贿|贪污|挪用|侵占|私分|诈骗|盗窃|抢劫|抢夺|敲诈|勒索|故意伤害|过失致|非法拘禁|绑架|强奸|猥亵|非法吸收|集资诈骗|职务侵占|渎职|滥用职权|徇私舞弊|报复陷害|刑讯逼供|涉嫌|伙同|纠集|结伙|窜至|途经|翻墙|入户|盗走|窃得|骗取|销赃|分赃|退赔|退还|到案|归案|抓获|羁押|逮捕|移送|侦查|立案|取保|担任|接受|指派|承办|办理|会见|查阅|复制|通知|告知|决定|批准|审理|审查|核实|确认|宣布|判处|辩称|供述|陈述|声称|主张|要求|拒绝|承认|否认|指认|辨认|证实|作证|提起诉讼|提出异议|提出|表示同意|作最后|作陈述|作无罪|作有罪|到庭|出庭|报案|报警|受伤|死亡|上诉|答辩|应诉|反诉|起诉|诉称|服刑|刑满|释放|取保候审|监视居住|拘留|传唤|讯问|询问|辨认|指认|退赃|赔偿|谅解|委托|聘请|委派|指定)/;
 
 /* ---------------- 字段行嵌套角色词：「合议庭成员：审判员李舟」 ---------------- */
 
@@ -245,8 +300,8 @@ const CRIME_FOLLOW_RE = /^(?:贿赂|受贿|行贿|索贿|贪污|挪用|侵占|�
 // 审判员出庭/书记员记录/证人：到庭是动词短语，附：证人名单是名册短语，
 // 在记录/已到庭以句首功能字开头——它们与「角色词+姓名」结构同形，一律不确认。
 const PHRASE_HEAD_BAD_RE = /^[在已正将要该各均皆无每某]/;
-const PHRASE_VERB_BAD_RE = /(?:出庭|入庭|开庭|休庭|闭庭|退庭|复庭|到庭|提审|宣判|宣布|传唤|起立|坐下|落座|肃静|安静|候审|带到|带入|记录|回避|缺席|签名|告知|会见|述职|值庭|阅卷|参与|参加|陪同|陈述|答辩|举证|质证|宣读|讯问|发问|作证|签字|盖章|捺印|到场|到案|在逃|出示|出具|展示|提供|提交|调取|负责|担任|主管|分管|兼任|任职|调任|主持|主抓|名单|名册|花名|登记|签到|表明|说明|发表|举行|召开)$/;
-const PHRASE_TAIL_BAD_RE = /[册表簿单页栏]$/;
+const PHRASE_VERB_BAD_RE = /(?:出庭|入庭|开庭|休庭|闭庭|退庭|复庭|到庭|提审|宣判|宣布|传唤|起立|坐下|落座|肃静|安静|候审|带到|带入|记录|回避|缺席|签名|告知|会见|述职|值庭|阅卷|参与|参加|陪同|陈述|答辩|举证|质证|宣读|讯问|发问|作证|签字|盖章|捺印|到场|到案|在逃|出示|出具|展示|提供|提交|调取|负责|担任|主管|分管|兼任|任职|调任|主持|主抓|名单|名册|花名|登记|签到|表明|说明|发表|举行|召开|上诉|起诉|诉称|报案|报警|受伤|死亡|服刑|赔偿|谅解|退赃)$/;
+const PHRASE_TAIL_BAD_RE = /[册表簿单页栏在就和与时后]$/;
 
 // 嵌套角色词用封闭职务名词表精确匹配。纯词尾形态会把庭审叙述拆出伪姓名：
 // 「请公诉人及其他诉讼参与人入庭」→「入庭」、「核对被告人身份」→「身份」
@@ -259,9 +314,14 @@ const NEST_ROLES = new Set([
   '申请人', '被申请人', '复议申请人', '第三人', '诉讼代理人',
   '法定代表人', '法定代理人', '代表人', '负责人', '代理人',
   '委托代理人', '委托诉讼代理人', '辩护人', '被害人', '自诉人', '监护人',
-  '证人', '鉴定人', '翻译人', '附带民事诉讼原告人', '附带民事诉讼被告人',
+  '证人', '鉴定人', '翻译人', '附带民事诉讼原告人', '附带民事诉讼被告人', '罪犯',
 ]);
 
+// 与主扫描并行的精确锚点：只认表内的职务名词（长者优先），不受句子后面
+// 其他角色尾词的影响。用于修「被告人张三可以委托辩护人」这类锚点被抢走的场景。
+const ROLE_WORD_RE = new RegExp(
+  `(?:${[...NEST_ROLES].sort((a, b) => b.length - a.length).join('|')})`
+  + '[\\t \\u3000]*[:：]?[\\t \\u3000]*', 'g');
 // 字段作用域止于句末标点/换行；段间以顿号、逗号、空白分隔
 //（「审判员李舟、人民陪审员王五」「审判员李舟 审判员王五」）。
 const NEST_SCOPE_END = '。？！；\n\r';
@@ -298,7 +358,15 @@ function scanNestedPairs(text, from, confirmed) {
 function roleCandidates(text) {
   const confirmed = [];
   const ambiguous = [];
-  const scan = (re, field) => {
+  // 精确职务头衔锚点（副总经理/主任/医生…，封闭词表）后的两字候选：
+  // 「副总经理李想，以…」中「李想」吃掉整段连续串、右边界是标点或段末，
+  // 但既无冒号排版又非独占行，原有闭合路径都不认。这类候选单看一处证据不足
+  // （「医生值班」同形会误伤），因此不直接确认，先记为弱候选，由 collectEntities
+  // 按全文件复现 + 上下文多样性决定（文件独立，不跨文件传播）。
+  const weakTitle = [];
+  // strongAnchor：精确封闭词表锚点（如 TITLE_ANCHOR_RE 的副总经理/主任/医生…），
+  // 词本身即「后面跟人名」的强结构，误伤风险远低于词尾形态锚点。
+  const scan = (re, field, strongAnchor = false) => {
     re.lastIndex = 0;
     let m;
     while ((m = re.exec(text)) !== null) {
@@ -312,6 +380,9 @@ function roleCandidates(text) {
         || ROLE_TAIL_VERB_RE.test(compact) || ROLE_TAIL_VERB_RE.test(tailOne)) continue;
       // 「原告方 / 被告方」是集合指代，不是等待填写姓名的字段。
       if (/(?:告|人|犯|象|双|各|一|二|两|三|四|五|六|七|八|九|十|多)方(?:[一二三四五六七八九十\d]{1,2})?$/.test(compact)) continue;
+      // 「二人/三人/数人」是数量短语，末字与角色词尾同形但不是身份锚点：
+      // 「张三、李四二人共同实施盗窃」曾借它把「共同实施」确认成姓名。
+      if (/[一二两三四五六七八九十数多几\d]+人$/.test(compact)) continue;
       let start = m.index + prefix.length;
       // 连续汉字串；少数民族姓名允许一个间隔号（阿依古丽·买买提）。
       let run = /^[\u4e00-\u9fa5]+(?:·[\u4e00-\u9fa5]+)?/.exec(text.slice(start));
@@ -370,6 +441,8 @@ function roleCandidates(text) {
         // 否定副词/诉讼负面词开头不是姓名：「被申请人未足额支付」曾借 personMarked
         // 进入两遍式候选，再因子串复现凑齐统计被误确认成姓名「未足额」。
         if (NEGATIVE_HEAD_RE.test(value)) continue;
+        if (FUNCTION_HEAD_RE.test(value)) continue;
+        if (value.length >= 3 && FUNCTION_TAIL_RE.test(value)) continue;
         // 「姓名：审判员李长顺」：字段值以嵌套角色词开头时，角色词本身及其
         // 片段都不是姓名（否则会把「审判」遮掉）；整段交给 scanNestedPairs
         // 按「角色词 + 姓名」精确剥出「李长顺」。
@@ -399,7 +472,7 @@ function roleCandidates(text) {
         // 「杨素侠的委托」同样是强结构（委托人是当事人），代理词高频句式；
         // 后接必须是身份/亲属/权属类名词，「原告肖像的照片」这类普通名词组合不算。
         const possessiveClosed = len <= 3 && after === '的'
-          && /^的(?:辩护人|代理人|诉讼代理人|委托代理人|律师|家属|亲属|监护人|法定代表人|代表人|近亲属|意见|陈述|供述|辩解|行为|身份|账户|卡|卡号|账号|银行卡|存折|工资卡|社保卡|手机号|身份证|财产|住所|联系方式|授权|委托|[\u4e00-\u9fa5]{0,6}(?:卡号|银行卡|工资卡|社保卡|存折|账号))/.test(text.slice(end));
+          && /^的(?:辩护人|代理人|诉讼代理人|委托代理人|律师|家属|亲属|监护人|法定代表人|代表人|近亲属|意见|陈述|供述|辩解|行为|身份|账户|卡|卡号|账号|银行卡|存折|工资卡|社保卡|手机号|身份证|财产|住所|联系方式|授权|委托|车|车辆|汽车|轿车|摩托车|电动车|手机|电话|电脑|房产|房屋|住宅|首饰|金饰|存款|现金|财物|物品|微信|支付宝|证件|[\u4e00-\u9fa5]{0,6}(?:卡号|银行卡|工资卡|社保卡|存折|账号))/.test(text.slice(end));
         // 「姓名 + 逗号 + 叙述动词」（「本律师会见裴钱，了解案件情况」）。
         const commaClosed = len <= 3
           && /^[，,]\s*(?:了解|询问|核实|听取|查阅|复制|会见|提出|要求|表示|陈述|辩称|供述|承认|否认|交代)/.test(text.slice(end));
@@ -409,6 +482,14 @@ function roleCandidates(text) {
           && CRIME_FOLLOW_RE.test(text.slice(end + 1));
         // 「姓名 + 被 + 谓语」：校长沙悟净被组织留置 → 沙悟净是承受动作的人。
         const passiveClosed = len <= 4 && after === '被';
+        // 「姓名 + 助动词」是主谓结构（「被告人张三应当如实供述」）：助动词只能
+        // 接在主语之后，因此它本身就把前面的候选封闭成主语位。
+        const auxClosed = FUNCTION_HEAD_RE.test(text.slice(end));
+        // 整段只有「角色词 + 姓名」是文书标题/签名栏的版式（起诉书首部
+        // 「被告人张伟」独占一行）：候选吃掉整串且其后无内容即为右边界。
+        // 只认 ≤3 字，避免把「负责人张罗商议」「被告人认罪认罚」整段当姓名。
+        const blockClosed = raw.length <= 3 && len === raw.length
+          && !text.slice(0, m.index).trim() && !text.slice(end).trim();
         // 普通角色字段：默认 2~3 字；4 字以上须有字段/人口学/后随动词支撑。
         const lengthClosed = len <= 3 || field || demographicClosed || narrationClosed;
         const listClosed = lengthClosed && wholeRun && after === '、'
@@ -433,12 +514,22 @@ function roleCandidates(text) {
           && (!fieldLoose || fieldLooseClosed);
         const candidate = { start, end, value, raw };
         const closed = listClosed || physicallyClosed || demographicClosed || narrationClosed
-          || fieldClosed || possessiveClosed || commaClosed || causeClosed || passiveClosed;
+          || fieldClosed || possessiveClosed || commaClosed || causeClosed || passiveClosed
+          || auxClosed || blockClosed;
         // 冒号后是句子（而非字段值）时，冒号处的字词一律不当姓名——
         // 例外是「姓名：」显式字段，它是排版声明，不参与该判定。
         if (closed && !(speechLike && !field)) {
           accepted.push(candidate);
         } else if (!colon2 && len === 3 && personMarked) ambiguous.push(candidate);
+        // 精确头衔锚点 + 两字候选 + 整段连续串 + 标点/段末右边界：
+        // 「副总经理李想，以…」「联系该公司副总经理李想」。已过上面的
+        // validName/非名词/非字段词/非虚词尾守卫，仍不当场确认，交全文件复现判定。
+        if (strongAnchor && (len === 2 || len === 3) && wholeRun && !field
+          && (PHYSICAL_END_RE.test(after) || !after)
+          && !PHRASE_HEAD_BAD_RE.test(value)
+          && !(value.length === 2 && PHRASE_VERB_BAD_RE.test(value))) {
+          weakTitle.push(candidate);
+        }
       }
       // 字段值/含间隔号长名有唯一解：取最长的那一个，避免「姓名：阿依古丽·买买提」
       // 同时把「阿依」「阿依古」等前缀都当姓名（区间互相嵌套，屏蔽会打架）。
@@ -453,9 +544,14 @@ function roleCandidates(text) {
     }
   };
   scan(ROLE_PREFIX_RE, false);
-  scan(TITLE_ANCHOR_RE, false);
+  // 角色词尾形态的主扫描是贪婪的：一句话里若后面还有「辩护人/代理人/当事人」这类
+  // 以角色尾字收尾的词，锚点会被它抢走（「被告人张三可以委托辩护人」→ 锚点整段
+  // 吃到句末，张三丢失）。这里再按封闭职务名词表精确补一趟，锚点只落在角色词本身。
+  // 只做加法：所有候选仍要过同一组防误遮守卫，不改变原有判定。
+  scan(ROLE_WORD_RE, false);
+  scan(TITLE_ANCHOR_RE, false, true);
   scan(NAME_FIELD_RE, true);
-  return { confirmed, ambiguous };
+  return { confirmed, ambiguous, weakTitle };
 }
 
 function demographicNames(text) {
@@ -491,6 +587,13 @@ const ANAPHOR_HEAD_RE = /^(?:该|本|此|其|我|你|他|她|咱|各|每|全|同
 // 是姓名本身的组成部分，按封闭语法类拒绝，不引入姓名单。
 const ANAPHOR_TAIL_RE = /(?:上|下|前|后|内|外|中|间)$/;
 const NEGATIVE_HEAD_RE = /^(?:非|未|无|不|没|违|涉嫌|犯罪)/;
+// 助动词/情态词开头同样不是姓名，而且会与后一个词连成更长的伪候选：
+// 「被告人应当如实供述」曾把「应当如实」当成 4 字姓名（后随「供述」闭合）。
+// 这是封闭的语法类（助动词/情态副词），不是姓名或姓氏清单。
+const FUNCTION_HEAD_RE = /^(?:应当|应该|应到|必须|需要|可以|有权|无权|依法|依照|根据|按照|如实|自愿|主动|已经|是否|能否|同意|拒绝|要求|申请|共同|分别|一起|先后|均)/;
+// 候选尾巴上粘着助动词同理不是姓名（「张三应当」）：三字以上才判，避免误伤
+// 以「当/该」收尾的两字真名。
+const FUNCTION_TAIL_RE = /(?:应当|应该|可以|必须|需要|同意|拒绝|要求|申请|如实|自愿|依法|已经)$/;
 
 function suspicionNames(text) {
   const out = [];
@@ -537,6 +640,117 @@ function possessiveNames(text) {
   return out;
 }
 
+/* ---------------- 「姓名 + 财产方位」结构锚点 ---------------- */
+
+// 侵财类案卷的高频句式：「将李长生车内2000元现金盗走」「李长生名下房产」
+// 「将王东手机拿走」。这类姓名前面没有角色词（宾语位直接由「将/把」引入），
+// 后面紧跟表示财产所在处的方位词，结构封闭、可作姓名右边界。
+// 只认「车内/家中/住处/名下/随身」这组固定方位短语，不引入任何姓名清单。
+const PROPERTY_SITE_ANCHOR_RE = /(?:^|[\s，,。；;、：:（）()【】\[\]“”"'‘’]|将|把|对|向|给|在|到|从|于)([\u4e00-\u9fa5]{2,3})(?=(?:车内|家中|住处|名下|随身))/g;
+// 同一结构里姓名前也可能带角色词（「将被告人张三车内现金拿走」），
+// 用封闭职务名词表剥掉角色词后再取姓名。
+const PROPERTY_SITE_ROLE_RE = new RegExp(
+  `(?:${[...NEST_ROLES].sort((a, b) => b.length - a.length).join('|')})[\\s：:]*`
+  + `([\\u4e00-\\u9fa5]{2,3})(?=(?:车内|家中|住处|名下|随身))`, 'g');
+// 自称/他人指代/组织泛称不是姓名（「自己车内」「单位名下」）。
+const SELF_NOUN_RE = /^(?:自己|本人|他人|别人|对方|单位|公司|车主|自家|家里|大家|我家|你家|他家|这家|那家|该家)/;
+
+function propertySiteNames(text) {
+  const out = [];
+  const scan = (re) => {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const value = m[1];
+      if (!validName(value) || isNonPersonNoun(value) || isFieldPhrase(value)) continue;
+      if (ANAPHOR_HEAD_RE.test(value) || NEGATIVE_HEAD_RE.test(value)) continue;
+      if (SELF_NOUN_RE.test(value)) continue;
+      const start = m.index + m[0].length - value.length;
+      out.push(item('name', start, start + value.length, value, true));
+    }
+  };
+  scan(PROPERTY_SITE_ANCHOR_RE);
+  scan(PROPERTY_SITE_ROLE_RE);
+  return out;
+}
+
+/* ---------------- 「并列姓名 + 二人」与「姓名 + 亲属称谓」结构锚点 ---------------- */
+
+// 侵财/共同犯罪叙述里两名被告常以「裴钱、柳如烟二人以拉车门的方式…」出现，
+// 前面没有任何角色词。顿号 + 数量词「二人/三人/多人/等人」是并列人名的封闭结构，
+// 两侧候选同时确认。「苹果、香蕉等水果」这类普通并列没有数量词，不会被命中。
+const COORD_NAME_RE = /(?:^|[\s，,。；;、：:（）()【】“”"'‘’])([\u4e00-\u9fa5]{2,3})、([\u4e00-\u9fa5]{2,3})(?=(?:二人|两人|三人|四人|数人|多人|等人|共同|均|分别|一起|结伙|先后|伙同))/g;
+// 亲属称谓紧跟姓名是「（裴钱爷爷）」这类括注的唯一可判据；称谓本身是封闭词表。
+const KIN_TAIL_RE = /^(?:爷爷|奶奶|外公|外婆|父亲|母亲|爸爸|妈妈|儿子|女儿|妻子|丈夫|哥哥|姐姐|弟弟|妹妹|叔叔|舅舅|姑姑|姨妈|家属|亲属|家人)/;
+const KIN_NAME_RE = /(?:^|[\s，,。；;、：:（）()【】“”"'‘’])([\u4e00-\u9fa5]{2,3})(?=(?:爷爷|奶奶|外公|外婆|父亲|母亲|爸爸|妈妈|儿子|女儿|妻子|丈夫|哥哥|姐姐|弟弟|妹妹|叔叔|舅舅|姑姑|姨妈|家属|亲属))/g;
+
+function structuredNames(text) {
+  const out = [];
+  const guard = (value) => value.length >= 2 && validName(value) && !isNonPersonNoun(value)
+    && !isFieldPhrase(value) && !ANAPHOR_HEAD_RE.test(value)
+    && !NEGATIVE_HEAD_RE.test(value) && !SELF_NOUN_RE.test(value);
+  COORD_NAME_RE.lastIndex = 0;
+  let m;
+  while ((m = COORD_NAME_RE.exec(text)) !== null) {
+    const lead = m[0].length - m[1].length - 1 - m[2].length; // 左侧边界字符（0 或 1）
+    const start1 = m.index + lead;
+    const start2 = start1 + m[1].length + 1;
+    if (guard(m[1])) out.push(item('name', start1, start1 + m[1].length, m[1], true));
+    if (guard(m[2])) out.push(item('name', start2, start2 + m[2].length, m[2], true));
+  }
+  KIN_NAME_RE.lastIndex = 0;
+  while ((m = KIN_NAME_RE.exec(text)) !== null) {
+    const value = m[1];
+    if (!guard(value)) continue;
+    if (KIN_TAIL_RE.test(value)) continue;
+    const start = m.index + m[0].length - value.length;
+    out.push(item('name', start, start + value.length, value, true));
+  }
+  return out;
+}
+
+/* ---------------- 「姓名 + 的 + 随身财物」裸所有格锚点 ---------------- */
+
+// 侵财叙述里姓名也可能完全没有角色词，只以「X 的 + 随身财物」出现在宾语位
+//（「将张三的手机拿走」「李四的车辆被盗」）。这种结构没有角色锚点也没有字段，
+// 但占有关系本身就是身份证据：财物名词是封闭的随身物品类，且其后必须紧跟
+// 受损或方位谓语（被/丢失/里/内…），定语结构（黑色的轿车）不会命中。
+const BARE_POSSESS_ITEM =
+  '(?:手机|车辆|汽车|轿车|摩托车|电动车|自行车|房产|房屋|住宅|存款|现金|银行卡|工资卡|社保卡|账户|微信|支付宝|电脑|首饰|金饰|手表|钱包|身份证|证件)';
+const BARE_POSSESSIVE_RE = new RegExp(
+  '(?:^|[\\s，,。；;、：:（）()【】“”"‘’]|将|把|向|对|给|在|到|从|于)'
+  + '([\\u4e00-\\u9fa5]{2,3})的(' + BARE_POSSESS_ITEM + ')'
+  + '(?=(?:件|卡|号|被|被盗|被抢|被扣|丢失|遗失|不见|少了|拿走|盗走|骗走|抢走|卖掉|变卖|转移|里|中|内|上|旁|附近|尚未|已经))', 'g');
+// 「黑色的轿车」「崭新的车辆」是定语而非占有关系：候选以颜色/新旧/量词字收尾，
+// 一律不是姓名（封闭的修饰语素类，不涉及任何姓名清单）。
+const POSSESS_TAIL_BAD_RE = /[色新旧全型辆台部件张个条套等款项种]$/;
+// 「使用的手机」「购买的车辆」是动词定语，候选以这些动词收尾同样不是姓名。
+const POSSESS_VERB_TAIL_RE = /(?:使用|购买|持有|驾驶|乘坐|租用|借用|开设|办理|登记|所有|涉案|作案)$/;
+// 左边界可能吃进功能字（「是我开设的」），以这些字开头的候选不是姓名。
+const POSSESS_HEAD_BAD_RE = /^[是了的在和与及或由为以对向从于将把被遭]/;
+
+function barePossessiveNames(text) {
+  const out = [];
+  BARE_POSSESSIVE_RE.lastIndex = 0;
+  let m;
+  while ((m = BARE_POSSESSIVE_RE.exec(text)) !== null) {
+    // 行首/段首没有左边界字符时，{2,3} 会把介词一起吃掉（「将张三的手机」→
+    // 「将张三」）。剥离前导功能字后再判定，起点随之右移。
+    let value = m[1];
+    const leadBad = /^[将把向对给在到从于和与及或由为以是了的被遭]+/.exec(value);
+    if (leadBad) value = value.slice(leadBad[0].length);
+    const itemLen = m[2].length;
+    if (value.length < 2) continue;
+    const valueStart = m.index + m[0].length - itemLen - 1 - value.length;
+    if (!validName(value) || isNonPersonNoun(value) || isFieldPhrase(value)) continue;
+    if (ANAPHOR_HEAD_RE.test(value) || NEGATIVE_HEAD_RE.test(value)) continue;
+    if (SELF_NOUN_RE.test(value) || POSSESS_HEAD_BAD_RE.test(value)) continue;
+    if (POSSESS_TAIL_BAD_RE.test(value) || POSSESS_VERB_TAIL_RE.test(value)) continue;
+    out.push(item('name', valueStart, valueStart + value.length, value, true));
+  }
+  return out;
+}
+
 function detectLocalNames(text) {
   const role = roleCandidates(text);
   const items = [
@@ -544,8 +758,11 @@ function detectLocalNames(text) {
     ...demographicNames(text),
     ...suspicionNames(text),
     ...possessiveNames(text),
+    ...propertySiteNames(text),
+    ...structuredNames(text),
+    ...barePossessiveNames(text),
   ].map((c) => item('name', c.start, c.end, c.value, true));
-  return { items, ambiguous: role.ambiguous };
+  return { items, ambiguous: role.ambiguous, weakTitle: role.weakTitle };
 }
 
 function isPersonTableLabel(value) {
@@ -659,6 +876,27 @@ function addressAt(text, start) {
   return item('address', start, start + end, raw.slice(0, end), true);
 }
 
+// 引导词与地址值之间常还夹一个动词/介词（「案发地点位于涟水县…」「现场在临江市…」）。
+// 这些字不是地址的一部分，留在值里会让屏蔽形态变成「某X……位于」。多字动词整词跳过；
+// 单字介词（在/从/到/往/至/向）只在跳过之后仍能解析出地址时才跳，
+// 避免把「于都县」这类以介词同形字开头的真实地名切坏。
+const ADDRESS_GUIDE_HEAD_RE = /^(?:坐落于|位于|地处|处于|位在)/;
+const ADDRESS_PREP_HEAD_RE = /^[在从到往至向]/;
+
+function addressAfterGuide(text, start) {
+  const direct = addressAt(text, start);
+  const head = ADDRESS_GUIDE_HEAD_RE.exec(text.slice(start));
+  if (head) {
+    const shifted = addressAt(text, start + head[0].length);
+    if (shifted) return shifted;
+  }
+  if (ADDRESS_PREP_HEAD_RE.test(text[start] || '')) {
+    const shifted = addressAt(text, start + 1);
+    if (shifted) return shifted;
+  }
+  return direct;
+}
+
 function detectAddresses(text) {
   const out = [];
   const guides = [];
@@ -667,7 +905,7 @@ function detectAddresses(text) {
   while ((m = ADDRESS_GUIDE_RE.exec(text)) !== null) {
     const start = m.index + m[0].length;
     guides.push({ from: m.index, to: start });
-    const hit = addressAt(text, start);
+    const hit = addressAfterGuide(text, start);
     if (hit) out.push(hit);
   }
   GENERIC_ADDRESS_RE.lastIndex = 0;
@@ -710,6 +948,8 @@ const ORG_ROLE_VERB_RE = /(?:负责|担任|主管|分管|兼任|任职|调任|�
 // 出示/出具类叙述动词同样不能吞进字号（「出示红日建材有限公司」曾整体入字号，
 // 前2取到「出示」而显示为「出示****公司」）。这些词只作动作，不作机构字号。
 const ORG_NARRATION_VERB_RE = /(?:出示|出具|展示|提供|提交|调取)$/;
+// 「我先是找到涟水县实验中学校长…」这类行为动词只带机构宾语，不能吞进字号。
+const ORG_ACTION_VERB_RE = /(?:找到|前往|来到|联系|约定|入住|到达|抵达|走进|拜访|租用|途经|结识|走访|进入)$/;
 // 角色人称词的「人」同样不能吞进字号（「负责人李太白银行转账」曾得「人李太白银行」，
 // 还会在重叠消解时盖掉真姓名）。「人民银行/人民医院」的「人」前面是机构专名而非角色词，不受影响。
 const ORG_ROLE_PERSON_RE = /(?:被会见|会见|受援|委托诉讼代理|委托代理|法定代表|实际负责|委托|辩护|代理|被上诉|上诉|申诉|申请执行|被执行|申请|复议|被处罚|违法行为|行为|行贿|受贿|报案|被侵害|被害|被侵权|当事|同案|涉案|在场|主持|记录|调查|陪同|到庭|公诉|见证|负责|第三|证)人$/;
@@ -718,6 +958,7 @@ const ORG_ROLE_PERSON_RE = /(?:被会见|会见|受援|委托诉讼代理|委托
 function isOrgLeftBreak(text, ch, start, brandEnd, suffixEnd) {
   if (ORG_ROLE_VERB_RE.test(text.slice(Math.max(0, start - 4), start))) return true;
   if (ORG_NARRATION_VERB_RE.test(text.slice(Math.max(0, start - 4), start))) return true;
+  if (ORG_ACTION_VERB_RE.test(text.slice(Math.max(0, start - 4), start))) return true;
   if (ORG_PREP_RE.test(text.slice(Math.max(0, start - 4), start))) return true;
   // 「负责人/辩护人/证人…」的人后紧跟的只能是姓名或叙述，不是机构字号；
   // 窗口取 14 字覆盖「委托诉讼代理人/申请执行人」等长角色词
@@ -801,8 +1042,10 @@ function detectOrgs(text) {
     let brand = text.slice(start, brandEnd);
     // 若首个行政区划单元前混入长叙述，只从该单元稳定的二字地名核心重新起头。
     // 正常「江苏省淮安市…」首单元已经很短，不会被裁切。
+    // 全国性机构专名（「中国农业银行雷州市支行」）的层级字出现在专名之后，
+    // 属于机构名自身结构而非叙述前缀，不能裁切。
     const admin = ADMIN_UNIT_RE.exec(brand);
-    if (admin && admin.index > 4) {
+    if (admin && admin.index > 4 && !isKnownOrgName(brand)) {
       start += admin.index - 2;
       brand = text.slice(start, brandEnd);
     }
@@ -821,6 +1064,8 @@ function detectOrgs(text) {
     if (GENERIC_ORG_RE.test(brand)) continue;
     // 统一形态前提：字号须含 省/市/县/区/镇/村（或命中固定省市词典）。
     // 该前提同时兜住了「危害法庭安全」这类叙述残段——它们不含层级信息。
+    // 众人皆知的全国性机构（中国建设银行/交通银行）属公开主体、非个人信息，
+    // 按设计不做单独屏蔽（R-003b 锁定），见 README「机构」条目。
     if (!orgLevelOf(value)) continue;
     out.push(item('org', start, end, value, true));
   }
@@ -953,11 +1198,13 @@ function collectEntities(input, options = {}) {
     .map((v) => String(v || '')).filter((v) => v.trim());
   const known = knownFromOptions(options);
   const ambiguous = [];
+  const weakTitle = [];
 
   for (const block of blocks) {
     const local = detectLocalNames(block);
     for (const it of local.items) known.name.add(it.value);
     ambiguous.push(...local.ambiguous);
+    weakTitle.push(...local.weakTitle);
     for (const hit of detectAddresses(block)) known.address.add(hit.value);
     for (const hit of detectOrgs(block)) known.org.add(hit.value);
   }
@@ -1013,6 +1260,23 @@ function collectEntities(input, options = {}) {
     known.name.add(unique[0]);
   }
 
+  // 精确头衔锚点后的两字候选（weakTitle）：单处证据不足，须全文件复现 ≥3 次、
+  // 左右上下文均 ≥2 种，且不与已知实体子串重叠才确认。「副总经理李想」在真实
+  // 文书里出现 5 次且上下文各异 → 确认；「医生值班」这类孤例 → 不确认。
+  const weakStats = new Map();
+  for (const c of weakTitle) {
+    if (!weakStats.has(c.value)) weakStats.set(c.value, candidateStats(corpus, c.value));
+  }
+  const weakEligible = new Set();
+  for (const c of weakTitle) {
+    const s = weakStats.get(c.value);
+    if (!s || s.count < 3 || s.previous.size < 2 || s.next.size < 2) continue;
+    if ([...known.name].some((name) => name !== c.value
+      && (name.startsWith(c.value) || c.value.startsWith(name)))) continue;
+    weakEligible.add(c.value);
+  }
+  for (const value of weakEligible) known.name.add(value);
+
   return known;
 }
 
@@ -1026,4 +1290,5 @@ module.exports = {
   collectEntities,
   hashName,
   validName,
+  isSafeNameForCache,
 };

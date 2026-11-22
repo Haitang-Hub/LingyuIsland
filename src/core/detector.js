@@ -15,13 +15,20 @@ const RE = {
   bank: /(?<![\d\-])(?:62|60|4\d|5[1-5]|3[47]|35(?:2[89]|[3-8]))\d(?:[\s\-—－]?\d){10,18}(?![\d\-])/g,
   email: /[\u4e00-\u9fa5A-Za-z0-9._%+-]+@[\u4e00-\u9fa5A-Za-z0-9-]+(?:\.[\u4e00-\u9fa5A-Za-z0-9-]+)+/g,
   passport: /(?<![A-Za-z0-9])[EGSPD][0-9]{8}(?![0-9A-Za-z])/g,
-  plate: /(?<![A-Za-z0-9])[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵青藏川宁琼使领粤][A-HJ-NP-Z][A-HJ-NP-Z0-9挂学警港澳]{5,6}(?![A-Za-z0-9])/g,
+  // 省份简称 + 发牌机关字母 + 序号；实务排版常在字母与序号间加间隔号/空格
+  //（「粤B·88888」「粤B 88888」），分隔符属号牌书写的一部分，一并遮蔽。
+  plate: /(?<![A-Za-z0-9])[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵青藏川宁琼使领粤][A-HJ-NP-Z][·•.．\-－\u3000 ]?[A-HJ-NP-Z0-9挂学警港澳]{5,6}(?![A-Za-z0-9])/g,
   // 案号统一从年份括号起匹配（括号后字号/序号整体捕获，{1,16} 覆盖常见文号）；
   // 括号前缀（机关简称 / 省市简称+地市括注）由 extendCasePrefixes 向左补回。
-  caseNo: /[（(\[【［]\s*(?:19|20)\d{2}\s*[）)\]】］]\s*[\u4e00-\u9fa5A-Za-z0-9]{1,16}\s*号(?:之[一二三四五六七八九十\d]+)?/g,
+  // 括号形态须覆盖实务排版：全角（）/半角[]/方头【】/六角〔〕（公文与检察文书
+  // 的标准案号括号，如「南检刑诉〔2026〕15号」）/兼容﹝﹞。
+  caseNo: /[（(\[【［〔﹝]\s*(?:19|20)\d{2}\s*[）)\]】］〕﹞]\s*[\u4e00-\u9fa5A-Za-z0-9]{1,16}\s*号(?:之[一二三四五六七八九十\d]+)?/g,
   landline: /(?<!\d)0\d{2,3}[-—\s]?\d{7,8}(?!\d)/g,
   hotline: /(?<!\d)(?:400|800)[-—\s]?\d{3}[-—\s]?\d{4}(?!\d)/g,
   imWechat: /(?:微信号|微信账号|WX号|wx号|vx号|VX号|威信号|WeChat号)\s*[:：]?\s*([A-Za-z][-_A-Za-z0-9]{5,19})/g,
+  // 微信原始 ID 自带「wxid_」前缀，本身就是格式标记，无需「微信号：」标签；
+  // 前缀后是大小写字母/数字/下划线/短横，不可能是普通词语，误报面极小。
+  imWxid: /(?<![0-9A-Za-z_-])wxid_[0-9A-Za-z_-]{4,24}/gi,
   imQQ: /(?:QQ号|QQ账号|QQ)\s*[:：]?\s*([1-9]\d{4,10})(?!\d)/g,
   hkmtPermit: /(?<![A-Za-z0-9])[HM]\d{8}(?![0-9A-Za-z])/g,
   hkmtTaiwan: /台胞证\s*[:：]?\s*([1-9]\d{7})(?!\d)/g,
@@ -29,8 +36,17 @@ const RE = {
 };
 
 const RE_LICENSE = /(?:律师执业证号|执业证号|执业证书号|执业证|资格证号|法律职业资格证号|公证员执业证号)\s*[:：]?\s*第?\s*([A-Za-z]?\d{15,20})/g;
-const RE_IDCARD_LOOSE = /(?:公民身份号码|居民身份号码|身份号码|身份证号码|身份证号|身份证|证件号码|证件号)\s*[:：]?\s*([1-9]\d{5}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx])/g;
-const RE_BANK_KEYWORD = /(?:银行卡号|银行账号|卡号|账号|储蓄卡|借记卡|信用卡)\s*[:：]?\s*((?:\d[\s\-—－]?){12,20}\d)/g;
+// 身份证关键词路径额外接受 15 位老身份证（2013 年前签发，旧案卷常见）；
+// 裸号仍只认 18 位，避免把 15 位账号/编号误当证件号。
+const RE_IDCARD_LOOSE = /(?:公民身份号码|居民身份号码|身份号码|身份证号码|身份证号|身份证|证件号码|证件号)\s*[:：]?\s*((?:[1-9]\d{5}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]|[1-9]\d{5}\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3})(?!\d))/g;
+// 关键词路径：文书里常见「交易卡号为“xxxx”」「账号是 xxxx」「银行账号：（xxxx）」。
+// 关键词本身即语义证据，不再要求 Luhn——实务中测试号/旧卡号校验位可能不合法，
+// 但写在卡号字段里就必须遮蔽。裸号仍走严格校验（另有弱语境兜底，见 scanBankWeak）。
+const RE_BANK_KEYWORD = /(?:银行结算账户|交易卡号|银行卡号|银行账号|储蓄卡号|借记卡号|信用卡号|卡号|账号|账户号)\s*(?:为|是)?\s*[:：]?\s*[“"‘'（(\[]?\s*((?:\d[\s\-—－]?){12,20}\d)/g;
+// 弱语境兜底：不合法校验位的长卡号，若紧跟银行/交易/转账等语义词，也按卡号处理。
+// 只覆盖 16–19 位且落在常见卡组织前缀，避免把模板号/流水号误当卡号。
+const BANK_CONTEXT_RE = /(?:银行卡|卡号|账号|账户|银行|交易|转账|转帐|支付|收款|付款|消费|刷卡|储蓄|借记|信用|网银|汇款|工资|流水)/;
+const BANK_BIN_RE = /^(?:62|60|4\d|5[1-5]|3[47]|35(?:2[89]|[3-8]))/;
 
 const ID_WEIGHTS = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2];
 const ID_CHECK = ['1', '0', 'X', '9', '8', '7', '6', '5', '4', '3', '2'];
@@ -74,6 +90,21 @@ function isValidBank(raw) {
   return /^\d{13,19}$/.test(digits) && luhnValid(digits);
 }
 
+/** 校验位不合法、但处于银行语义语境中的卡号：补足「卡号为xxx」之外的裸号场景 */
+function scanBankWeak(text, out) {
+  RE.bank.lastIndex = 0;
+  let m;
+  while ((m = RE.bank.exec(text)) !== null) {
+    if (m.index === RE.bank.lastIndex) RE.bank.lastIndex++;
+    const raw = m[0];
+    const digits = cleanBank(raw);
+    if (isValidBank(raw) || !/^\d{16,19}$/.test(digits) || !BANK_BIN_RE.test(digits)) continue;
+    const ctx = text.slice(Math.max(0, m.index - 24), Math.min(text.length, m.index + raw.length + 24));
+    if (!BANK_CONTEXT_RE.test(ctx)) continue;
+    out.push({ type: 'bank', start: m.index, end: m.index + raw.length, value: digits });
+  }
+}
+
 function detectStrong(text, opts) {
   const out = [];
   const scan = (re, type, validate, normalize) => {
@@ -105,13 +136,18 @@ function detectStrong(text, opts) {
   if (opts.bank !== false) {
     scan(RE.bank, 'bank', isValidBank, cleanBank);
     scanGrouped(RE_BANK_KEYWORD, 'bank', cleanBank);
+    scanBankWeak(text, out);
   }
   if (opts.phone !== false) scan(RE.phone, 'phone');
   if (opts.email !== false) scan(RE.email, 'email');
   if (opts.passport !== false) scan(RE.passport, 'passport');
   if (opts.plate !== false) scan(RE.plate, 'plate');
   if (opts.landline === true) { scan(RE.landline, 'landline'); scan(RE.hotline, 'landline'); }
-  if (opts.im === true) { scanGrouped(RE.imWechat, 'im'); scanGrouped(RE.imQQ, 'im'); }
+  if (opts.im === true) {
+    scanGrouped(RE.imWechat, 'im');
+    scan(RE.imWxid, 'im');
+    scanGrouped(RE.imQQ, 'im');
+  }
   if (opts.hkmt === true) { scan(RE.hkmtPermit, 'hkmt'); scanGrouped(RE.hkmtTaiwan, 'hkmt'); }
   if (opts.uscc === true) scan(RE.uscc, 'uscc', isValidUscc);
   return out;

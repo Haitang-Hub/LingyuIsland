@@ -48,6 +48,8 @@ const DEFAULT_SETTINGS = {
   },
   // PDF 不可逆遮盖：dpi 控制清晰度/体积；ocrEngineDir 为空时自动探测本机 OcrFlow 引擎
   pdfRedact: { dpi: 200, ocrEngineDir: '' },
+  // 交付前复核闸口：开启后产物复检仍有敏感信息就删除产物并阻断交付
+  strictResidual: false,
   clipboardWatch: true,           // 剪贴板自动识别可恢复内容
   autoCollapse: true,             // 灵动岛无操作自动收起为顶部线段
   autoCollapseDelay: DEFAULT_COLLAPSE_SEC, // 自动收起时长（秒），可在设置中自定义
@@ -90,8 +92,6 @@ class Store {
       vaultPlain: path.join(this.dir, 'vault.json'),
       history: path.join(this.dir, 'history.json'),
       appearanceDir: path.join(this.dir, 'appearance'), // 自定义背景文件（islandbg:// 协议映射到这里）
-      // 跨文件已知姓名缓存（只存哈希，按案卷目录区分条目；不放案卷目录内）
-      knownNames: path.join(this.dir, 'mask-names.json'),
     };
   }
 

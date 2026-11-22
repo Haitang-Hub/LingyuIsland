@@ -18,7 +18,8 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 const { detect } = require('./detector');
-const { collectEntities, mergeEntities } = require('./entities');
+const { collectEntities, mergeEntities, createEntities } = require('./entities');
+const { residualCheckDetailed } = require('./residual');
 const pdfflow = require('./pdfflow');
 
 // 命名与全项目统一：屏蔽产物一律 _屏蔽，还原产物一律 _还原（PDF/图片不可还原）
@@ -488,6 +489,30 @@ function ocrTextWithBoxes(blocks) {
   return pdfflow.buildFlowFromBlocks(blocks);
 }
 
+/**
+ * 产物复核：重新渲染涂黑页 → OCR → 用同一实体表检测。
+ * 用于发现「黑框与文字错位」这类仅靠编辑坐标无法察觉的泄漏。
+ */
+async function verifyRedactedPages(outBytes, pages, detectOpts, dpi, ocrOpts = {}) {
+  const doc = await openPdf(outBytes);
+  const findings = [];
+  try {
+    for (const pn of [...pages].sort((a, b) => a - b)) {
+      const page = await doc.getPage(pn);
+      const r = await renderPage(page, dpi);
+      const blocks = await runOcr(r.canvas.toBuffer('image/png'), ocrOpts);
+      if (!blocks.length) continue;
+      const info = ocrTextWithBoxes(blocks);
+      const report = residualCheckDetailed(info.text, detectOpts.toggles,
+        undefined, detectOpts.knownEntities);
+      for (const it of report ? report.items : []) findings.push({ page: pn, ...it });
+    }
+  } finally {
+    try { await doc.destroy(); } catch { /* ignore */ }
+  }
+  return findings;
+}
+
 /* ---------------- 主流程 ---------------- */
 
 /**
@@ -506,10 +531,14 @@ async function redactPdfFile(filePath, toggles, outPath, opts = {}) {
     const bytes = fs.readFileSync(filePath);
     const dpi = Math.max(96, Math.min(400, Number(opts.dpi) || 200));
     const padding = Number(opts.padding) || 2;
+    // 文件独立：只从本 PDF 自身预扫确认实体；不读账本、缓存或其他文件的实体。
+    const knownIn = createEntities();
+    const detectOptionsRef = { toggles, knownEntities: knownIn };
     pdf = await openPdf(bytes);
     const total = pdf.numPages;
 
     const counts = {};
+    const hitPages = new Set();
     let count = 0;
     let usedOcr = false;
     const pageFlows = new Map(); // 页号 → 文本层检测流
@@ -550,11 +579,12 @@ async function redactPdfFile(filePath, toggles, outPath, opts = {}) {
       return { ok: true, path: filePath, count: 0, skipped: 'no-pii' };
     }
 
-    // 全文档实体表 = 批处理传入（其他文件预扫）+ 本文档语料自收集
+    // 全文档实体表 = 本 PDF 自身语料自收集
     const selfKnown = corpus.some((s) => s.trim())
       ? collectEntities(corpus, { toggles })
       : null;
-    const known = mergeEntities(opts.knownEntities, selfKnown);
+    const known = mergeEntities(knownIn, selfKnown);
+    detectOptionsRef.knownEntities = known;
 
     // ── 第二遍：按命中情况逐页组装 ──
     const { PDFDocument } = require('pdf-lib');
@@ -609,12 +639,9 @@ async function redactPdfFile(filePath, toggles, outPath, opts = {}) {
       // 先检测（不渲染）：命中才光栅化，未命中页照抄原页
       let boxes = [];
       if (flow) {
-        const res = detect(flow.text, {
-          toggles,
-          knownEntities: known,
-          knownNameHashes: opts.knownNameHashes,
-        });
+        const res = detect(flow.text, detectOptionsRef);
         if (res.items.length) {
+          hitPages.add(pn);
           const page = await pdf.getPage(pn);
           const vp = page.getViewport({ scale: dpi / 72 });
           boxes = pdfBoxesToPixels(boxesFromHits(res.items, flow.chars), vp);
@@ -624,9 +651,10 @@ async function redactPdfFile(filePath, toggles, outPath, opts = {}) {
       } else {
         const ocrInfo = ocrTextWithBoxes(blocks);
         const res = blocks.length
-          ? detect(ocrInfo.text, { toggles, knownEntities: known })
+          ? detect(ocrInfo.text, detectOptionsRef)
           : { items: [] };
         if (res.items.length) {
+          hitPages.add(pn);
           boxes = boxesFromHits(res.items, ocrInfo.chars);
           count += res.items.length;
           for (const it of res.items) counts[it.type] = (counts[it.type] || 0) + 1;
@@ -649,7 +677,9 @@ async function redactPdfFile(filePath, toggles, outPath, opts = {}) {
     await pdf.destroy();
     pdf = null;
 
-    if (!outDoc || count === 0) return { ok: true, path: filePath, count: 0, skipped: 'no-pii' };
+    if (!outDoc || count === 0) {
+      return { ok: true, path: filePath, count: 0, skipped: 'no-pii' };
+    }
 
     // 清掉元数据：产物里不留作者 / 主题 / 关键词 / XMP 线索
     try {
@@ -660,10 +690,36 @@ async function redactPdfFile(filePath, toggles, outPath, opts = {}) {
     const outBytes = Buffer.from(await outDoc.save());
     const out = outPath || redactedPathOf(filePath);
     fs.writeFileSync(out, outBytes);
-    return {
+    const result = {
       ok: true, path: filePath, redactedPath: out, count, counts,
       irreversible: true, ocr: usedOcr,
     };
+    // 交付前复核：只对涂黑页重新 OCR，检查黑框是否真的盖住文字
+    if (opts.verifyOutput !== false && hitPages.size) {
+      try {
+        // 复核只需判定「有没有残留文字」，150dpi 足够且比 200dpi 快近一半
+        const findings = await verifyRedactedPages(
+          outBytes, hitPages, detectOptionsRef, Math.min(dpi, 150), opts,
+        );
+        if (findings.length) {
+          const report = { code: 'residual-pii', count: findings.length, items: findings.slice(0, 20) };
+          if (opts.strictResidual) {
+            try { fs.rmSync(out, { force: true }); } catch { /* 锁定时仅阻断 */ }
+            return {
+              ok: false, path: filePath, skipped: 'residual-pii',
+              reason: 'PDF 产物复核仍检出敏感信息，已阻断交付',
+              warning: report.code, residual: report,
+            };
+          }
+          result.warning = report.code;
+          result.residual = report;
+        }
+      } catch (err) {
+        result.verification = 'unavailable';
+        result.verificationReason = String((err && err.message) || err);
+      }
+    }
+    return result;
   } catch (err) {
     if (pdf) { try { await pdf.destroy(); } catch { /* ignore */ } }
     return {
