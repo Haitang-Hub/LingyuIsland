@@ -13,8 +13,9 @@ const { spawnSync } = require('child_process');
 const { compareVersions } = require('../core/version');
 
 const PKG_NAME = '@haitang-hub/lingyu-island';
-const REGISTRY_PRIMARY = 'https://registry.npmjs.org';
-const REGISTRY_MIRROR = 'https://registry.npmmirror.com';
+// 国内优先：先查 npmmirror（国内 CDN 直连），失败再回退 npm 官方源。
+const REGISTRY_PRIMARY = 'https://registry.npmmirror.com';
+const REGISTRY_MIRROR = 'https://registry.npmjs.org';
 const NPM_PAGE = 'https://www.npmjs.com/package/' + PKG_NAME;
 const FETCH_TIMEOUT_MS = 8000;
 
@@ -85,14 +86,14 @@ function createUpdater({ appDir, currentVersion, onBroadcast, isPackaged = false
       const m = await fetchJSON(override);
       return { version: m.version, tarball: m.dist && m.dist.tarball };
     }
-    // 官方源失败降级 npmmirror（国内直连通常更稳）
+    // 国内镜像优先，官方源作为兜底
     for (const base of [REGISTRY_PRIMARY, REGISTRY_MIRROR]) {
       try {
         const m = await fetchJSON(base + '/' + PKG_NAME + '/latest');
         if (m && m.version) return { version: m.version, tarball: m.dist && m.dist.tarball };
       } catch { /* 尝试下一个源 */ }
     }
-    throw new Error('无法连接 npm registry（官方源与镜像均失败）');
+    throw new Error('无法连接 npm registry（国内镜像与官方源均失败）');
   }
 
   /** 检查更新，返回 { current, latest, hasUpdate, tarball, releasePage, packaged } */

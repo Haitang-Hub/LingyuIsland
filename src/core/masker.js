@@ -76,6 +76,8 @@ class Vault {
     this.codeMap = new Map();   // code -> { v: 原文, t: 类型 }
     this.valueMap = new Map();  // type\x00value -> code（保证同批次同值同编码）
     this.salt = typeof salt === 'string' ? salt : crypto.randomBytes(8).toString('hex');
+    // 有新增映射未持久化（主进程 persistVault 成功写盘后清零）；只读操作不置位
+    this._dirty = false;
   }
 
   /**
@@ -101,6 +103,7 @@ class Vault {
         if (!heads.includes(head)) {
           heads.push(head);
           holder.h = heads.length === 1 ? heads[0] : heads;
+          this._dirty = true; // 新增头部修饰要随 vault 持久化，还原端才能匹配
         }
       }
       return exist;
@@ -116,6 +119,7 @@ class Vault {
       if (!holder) {
         this.codeMap.set(code, entry);
         this.valueMap.set(key, code);
+        this._dirty = true;
         return code;
       }
       if (holder.v === value && holder.t === type) { // 极端哈希碰撞视为同值
@@ -127,6 +131,7 @@ class Vault {
     const code = digest.slice(0, 12) + crypto.randomBytes(2).toString('hex');
     this.codeMap.set(code, entry);
     this.valueMap.set(key, code);
+    this._dirty = true;
     return code;
   }
 

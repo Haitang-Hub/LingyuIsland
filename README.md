@@ -2,10 +2,11 @@
 
 桌面文件隐私遮盖与还原工具。把文件拖到屏幕顶部的「灵动岛」上，自动识别敏感信息并生成结果副本；文本、Office 文件的遮盖可无损还原，PDF 与图片为不可逆遮盖。
 
-当前版本：**v1.14.0**。文档中的姓名、号码、地址与机构均为虚构示例。
+当前版本：**v1.14.3**。文档中的姓名、号码、地址与机构均为虚构示例。
 
-- 安装包：[GitHub Releases](https://github.com/Haitang-Hub/LingyuIsland/releases/latest)
-- 源码更新通道：[npm 包](https://www.npmjs.com/package/@haitang-hub/lingyu-island)
+- 安装包（国内，推荐）：[CNB Releases](https://cnb.cool/haitang.hub/LingyuIsland/-/releases)
+- 安装包（备用）：[GitHub Releases](https://github.com/Haitang-Hub/LingyuIsland/releases/latest)
+- 源码更新通道：[npm 包](https://www.npmjs.com/package/@haitang-hub/lingyu-island)（优先走国内镜像 `registry.npmmirror.com`）
 
 ## 40 秒上手
 
@@ -35,7 +36,7 @@ Windows 也可双击 `启动灵屿岛.bat`；macOS 首次执行 `chmod +x 启动
 | 快速查找 | 配置文件根目录后自动建索引并监听变更；按「全部 / 文档 / 表格 / 图片 / 文本 / 其他」筛选，按钮数字为命中数。回车打开，Shift+回车定位。 |
 | 多分辨率适配 | 按显示器工作区与系统缩放自动调整胶囊和面板；面板宽高独立，可切换「细长 / 标准 / 宽扁」，始终完整落在屏幕内。 |
 | 外观定制 | 8 套主题、9 种强调色、透明度 / 圆角 / 字号 / 毛玻璃 / 面板尺寸 / 动效开关，支持自定义图片或视频背景。 |
-| 本地更新 | 设置中检查更新；源码直跑从 npm registry 获取，安装版从 GitHub Releases 获取。下载与安装需手动确认。 |
+| 本地更新 | 设置中检查更新；源码直跑优先从国内 npm 镜像获取，安装版从 CNB Releases（国内通道）获取，均保留官方源兜底。下载与安装需手动确认。 |
 
 ## 文件处理方式
 
@@ -116,23 +117,25 @@ Windows 也可双击 `启动灵屿岛.bat`；macOS 首次执行 `chmod +x 启动
 ## 隐私与安全
 
 - 文件处理、检测、OCR 均在**本机**完成；文件内容与映射库不会上传。
-- 仅「检查更新 / 下载更新」会访问 npm registry 或 GitHub Releases。
+- 仅「检查更新 / 下载更新」会访问国内 npm 镜像 / npm 官方源或 CNB Releases；GitHub 仅作备用下载地址。
 - 映射库存于 Electron 用户数据目录（Windows 通常在 `%APPDATA%/<应用名>`），优先用系统安全存储加密；不可用时退化为明文文件，并在「设置 → 数据」显示状态。
 - 清空记录不会删除已生成的文件或映射库。请勿删除映射库，否则已遮盖内容无法还原。
 - 姓名跨文件传播缓存只保存哈希，不保存明文。
 
-## v1.14.0 性能与稳定性
+## v1.14.x 性能与稳定性
 
 - OCR 引擎有界复用：小图复用避免冷启动；大图或累计多次后回收重启，防止长任务逐渐变慢。
 - PDF / 图片遮盖转移到独立工作进程池，渲染、合成与编码不再冻结主界面。
 - 数字版 PDF 只读文本层检测，**仅栅格化命中页**；无命中直接跳过。10 页 1 命中的实测耗时从约 6.4 秒降至约 0.5 秒。
 - 旧 OCR 子进程退出 / 错误事件不再误伤新请求。
-- 灵动岛悬停看门狗按状态自适应轮询（收起 30ms / 展开 200ms / 不可见 1Hz），并修复 Windows 偶发丢失置顶的问题。
+- 灵动岛悬停看门狗按状态自适应轮询（收起 60ms / 展开 200ms / 不可见 1Hz），并修复 Windows 偶发丢失置顶的问题。
+- 更新下载优先走国内通道：安装版从 CNB Releases 获取，源码直跑优先国内 npm 镜像；不再依赖 GitHub 的海外下载速度。
+- 批量处理复用姓名缓存、映射新增才落盘、剪贴板关闭时不读系统剪贴板，减少重复 IO 与轮询开销。
 
 ## 开发与测试
 
 ```bash
-npm test              # 核心单测 + 回归测试（当前 289/289）
+npm test              # 核心单测 + 回归测试（当前 288/288）
 npm run test:core     # 仅核心单测
 npm run test:regress  # 仅回归测试
 ```
@@ -155,6 +158,7 @@ npm run clean:release   # 只清理历史产物，保留当前版本目录
 - `scripts/dist.js` 复用本地 Electron 并配置国内镜像，产物包括安装包、blockmap、`latest.yml` 与 `win-unpacked`；不再生成 zip。
 - 每次打包前清理历史产物；被占用而删不掉的文件会打印路径，重启后再清理。
 - 不要直接运行 `npx electron-builder --win`，否则产物会散落到 `release` 根目录。
+- 安装版更新源写进 `app-update.yml`（`provider: generic` → CNB）。发版时除 GitHub Release 外，**必须**把安装包、blockmap、`latest.yml` 同步到 [CNB Releases](https://cnb.cool/haitang.hub/LingyuIsland/-/releases)，否则更新检查会拿到旧版本。`npm run dist` 会校验更新源未被改回 GitHub。
 
 ## 已知限制
 
@@ -179,7 +183,7 @@ npm run clean:release   # 只清理历史产物，保留当前版本目录
 | OCR | 内置 RapidOCR-json，多语言模型随包分发，有界复用 |
 | 老式 .doc | LibreOffice → Windows Word COM 本地转换 |
 | 安全存储 | Electron safeStorage：Windows DPAPI / macOS Keychain |
-| 更新 | 源码直跑走 npm registry；安装版走 GitHub Releases / electron-updater |
+| 更新 | 源码直跑优先国内 npm 镜像；安装版走 CNB Releases / electron-updater（generic feed） |
 | 打包 | electron-builder + NSIS；asarUnpack 解包原生依赖，extraResources 携带 OCR 引擎 |
 
 ## 项目结构

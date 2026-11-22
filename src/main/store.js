@@ -163,8 +163,13 @@ class Store {
   }
 
   persistVault() {
+    // 脏标记：没有新增映射时跳过全量序列化+加密写盘（每批处理完和退出都会调用），
+    // 但旧明文 vault.json → vault.bin 的加密迁移不受脏标记抑制。
+    if (!this.vault) return;
+    const canEncrypt = safeStorage.isEncryptionAvailable();
+    if (!this.vault._dirty && (this.vaultEncrypted || !canEncrypt)) return;
     const json = JSON.stringify(this.vault.toJSON());
-    if (safeStorage.isEncryptionAvailable()) {
+    if (canEncrypt) {
       fs.writeFileSync(this.paths.vaultBin, safeStorage.encryptString(json));
       this.vaultEncrypted = true;
       // 清理旧明文
@@ -173,6 +178,7 @@ class Store {
       fs.writeFileSync(this.paths.vaultPlain, json, 'utf8');
       this.vaultEncrypted = false;
     }
+    this.vault._dirty = false;
   }
 
   /* ---------------- 历史 ---------------- */

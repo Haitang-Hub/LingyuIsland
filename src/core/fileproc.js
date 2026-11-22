@@ -230,18 +230,40 @@ function caseDirKey(caseDir) {
 // 缓存并跨文件传播；守卫补齐后旧缓存不可信，整体弃用重新积累。
 const NAMES_STORE_VERSION = 6;
 
+// mask-names.json 的进程内缓存：批量处理时每个文件的 load/save 都会经
+// readNamesStore 重读并解析整个 JSON，N 个文件 = N 次重复读盘。文件由本应用
+// 独占写入，stat（mtimeMs+size）不变即视为与磁盘一致；外部改动（旧版毒缓存
+// 重置、手工编辑、测试注入）会使 stat 变化而自动失效回源。
+let namesCache = null; // { key, mtimeMs, size, data }
+
+function namesCacheKey(storeFile) {
+  const abs = path.resolve(String(storeFile));
+  return process.platform === 'win32' ? abs.toLowerCase() : abs;
+}
+
 function readNamesStore(storeFile) {
+  let st = null;
+  try { st = fs.statSync(storeFile); } catch { /* 缺失 → 全新 */ }
+  if (!st) return { v: NAMES_STORE_VERSION, dirs: {} };
+  const key = namesCacheKey(storeFile);
+  if (namesCache && namesCache.key === key
+    && namesCache.mtimeMs === st.mtimeMs && namesCache.size === st.size) {
+    return namesCache.data;
+  }
+  let data = null;
   try {
-    const data = JSON.parse(fs.readFileSync(storeFile, 'utf8'));
-    // v4 起才信任缓存：旧版检测器/守卫缺口可能写入误判姓名的哈希（庭审指令
-    // 「开庭/入庭」曾被确认成姓名并经哈希传播毒化全篇），修复后一律弃用重新积累。
-    // v5：v1.12.0 的冒号字段路径仍可把「现在/当时」等时间词确认为姓名并写入
-    // 缓存（「被告人：现在，…」→ 现*〔姓名·…〕传播到「检察院现在给你做不起诉」），
-    // 时间词守卫加入后旧缓存不可信，整体弃用重新积累。
-    if (data && data.v === NAMES_STORE_VERSION
-      && data.dirs && typeof data.dirs === 'object') return data;
-  } catch { /* 缺失/损坏 → 全新 */ }
-  return { v: NAMES_STORE_VERSION, dirs: {} };
+    data = JSON.parse(fs.readFileSync(storeFile, 'utf8'));
+  } catch { /* 损坏 → 全新 */ }
+  // v4 起才信任缓存：旧版检测器/守卫缺口可能写入误判姓名的哈希（庭审指令
+  // 「开庭/入庭」曾被确认成姓名并经哈希传播毒化全篇），修复后一律弃用重新积累。
+  // v5：v1.12.0 的冒号字段路径仍可把「现在/当时」等时间词确认为姓名并写入
+  // 缓存（「被告人：现在，…」→ 现*〔姓名·…〕传播到「检察院现在给你做不起诉」），
+  // 时间词守卫加入后旧缓存不可信，整体弃用重新积累。
+  const store = data && data.v === NAMES_STORE_VERSION
+    && data.dirs && typeof data.dirs === 'object'
+    ? data : { v: NAMES_STORE_VERSION, dirs: {} };
+  namesCache = { key, mtimeMs: st.mtimeMs, size: st.size, data: store };
+  return store;
 }
 
 /**
@@ -284,6 +306,11 @@ function saveKnownNameHashes(storeFile, caseDir, names) {
     store.dirs[key] = { hashes: [...merged] };
     fs.mkdirSync(path.dirname(storeFile), { recursive: true });
     fs.writeFileSync(storeFile, JSON.stringify(store), 'utf8');
+    // 写后同步缓存：同批下一文件的 load/save 直接命中，不再重读磁盘
+    try {
+      const st = fs.statSync(storeFile);
+      namesCache = { key: namesCacheKey(storeFile), mtimeMs: st.mtimeMs, size: st.size, data: store };
+    } catch { /* stat 失败则留空，下次读盘自愈 */ }
     return true;
   } catch { return false; }
 }

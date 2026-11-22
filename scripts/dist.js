@@ -111,6 +111,13 @@ function verify() {
   const m = yml.match(/^sha512:\s*(\S+)/m);
   if (!m || m[1] !== sha) throw new Error('latest.yml 的 sha512 与安装包不一致');
 
+  // 防止误把更新源打包回 GitHub：安装版必须指向 CNB 国内通道。
+  const updateConf = path.join(outDir, 'win-unpacked', 'resources', 'app-update.yml');
+  const feed = fs.readFileSync(updateConf, 'utf8');
+  if (!/provider:\s*generic/.test(feed)) throw new Error('安装版更新源不是 generic');
+  if (!/cnb\.cool\/haitang\.hub\/LingyuIsland/.test(feed)) throw new Error('安装版更新源未指向 CNB');
+  console.log('[verify] 更新源已确认：CNB generic feed');
+
   for (const n of expected.slice(0, 4)) {
     console.log(`  ${n}  ${fs.statSync(path.join(outDir, n)).size} B`);
   }

@@ -56,13 +56,14 @@ class ClipboardWatcher {
   }
 
   _poll() {
-    let text = '';
-    try { text = this.readText(); } catch { return; }
+    // 功能关闭时不读剪贴板：readText（同步读系统剪贴板）是每 tick 的主要开销。
+    // 只清失效提示、不碰剪贴板；重新开启后首个 tick 会以当前内容重建提示。
     if (!this.getEnabled()) {
       this._clearPending();
-      this.lastText = text;
       return;
     }
+    let text = '';
+    try { text = this.readText(); } catch { return; }
     if (text === this.lastText) return;
     this.lastText = text;
 

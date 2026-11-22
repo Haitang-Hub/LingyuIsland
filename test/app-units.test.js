@@ -553,15 +553,15 @@ test('置顶看门狗：心跳幂等，不会叠加多个定时器', () => {
   clearInterval(island._topmostWatch);
 });
 
-test('悬停看门狗：按状态自适应换挡（收起 30 / 展开 200 / 不可见 1000）', () => {
+test('悬停看门狗：按状态自适应换挡（收起 60 / 展开 200 / 不可见 1000）', () => {
   const island = new Island();
   const win = { isDestroyed: () => false, isVisible: () => true };
   island.pill = win;
   island.startPillHoverWatch();
-  assert.strictEqual(island._hoverMs, 200, '展开态 200ms（仅兜底丢 mouseleave，无需 30ms 密度）');
+  assert.strictEqual(island._hoverMs, 200, '展开态 200ms（仅兜底丢 mouseleave，无需密集轮询）');
   island.pillCollapsed = true;
   island._restartHoverWatch();
-  assert.strictEqual(island._hoverMs, 30, '收起态 30ms（唤回停留判定需要）');
+  assert.strictEqual(island._hoverMs, 60, '收起态 60ms（唤回停留判定，约一拍即可展开）');
   win.isVisible = () => false;
   island._restartHoverWatch();
   assert.strictEqual(island._hoverMs, 1000, '胶囊窗口不可见降为 1Hz 心跳');

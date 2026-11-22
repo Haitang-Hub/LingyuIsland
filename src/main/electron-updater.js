@@ -1,6 +1,6 @@
 'use strict';
 /**
- * 安装版更新后端：基于 electron-updater，更新源为 GitHub Releases。
+ * 安装版更新后端：基于 electron-updater，更新源为 CNB Releases（国内通道）。
  *
  * 与 src/main/updater.js（源码直跑后端）保持同一接口：
  *   { checkNow, install, apply, getStatus }
@@ -14,7 +14,10 @@
 
 const { autoUpdater } = require('electron-updater');
 
-const RELEASES_PAGE = 'https://github.com/Haitang-Hub/LingyuIsland/releases/latest';
+// 国内优先：安装版从这里取 latest.yml 与安装包；GitHub Release 仅作开源门面/备用。
+const CNB_RELEASES = 'https://cnb.cool/haitang.hub/LingyuIsland/-/releases';
+const DEFAULT_FEED = CNB_RELEASES + '/latest/download';
+const RELEASES_PAGE = CNB_RELEASES;
 
 function createAutoUpdater({ currentVersion, onBroadcast, feedUrl } = {}) {
   // state: idle → available → downloading → staged（与源码后端状态机一致）
@@ -25,11 +28,14 @@ function createAutoUpdater({ currentVersion, onBroadcast, feedUrl } = {}) {
   const broadcast = (ch, payload) => { try { onBroadcast && onBroadcast(ch, payload); } catch { /* ignore */ } };
   const setState = (s) => { state = s; };
 
-  // feed 覆盖：ISLAND_UPDATE_FEED 环境变量 / 构造参数（镜像或测试用）
+  // 国内优先：默认指向 CNB 的 generic feed；ISLAND_UPDATE_FEED / 构造参数可覆盖（测试或临时切换）。
+  // 显式 setFeedURL 也能让带旧 github app-update.yml 的安装包在升级后立刻走国内通道。
   const override = feedUrl || process.env.ISLAND_UPDATE_FEED;
-  if (override) {
-    autoUpdater.setFeedURL({ provider: 'generic', url: override });
-  }
+  autoUpdater.setFeedURL({
+    provider: 'generic',
+    url: override || DEFAULT_FEED,
+    useMultipleRangeRequest: false,
+  });
   autoUpdater.autoDownload = false;        // 点「立即更新」才下载
   autoUpdater.autoInstallOnAppQuit = false; // 只走「重启完成安装」按钮
   autoUpdater.allowPrerelease = false;
@@ -68,7 +74,7 @@ function createAutoUpdater({ currentVersion, onBroadcast, feedUrl } = {}) {
   function friendlyError(err) {
     const raw = String(err && err.message || err);
     if (/ERR_CONNECTION_RESET|ERR_CONNECTION_TIMED_OUT|ERR_CONNECTION_REFUSED|ERR_NAME_NOT_RESOLVED|ERR_INTERNET_DISCONNECTED|ENOTFOUND|ECONNRESET|ETIMEDOUT|timeout/i.test(raw)) {
-      return '无法连接更新服务器（GitHub）。请检查网络或代理后重试，也可点「打开下载页」手动下载安装包。';
+      return '无法连接国内更新服务器（CNB）。请检查网络后重试，也可点「打开下载页」手动下载安装包。';
     }
     if (/404/.test(raw)) return '更新服务器上暂时没有找到版本信息，请稍后重试。';
     return '检查更新失败：' + raw.slice(0, 80);

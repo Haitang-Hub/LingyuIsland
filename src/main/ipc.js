@@ -248,7 +248,7 @@ function register(ctx) {
     }
     return r;
   });
-  // 打开下载页（手动兜底）：源码模式指 npm 包页，安装版指 GitHub Releases
+  // 打开下载页（手动兜底）：源码模式指 npm 包页，安装版指 CNB Releases（国内通道）
   ipc_handle('update:open-page', () => { shell.openExternal(updater.getStatus().releasePage); return true; });
   ipc_handle('app:version', () => app_ref().getVersion());
   ipc_handle('app:quit', () => app_ref().quit());

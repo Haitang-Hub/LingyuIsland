@@ -26,9 +26,9 @@ const PILL_W = BASE.pillW, PILL_H = BASE.pillH;
 const PANEL_W = BASE.panelW, PANEL_H = BASE.panelH;
 
 // 悬停纠偏看门狗轮询间隔（按状态分档，见 startPillHoverWatch 注释）：
-// 收起态唤回按 ~30ms 停留判定，轮询必须明显更密；展开态仅兜底丢 mouseleave；
-// 窗口不可见时 1Hz 心跳（启动加载期），可见性恢复自动换挡。
-const HOVER_POLL_COLLAPSED_MS = 30;
+// 收起态唤回按停留判定（约一拍 60ms，快速扫过不触发）；展开态仅兜底丢
+// mouseleave；窗口不可见时 1Hz 心跳（启动加载期），可见性恢复自动换挡。
+const HOVER_POLL_COLLAPSED_MS = 60;
 const HOVER_POLL_EXPANDED_MS = 200;
 const HOVER_POLL_HIDDEN_MS = 1000;
 
@@ -315,7 +315,7 @@ class Island {
     this.layout();    // 窗口贴到屏幕顶边
     try { this.pill.setIgnoreMouseEvents(true, { forward: true }); } catch { /* ignore */ }
     this.pill.webContents.send('pill:state', 'collapsed');
-    this._restartHoverWatch(); // 换挡到收起态 30ms（唤回判定需要）
+    this._restartHoverWatch(); // 换挡到收起态 60ms（唤回判定需要）
     // 收起瞬间光标若就停在命中区（自动收起/右键隐藏时光标未动）→ 抑制兜底展开，
     // 防止「光标停在原地 → 自动收起 → 立刻自动展开」的原地开合循环
     this._peekHold = this._cursorInPeekZone();
@@ -369,12 +369,12 @@ class Island {
      收起态兜底：setIgnoreMouseEvents(forward:true) 的鼠标转发对前台窗口敏感
      （官方文档：前台窗口完整性级别更高时临时停发；实测点选桌面、焦点切换也会断），
      转发一断渲染端收不到 mousemove，线段永远唤不回。因此收起时改为光标轮询
-     （30ms 间隔）：光标进入命中区停留约 50ms 才展开，快速扫过不触发；收起瞬间
+     （60ms 间隔）：光标进入命中区停留约 60ms 才展开，快速扫过不触发；收起瞬间
      指针就停在命中区（自动收起/右键隐藏）则先离开再回来才允许展开，避免原地开合
      循环；右键隐藏后光标不离开线段区就绝不重新打开，与渲染端 hideGuard 同语义。
 
      后台开销：这是灵动岛常驻期间唯一的密集定时器，按状态分档——
-     收起态 30ms（唤回判定需要）、展开态 200ms（仅兜底丢事件，正常悬停
+     收起态 60ms（唤回判定需要）、展开态 200ms（仅兜底丢事件，正常悬停
      由渲染端 DOM 事件覆盖）；胶囊窗口不可见（启动加载期）降为 1Hz 心跳，
      只探测可见性恢复，恢复后自动换挡——不做完全停表，免得 show 路径
      漏挂重启钩子导致看门狗永久停摆。 */
@@ -462,8 +462,8 @@ class Island {
    *   扰动。应用自身只在 create() 设置过一次置顶，不存在「故意关掉」的路径，
    *   所以无脑补抬总是正确的。
    * 心跳 600ms：实测沉底在窗口激活后 ~1s 内发生，600ms 保证最坏被压半秒级；
-   * moveTop 每窗每次一条原生 SetWindowPos，两窗合计 ~3 次/秒，远低于既有
-   * 30ms 悬停轮询，开销可忽略。 */
+   * moveTop 每窗每次一条原生 SetWindowPos，两窗合计 ~3 次/秒，远低于收起态
+   * 60ms 悬停轮询，开销可忽略。 */
 
   /** 补回置顶：样式位丢了 → setAlwaysOnTop 重设（顺带抬回带顶）；
    *  样式位在 → moveTop 把 z 序抬回带顶（不动样式、不抢焦点） */
