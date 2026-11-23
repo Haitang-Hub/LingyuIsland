@@ -598,6 +598,7 @@ const DETECT_ITEMS = [
 const BEHAVIORS = [
   ['clipboardWatch', '剪贴板自动识别', '复制了含编码的内容时，胶囊提示一键恢复'],
   ['autoCollapse', '灵动岛自动收起', '无操作时收起为顶部线段，悬停展开；关闭后一直显示'],
+  ['fullscreenAutoHide', '全屏时自动隐藏', '其他应用全屏时临时让位，不遮挡全屏内容；退出全屏自动恢复'],
   ['launchOnBoot', '开机自启', '登录 Windows 后自动运行灵屿岛'],
 ];
 

@@ -100,8 +100,12 @@ body { position: relative; display: flex; align-items: center; justify-content: 
   transition: opacity 180ms ease;
 }
 .label-hover { color: var(--ink-2); opacity: 0; }
-.pill.hover .label-idle  { opacity: 0; }
-.pill.hover .label-hover { opacity: 1; }
+/* 悬停交叠铁律：悬停时 idle 层必须彻底让位。
+   animation: none 不可省——文案轮换/结果反馈的 .swap 动画（lineSwap）会以动画优先级
+   盖掉下面的 opacity: 0，两层文字便在同一位置同时可见（表现为「两句话叠字」，
+   拖完位置松手、设置变更等刷新文案的时刻最容易撞上）。 */
+.pill.hover .label-idle  { opacity: 0; animation: none; transition-duration: 100ms; }
+.pill.hover .label-hover { opacity: 1; transition-duration: 170ms; }
 
 /* 剪贴板恢复提示 */
 .chip {

@@ -3,7 +3,7 @@
  * 灵屿岛 —— 应用入口
  */
 
-const { app, Menu, protocol, net } = require('electron');
+const { app, Menu, protocol, net, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('node:url');
@@ -12,6 +12,7 @@ const { Store } = require('./store');
 const { Island } = require('./island');
 const { Indexer } = require('./indexer');
 const { ClipboardWatcher } = require('./clipboard');
+const { FullscreenWatch } = require('./fullscreen-watch');
 const { register } = require('./ipc');
 const { createUpdater } = require('./updater');
 const { createAutoUpdater } = require('./electron-updater');
@@ -73,7 +74,7 @@ if (process.platform === 'darwin') {
 // 关闭硬件加速问题排查开关（默认开启加速；透明窗在部分驱动下需软渲染，按需调整）
 // app.disableHardwareAcceleration();
 
-let store, island, indexer, clipboardWatcher, tray, updater;
+let store, island, indexer, clipboardWatcher, tray, updater, fullscreenWatch;
 
 app.whenReady().then(() => {
   store = new Store();
@@ -122,7 +123,20 @@ app.whenReady().then(() => {
         isPackaged: app.isPackaged,
       });
 
-  register({ store, island, indexer, clipboardWatcher, updater });
+  // 全屏/截图让位探测：前台窗口铺满主屏（全屏应用或截图遮罩）时，
+  // 按「全屏时自动隐藏」开关让胶囊/面板让位；期间置顶看门狗停止抢位。
+  island.fullscreenAutoHide = store.settings.fullscreenAutoHide !== false;
+  fullscreenWatch = new FullscreenWatch({
+    getPrimaryBounds: () => {
+      try { return screen.getPrimaryDisplay().bounds; } catch { return null; }
+    },
+    onChange: (active, overlay) => island.setFullscreen(active, overlay),
+  });
+  // E2E 模式下不启动探测：自动化测试跑在前台覆盖窗口里，全屏判定会干扰断言。
+  // 探测恒开（截图遮罩让位不受开关影响）；「全屏时自动隐藏」开关只在 island 内部起作用。
+  if (!process.env.ISLAND_E2E) fullscreenWatch.start();
+
+  register({ store, island, indexer, clipboardWatcher, updater, fullscreenWatch });
 
   tray = createTray(island, store);
 
@@ -133,8 +147,13 @@ app.whenReady().then(() => {
     }, 5000);
   }
 
-  // 第二次启动实例 → 聚焦面板
-  app.on('second-instance', () => island.showPanel());
+  // 第二次启动实例（如再次双击快捷方式）→ 展开胶囊并聚焦面板。
+  // 胶囊无操作 20 秒会自动收起为顶部细线，仅 showPanel 会让用户以为「胶囊没弹出来」，
+  // 所以先把胶囊从线段展开，再打开面板（expandPill 在展开态下自会跳过）。
+  app.on('second-instance', () => {
+    island.expandPill();
+    island.showPanel();
+  });
 
   // 开机自启设置同步
   if (store.settings.launchOnBoot) {
@@ -153,6 +172,7 @@ app.on('before-quit', () => {
   try {
     if (store) store.persistVault();
     if (indexer) indexer._closeWatch();
+    if (fullscreenWatch) fullscreenWatch.stop();
     // 遮盖工作进程与常驻 OCR 引擎随退出释放
     require('./redactpool').getRedactPool().dispose();
     require('../core/pdfredact').disposeOcrEngine();

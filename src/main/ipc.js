@@ -24,7 +24,7 @@ function clearBgFiles(dir, except) {
 }
 
 function register(ctx) {
-  const { store, island, indexer, clipboardWatcher, updater } = ctx;
+  const { store, island, indexer, clipboardWatcher, updater, fullscreenWatch } = ctx;
 
   const ipc_handle = (channel, fn) => ipcMain.handle(channel, fn);
 
@@ -66,6 +66,10 @@ function register(ctx) {
       // 密度变化 → 重算窗口尺寸与缩放（档位最终仍由工作区钳制）
       island.setPanelSize(app2.panel); // 面板宽高立即生效
       island.setPillFontScale(app2.fontScale); // 字体档位 → 胶囊宽度等比伸缩
+    }
+    // 全屏自动隐藏开关：探测恒开（截图遮罩让位不受开关影响），这里只重算决策
+    if (patch && 'fullscreenAutoHide' in patch) {
+      island.setFullscreenAutoHide(!!next.fullscreenAutoHide);
     }
     island.broadcast('settings:changed', next);
     return next;

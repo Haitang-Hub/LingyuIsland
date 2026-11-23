@@ -40,6 +40,7 @@ if (!window.island) {
     clipboardWatch: true,
     autoCollapse: true,
     autoCollapseDelay: 20,
+    fullscreenAutoHide: true,
     launchOnBoot: false,
     appearance: {
       theme: 'midnight', accent: '', alpha: 0.97, radius: 18, fontScale: 1, pillX: 0.5, glass: 'off',

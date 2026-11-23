@@ -57,6 +57,14 @@ class Island {
     this._hoverMs = null;
     // 拖动换位结束后的持久化钩子（main.js 注入：写设置 + 广播）
     this.onPillOffsetChange = null;
+    // 全屏/截图让位：FullscreenWatch 区分「截图遮罩」与「普通全屏应用」后转发。
+    // 截图遮罩恒让位（不进截图）；全屏应用跟随 fullscreenAutoHide 开关——
+    // 开关关闭时保持旧置顶行为，看门狗照常抢位（胶囊浮在全屏之上）。
+    this.fullscreenActive = false;
+    this._fsActive = false;          // 最近探测态：存在铺满主屏的覆盖（应用或遮罩）
+    this._fsOverlay = false;         // 最近探测态：该覆盖是否为截图遮罩类置顶层
+    this.fullscreenAutoHide = false; // 设置开关：全屏时自动隐藏（main.js 按设置同步）
+    this._fsHidden = null;           // 让位隐藏期间的可见性快照 { pillVisible, panelVisible }
     this.panelSize = { w: BASE.panelW, h: BASE.panelH }; // 面板 CSS 视口尺寸（宽高独立，可细长 / 宽扁）
   }
 
@@ -89,7 +97,7 @@ class Island {
         contextIsolation: true, nodeIntegration: false, sandbox: false,
       },
     });
-    this.pill.setAlwaysOnTop(true, 'screen-saver');
+    this.pill.setAlwaysOnTop(true, 'floating'); // 普通置顶层：高于所有普通应用，但不压截图遮罩
     this.pill.loadFile(path.join(__dirname, '..', 'renderer', 'pill.html'));
 
     this.panel = new BrowserWindow({
@@ -105,7 +113,7 @@ class Island {
         contextIsolation: true, nodeIntegration: false, sandbox: false,
       },
     });
-    this.panel.setAlwaysOnTop(true, 'screen-saver');
+    this.panel.setAlwaysOnTop(true, 'floating');
     this.panel.loadFile(path.join(__dirname, '..', 'renderer', 'panel.html'));
 
     // 面板失焦 = 鼠标点到了面板外任意位置 → 收起（打开文件对话框时不隐藏）
@@ -206,6 +214,8 @@ class Island {
 
   showPanel(tab) {
     if (!this.panel) return;
+    // 全屏让位隐藏期间不弹面板（如全屏中另一实例被拉起）：记下意图，退出全屏后恢复
+    if (this._fsHidden) { this._fsHidden.panelVisible = true; return; }
     this.layout();
     if (tab) this.panel.webContents.send('panel:show-tab', tab);
     // 正处在收起过渡里再点开：直接反向，别让窗口停在半透明状态
@@ -468,12 +478,13 @@ class Island {
   /** 补回置顶：样式位丢了 → setAlwaysOnTop 重设（顺带抬回带顶）；
    *  样式位在 → moveTop 把 z 序抬回带顶（不动样式、不抢焦点） */
   ensureTopmost() {
+    if (this.fullscreenActive) return; // 全屏/截图让位期间不抢 z 序（详见 setFullscreen 注释）
     for (const w of [this.pill, this.panel]) {
       if (!w || isGone(w) || typeof w.isAlwaysOnTop !== 'function') continue;
       try {
         if (!w.isVisible()) continue;
         if (!w.isAlwaysOnTop()) {
-          w.setAlwaysOnTop(true, 'screen-saver');
+          w.setAlwaysOnTop(true, 'floating');
         } else if (typeof w.moveTop === 'function') {
           w.moveTop();
         }
@@ -488,7 +499,8 @@ class Island {
   }
 
   /* ---------------- 灵动岛拖动换位 ----------------
-   * 渲染端 mousedown → startPillDrag()：主进程 16ms 轮询光标并 setPosition，
+   * 渲染端 mousedown → startPillDrag()：主进程 16ms 轮询光标并 setBounds
+   * （显式带上锁定尺寸，规避 Windows 非 100% 缩放下 setPosition 的 ±1px 漂移），
    * 窗口跟随光标水平移动（Y 恒贴屏幕顶边）。mouseup → stopPillDrag()：
    * 停轮询、把最终比例经 onPillOffsetChange 持久化，并让面板跟随到新位置。
    * 拖动过的下一次 onPillClick 会被吞掉，避免松手误开面板。 */
@@ -505,11 +517,31 @@ class Island {
       if (Math.abs(c.x - d.startCursorX) > 4) d.moved = true;
       const wa = screen.getPrimaryDisplay().workArea;
       const b = w.getBounds();
-      const nx = Math.min(wa.x + wa.width - b.width,
+      // 钳制用锁定尺寸 d.width 而非 b.width：尺寸一旦被 DPI 漂移带偏，钳制边界不应跟着变
+      const nx = Math.min(wa.x + wa.width - d.width,
         Math.max(wa.x, c.x - d.offsetX));
-      if (nx !== b.x) w.setPosition(nx, b.y);
+      // Windows 缩放 >100% 时 Electron 的老 bug（#20423/#20683）：高频 setPosition
+      // 会让无边框窗每次 ±1px 漂移；且 DIP↔物理像素取整使 b.x 永远对不上目标值，
+      // 静止长按也会每 tick 重设一次 → 窗口持续变大（「按住不动，胶囊向右不断变长」）。
+      // 修法两层：移动改用 setBounds 显式带上锁定尺寸，把漂移当场纠正；
+      // x 没变且尺寸没漂时不再发 SetWindowPos，静止时彻底静默。
+      if (b.width !== d.width || b.height !== d.height) {
+        // resizable:false 的窗口在 Windows 上 setSize 只能变大不能变小，
+        // 纠偏前按 _apply 同款技巧临时解锁（仅在尺寸真的漂了才会走到）
+        let unlocked = false;
+        try {
+          if (!w.isResizable()) { w.setResizable(true); unlocked = true; }
+        } catch { /* ignore */ }
+        w.setBounds({ x: nx, y: b.y, width: d.width, height: d.height });
+        if (unlocked) {
+          try { w.setResizable(false); } catch { /* ignore */ }
+        }
+      } else if (nx !== d.appliedX) {
+        w.setBounds({ x: nx, y: b.y, width: d.width, height: d.height });
+      }
+      d.appliedX = nx;
       // 比例按「钳制后的中心」计算：贴边时比例就是 0/1，持久化与布局严格一致
-      this.pillX = Math.round(((nx + b.width / 2 - wa.x) / wa.width) * 1000) / 1000;
+      this.pillX = Math.round(((nx + d.width / 2 - wa.x) / wa.width) * 1000) / 1000;
     } catch { this.stopPillDrag(); }
   }
 
@@ -517,9 +549,13 @@ class Island {
     if (!this.pill || this.pill.isDestroyed() || this.pillCollapsed) return false;
     try {
       const c = screen.getCursorScreenPoint();
+      const plan = this._plan();
       const b = this.pill.getBounds();
       this._drag = {
         offsetX: c.x - b.x,       // 光标相对胶囊左缘的偏移：拖动中保持不跳变
+        width: plan.pill.width,   // 拖动期锁定的目标尺寸：跟随一律显式带上，防 DPI 漂移
+        height: plan.pill.height,
+        appliedX: b.x,            // 上次已应用的目标 x：静止时不再重复 SetWindowPos
         startCursorX: c.x,
         moved: false,
         startedAt: Date.now(),
@@ -542,6 +578,60 @@ class Island {
         try { this.onPillOffsetChange(this.pillX); } catch { /* ignore */ }
       }
     }
+  }
+
+  /* ---------------- 全屏 / 截图让位 ----------------
+   * 置顶窗永远压在无边框全屏应用之上（后者在普通窗口层），纯 z 序无法既高于
+   * 所有普通应用又低于全屏；截图遮罩虽同在置顶层，但看门狗的 moveTop 会在
+   * 600ms 内把胶囊重新抬到遮罩之上。因此改用探测 + 让位：
+   *   - FullscreenWatch 发现前台窗口铺满主屏（全屏应用与截图遮罩都满足）→
+   *     main.js 转发 setFullscreen(true)；
+   *   - 开启「全屏时自动隐藏」→ 胶囊与面板临时隐藏，全屏结束自动恢复；
+   *   - 期间 ensureTopmost 同步让位，不再抢 z 序（遮罩始终盖在胶囊之上）。 */
+
+  /** 全屏态变化（FullscreenWatch 回调，main.js 转发） */
+  /**
+   * 探测同步（FullscreenWatch 回调）：截图遮罩恒让位；普通全屏应用跟随开关。
+   * 开关关闭时保持旧置顶行为（胶囊浮在全屏之上，看门狗照常抢位）。
+   */
+  setFullscreen(active, overlay = false) {
+    this._fsActive = !!active;
+    this._fsOverlay = !!this._fsActive && !!overlay;
+    const hide = this._fsActive && (this._fsOverlay || this.fullscreenAutoHide);
+    if (this.fullscreenActive === hide) return;
+    this.fullscreenActive = hide;
+    if (hide) this._hideForFullscreen();
+    else this._restoreFromFullscreen();
+  }
+
+  /** 设置开关同步：用最近一次探测态立即重算让位与否 */
+  setFullscreenAutoHide(on) {
+    this.fullscreenAutoHide = !!on;
+    if (this._fsActive) this.setFullscreen(this._fsActive, this._fsOverlay);
+  }
+
+  _hideForFullscreen() {
+    if (this._fsHidden) return;
+    const pillVisible = !!this.pill && !isGone(this.pill) && !!this.pill.isVisible();
+    const panelVisible = !!this.panel && !isGone(this.panel) && !!this.panel.isVisible();
+    this._fsHidden = { pillVisible, panelVisible };
+    try { if (panelVisible) this.panel.hide(); } catch { /* ignore */ }
+    try { if (pillVisible) this.pill.hide(); } catch { /* ignore */ }
+  }
+
+  _restoreFromFullscreen() {
+    const h = this._fsHidden;
+    this._fsHidden = null;
+    if (!h) return;
+    // 胶囊：按收起/展开布局后静默恢复（showInactive 不抢焦点，不惊扰刚退出全屏的前台应用）
+    if (h.pillVisible && this.pill && !isGone(this.pill)) {
+      this.layout();
+      try { if (!this.pill.isVisible()) this.pill.showInactive(); } catch { /* ignore */ }
+      try {
+        this.pill.setIgnoreMouseEvents(this.pillCollapsed, this.pillCollapsed ? { forward: true } : undefined);
+      } catch { /* ignore */ }
+    }
+    if (h.panelVisible) this.showPanel();
   }
 
   /** 恢复默认位置（顶部居中）：托盘菜单与外观页按钮共用入口 */

@@ -512,18 +512,18 @@ function makeTopWin(opts) {
   return { win, calls };
 }
 
-test('置顶看门狗：样式位被系统踢掉 → 立即补回 screen-saver 级别', () => {
+test('置顶看门狗：样式位被系统踢掉 → 立即补回 floating 级别', () => {
   const island = new Island();
   const pill = makeTopWin({ visible: true, onTop: false });   // 已沉底
   const panel = makeTopWin({ visible: false, onTop: false }); // 隐藏时不理会
   island.pill = pill.win;
   island.panel = panel.win;
   island.ensureTopmost();
-  assert.deepStrictEqual(pill.calls, [['set', true, 'screen-saver']], '可见窗口丢了置顶必须补回');
+  assert.deepStrictEqual(pill.calls, [['set', true, 'floating']], '可见窗口丢了置顶必须补回');
   assert.deepStrictEqual(panel.calls, [], '隐藏的面板等 showPanel 时再补，不做无谓调用');
 
   island.ensureTopmost();
-  assert.deepStrictEqual(pill.calls, [['set', true, 'screen-saver'], ['moveTop']], '补回后下一拍转入 moveTop 维护');
+  assert.deepStrictEqual(pill.calls, [['set', true, 'floating'], ['moveTop']], '补回后下一拍转入 moveTop 维护');
 });
 
 test('置顶看门狗：样式位完好但被压 → moveTop 抬回带顶，不动样式不重设', () => {
@@ -810,4 +810,83 @@ test('applyStaged：拷贝覆盖与跳过列表（临时目录模拟）', () => 
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+/* ---------------- 全屏/截图让位（fullscreen-watch.js + island.js） ----------------
+ * 约定：截图遮罩（置顶全屏覆盖层）恒让位、不受开关影响；
+ * 普通全屏应用跟随「全屏时自动隐藏」开关，开关关时保持旧置顶行为。 */
+
+const { FullscreenWatch } = require('../src/main/fullscreen-watch');
+
+const MON = { x: 0, y: 0, width: 1920, height: 1080 };
+
+test('全屏探测：普通全屏两拍判定/立即恢复；遮罩判 overlay；全屏上弹遮罩会上报翻转', () => {
+  const events = [];
+  const w = new FullscreenWatch({ getPrimaryBounds: () => MON, onChange: (a, o) => events.push([a, o]) });
+  w._handle('FULL 0 0 1920 1080 T 0');       // 单拍不判定
+  assert.strictEqual(w.active, false);
+  w._handle('FULL 0 0 1920 1080 T 0');       // 连续两拍 → 普通全屏
+  assert.deepStrictEqual(events, [[true, false]]);
+  w._handle('FULL 0 0 1920 1080 T 1');       // 遮罩弹出（覆盖层计数 +1）
+  assert.deepStrictEqual(events, [[true, false]], '遮罩单拍不翻转');
+  w._handle('FULL 0 0 1920 1080 T 1');
+  assert.deepStrictEqual(events, [[true, false], [true, true]]);
+  w._handle('FULL 0 0 800 600 T 0');         // 离开：立即恢复
+  assert.deepStrictEqual(events, [[true, false], [true, true], [false, false]]);
+  assert.strictEqual(w.active, false);
+  // 最大化窗口（任务栏还在）、副屏全屏、非法行均不触发
+  for (let i = 0; i < 5; i++) w._handle('FULL 0 0 1920 1032 T 0');
+  assert.deepStrictEqual(events.length, 3);
+});
+
+function makeFsIslandStub() {
+  const st = { pill: true, panel: false, shown: [] };
+  const island = new Island();
+  island.layout = () => {};
+  island.panel = {
+    isVisible: () => st.panel,
+    hide() { st.panel = false; },
+    show() { st.panel = true; st.shown.push('show'); },
+    focus() { st.shown.push('focus'); },
+    showInactive() { st.panel = true; },
+    webContents: { send() {} },
+  };
+  island.pill = {
+    isDestroyed: () => false,
+    isVisible: () => st.pill,
+    hide() { st.pill = false; },
+    showInactive() { st.pill = true; },
+    setIgnoreMouseEvents() {},
+    webContents: { send() {} },
+  };
+  return { island, st };
+}
+
+test('灵动岛：全屏跟随开关（关→不隐藏、看门狗照常；切开关即时生效）；遮罩恒让位', () => {
+  const { island, st } = makeFsIslandStub();
+  island.setFullscreenAutoHide(false);
+  island.setFullscreen(true, false);            // 开关关 + 普通全屏
+  assert.strictEqual(st.pill, true, '开关关闭时全屏不隐藏');
+  island.ensureTopmost();                        // 非让位期：stub 窗口无 isAlwaysOnTop，不应抛错
+  island.setFullscreen(true, true);              // 遮罩出现：恒让位
+  assert.strictEqual(st.pill, false, '截图遮罩不受开关影响');
+  island.ensureTopmost();                        // 让位期间不抢 z 序
+  island.setFullscreen(false);                   // 退出
+  assert.strictEqual(st.pill, true, '退出自动恢复');
+  // 开关切换即时生效：普通全屏（开关关，未隐藏）中打开开关 → 立即隐藏；再关 → 立即恢复
+  island.setFullscreen(true, false);
+  assert.strictEqual(st.pill, true);
+  island.setFullscreenAutoHide(true);
+  assert.strictEqual(st.pill, false, '全屏中打开开关应立即隐藏');
+  island.setFullscreenAutoHide(false);
+  assert.strictEqual(st.pill, true, '全屏中关闭开关应立即恢复');
+});
+
+test('灵动岛：让位期间 showPanel 记意图，退出后恢复面板', () => {
+  const { island, st } = makeFsIslandStub();
+  island.setFullscreenAutoHide(true);
+  island.setFullscreen(true);
+  island.showPanel();
+  assert.deepStrictEqual(st.shown, [], '让位期间不弹面板');
+  island.setFullscreen(false);
+  assert.deepStrictEqual(st.shown, ['show', 'focus'], '退出后恢复面板');
 });

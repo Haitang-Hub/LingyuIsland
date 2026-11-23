@@ -138,3 +138,31 @@ test('头衔锚点：无冒号「副总经理+姓名」经全文件复现确认�
   ], {});
   assert.ok(!weak.name.has('周建国'), '仅出现一次的头衔弱候选不应被确认为姓名');
 });
+
+test('法律文书姓名闭合：角色+逗号谓语、普通动作、的证言、同案犯、祖父', () => {
+  const nameHits = (text) => detect(text).items
+    .filter((i) => i.type === 'name').map((i) => i.value);
+
+  assert.deepStrictEqual(nameHits('辩护人李晓龙，指派。'), ['李晓龙']);
+  assert.deepStrictEqual(nameHits('被害人王芳停放在此车内现金2000元。'), ['王芳']);
+  assert.deepStrictEqual(nameHits('证人陈阿满的证言；'), ['陈阿满']);
+  assert.deepStrictEqual(nameHits('同案犯张伟的供述；'), ['张伟']);
+  assert.deepStrictEqual(nameHits('其祖父李敬舟愿意履行监护职责'), ['李敬舟']);
+
+  // 封闭结构负例：角色词后是动作/泛称或普通状语时不得猜姓名
+  assert.deepStrictEqual(nameHits('辩护人出庭，核对身份。'), []);
+  assert.deepStrictEqual(nameHits('证人证言；'), []);
+  assert.deepStrictEqual(nameHits('祖父长期在外务工'), []);
+  assert.deepStrictEqual(nameHits('被害人停放车辆后离开'), []);
+});
+
+test('地址：村庄类「庄」+门牌可识别，普通名词不误伤', () => {
+  const addressHits = (text) => detect(text).items
+    .filter((i) => i.type === 'address').map((i) => i.value);
+  assert.deepStrictEqual(addressHits('户籍所在地及住址裴庄46号。'), ['裴庄46号']);
+  assert.deepStrictEqual(addressHits('张家庄1号'), ['张家庄1号']);
+  assert.deepStrictEqual(addressHits('委会裴庄46号。'), ['裴庄46号']);
+  assert.deepStrictEqual(addressHits('村委会裴庄46号。'), ['裴庄46号']);
+  assert.deepStrictEqual(addressHits('村庄46号'), []);
+  assert.deepStrictEqual(addressHits('庄子46号'), []);
+});

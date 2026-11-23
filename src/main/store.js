@@ -53,6 +53,7 @@ const DEFAULT_SETTINGS = {
   clipboardWatch: true,           // 剪贴板自动识别可恢复内容
   autoCollapse: true,             // 灵动岛无操作自动收起为顶部线段
   autoCollapseDelay: DEFAULT_COLLAPSE_SEC, // 自动收起时长（秒），可在设置中自定义
+  fullscreenAutoHide: true,       // 其他应用全屏/截图时自动隐藏灵动岛（全屏结束自动恢复）
   launchOnBoot: false,            // 开机自启
   appearance: {                   // 外观：主题 / 强调色 / 透明度 / 圆角 / 毛玻璃 / 面板尺寸 / 动效 / 背景
     theme: 'midnight',
