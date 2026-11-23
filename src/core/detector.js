@@ -30,8 +30,6 @@ const RE = {
   // 前缀后是大小写字母/数字/下划线/短横，不可能是普通词语，误报面极小。
   imWxid: /(?<![0-9A-Za-z_-])wxid_[0-9A-Za-z_-]{4,24}/gi,
   imQQ: /(?:QQ号|QQ账号|QQ)\s*[:：]?\s*([1-9]\d{4,10})(?!\d)/g,
-  hkmtPermit: /(?<![A-Za-z0-9])[HM]\d{8}(?![0-9A-Za-z])/g,
-  hkmtTaiwan: /台胞证\s*[:：]?\s*([1-9]\d{7})(?!\d)/g,
   uscc: /(?<![0-9A-Z])[159Y][1239]\d{6}[0-9A-HJ-NPQRTUWXY]{10}(?![0-9A-Z])/g,
 };
 
@@ -148,7 +146,6 @@ function detectStrong(text, opts) {
     scan(RE.imWxid, 'im');
     scanGrouped(RE.imQQ, 'im');
   }
-  if (opts.hkmt === true) { scan(RE.hkmtPermit, 'hkmt'); scanGrouped(RE.hkmtTaiwan, 'hkmt'); }
   if (opts.uscc === true) scan(RE.uscc, 'uscc', isValidUscc);
   return out;
 }
@@ -173,15 +170,15 @@ function exclusionRanges(text) {
 
 const PRIORITY = {
   caseNo: 0, idCard: 1, license: 2, uscc: 2, bank: 3, phone: 4,
-  landline: 4, passport: 5, hkmt: 5, email: 6, im: 6, plate: 7,
-  org: 8, address: 9, name: 10,
+  landline: 4, passport: 5, email: 6, im: 6, plate: 7,
+  org: 8, address: 9, native: 9, name: 10,
 };
 
 /**
  * 案号前缀补回：正则从括号年份起匹配，「南检刑诉[2026]Z25号」中机关简称会被留下，
  * 「苏淮（涟）援刑指字【2026】…」中省市简称+地市括注也会被留下。
  * 这里只对已检出的案号向左补回紧邻的「[简称+（括注）] + 类别词」，且不吞进已被识别为
- * 机构/地址/姓名的部分，避免把「临江市清河区人民检察院南检刑诉…」整体吞成案号。
+ * 机构/地址/姓名的部分，避免把「临江市望湖区人民检察院南检刑诉…」整体吞成案号。
  */
 // 可选「省市简称 + （地市/区县括注）」段：如 苏淮（涟）
 const CASE_PREFIX_LOCALITY = '(?:[\\u4e00-\\u9fa5]{0,6}[（(][\\u4e00-\\u9fa5]{1,3}[）)])?';
@@ -237,6 +234,14 @@ function dedupe(items) {
   for (const it of unique) {
     const last = out[out.length - 1];
     if (last && it.start < last.end) {
+      // 完全包含关系：保留覆盖范围更大的一方（遮大必遮小），不再按类型优先级裁剪。
+      // 否则「汉东省渡溪县湖田镇湖滨居委会裴庄46号」会被已命中的机构
+      // 「…湖滨居委会」整段吃掉，地址尾「裴庄46号」漏遮。
+      if (it.start <= last.start && it.end >= last.end) {
+        out[out.length - 1] = it;
+        continue;
+      }
+      if (it.start >= last.start && it.end <= last.end) continue;
       const better = PRIORITY[it.type] < PRIORITY[last.type]
         || (PRIORITY[it.type] === PRIORITY[last.type] && (it.end - it.start) > (last.end - last.start));
       if (better) out[out.length - 1] = it;
@@ -258,7 +263,7 @@ function detect(text, options = {}) {
     phone: true, idCard: true, bank: true, email: true,
     passport: true, name: true, address: true, plate: true,
     caseNo: true, license: true, org: true,
-    landline: true, im: false, hkmt: false, uscc: true,
+    landline: true, im: false, native: true, uscc: true,
     ...(options.toggles || {}),
   };
   const items = detectStrong(source, toggles);

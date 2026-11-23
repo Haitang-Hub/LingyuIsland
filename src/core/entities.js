@@ -51,7 +51,7 @@ function findOrgSuffixOf(value) {
 }
 
 // 层级字：字号里出现 省/市/县/区/镇/村 即按该层级屏蔽（取最末次出现，
-// 「江苏省淮安市涟水县…」取县）；不含层级字时按固定词典兜底：
+// 「汉东省临江市渡溪县…」取县）；不含层级字时按固定词典兜底：
 // 直辖市/省会/主要城市 → 某市（南京），省份全名 → 某省（江西）；
 // 两者皆无的机构不再按机构屏蔽。
 const ORG_LEVEL_SCAN_RE = /[省市县区镇村]/g;
@@ -436,7 +436,7 @@ function roleCandidates(text) {
         if (!validName(value) || value === '姓名' || value === '名字') continue;
         if (isNonPersonNoun(value)) continue; // 经理/证言/意见/婴儿等泛称不是姓名
         if (isFieldPhrase(value)) continue; // 日出生/出生日期/身份证号等字段词
-        // 姓名不以连词收尾：「杨素侠与被申请人」的 4 字候选会借 passiveClosed
+        // 姓名不以连词收尾：「王铁柱与被申请人」的 4 字候选会借 passiveClosed
         // 闭合（下一字恰是「被」），「X与被Y」是并列结构信号，姓名止于连字之前。
         if (/[与和及或同跟]$/.test(value)) continue;
         // 否定副词/诉讼负面词开头不是姓名：「被申请人未足额支付」曾借 personMarked
@@ -470,7 +470,7 @@ function roleCandidates(text) {
         const narrationClosed = CRIME_FOLLOW_RE.test(text.slice(end));
         // 「姓名 + 的 + 身份/亲属名词」是文书里的所有格结构
         // （「本律师担任张三的辩护人」）：「的」紧贴姓名即为右边界。
-        // 「杨素侠的委托」同样是强结构（委托人是当事人），代理词高频句式；
+        // 「王铁柱的委托」同样是强结构（委托人是当事人），代理词高频句式；
         // 后接必须是身份/亲属/权属类名词，「原告肖像的照片」这类普通名词组合不算。
         const possessiveClosed = len <= 3 && after === '的'
           && /^的(?:辩护人|代理人|诉讼代理人|委托代理人|律师|家属|亲属|监护人|法定代表人|代表人|近亲属|意见|陈述|证言|证词|供述|辩解|行为|身份|账户|卡|卡号|账号|银行卡|存折|工资卡|社保卡|手机号|身份证|财产|住所|联系方式|授权|委托|车|车辆|汽车|轿车|摩托车|电动车|手机|电话|电脑|房产|房屋|住宅|首饰|金饰|存款|现金|财物|物品|微信|支付宝|证件|[\u4e00-\u9fa5]{0,6}(?:卡号|银行卡|工资卡|社保卡|存折|账号))/.test(text.slice(end));
@@ -564,18 +564,31 @@ function roleCandidates(text) {
 
 function demographicNames(text) {
   const out = [];
+  const roleLongest = [...NEST_ROLES].sort((a, b) => b.length - a.length);
   for (const re of [DEMOGRAPHIC_RE, DEMOGRAPHIC_LONG_RE]) {
     re.lastIndex = 0;
     let m;
     while ((m = re.exec(text)) !== null) {
-      const value = m[1];
+      let value = m[1];
+      let start = m.index + m[0].length - value.length;
+      // 人口学路径捕获到「角色词 + 姓名」整串（如「犯罪嫌疑人裴毅，男」）
+      // 时，剥掉封闭角色词表里的前缀，只保留后面的姓名——否则连「犯罪嫌疑
+      // 人」「同案犯」这些角色词一起遮，属于过度屏蔽（起诉书实证）。
+      // 短守卫只认 1~3 字且特定尾字，挡不住 5 字角色词和「同案犯」，故改查封闭表。
+      if (!value.includes('·')) {
+        const role = roleLongest.find((r) => value.startsWith(r));
+        if (role) {
+          start += role.length;
+          value = value.slice(role.length);
+          if (!value) continue; // 捕获的整个就是角色词，没有姓名
+        }
+      }
       if (!validName(value) || isNonPersonNoun(value)
         || isFieldPhrase(value)) continue;
       // 长名正则排除以人称角色词开头的捕获（「当事人李四」「被告人王五」
       // 是角色词+姓名，不是 5 字姓名本身）。
       if (value.length >= 5 && /^[\u4e00-\u9fa5]{1,3}(?:人|员|者|师|长|告|象)/.test(value)
         && !value.includes('·')) continue;
-      const start = m.index + m[0].length - value.length;
       out.push({ start, end: start + value.length, value });
     }
   }
@@ -587,7 +600,7 @@ function demographicNames(text) {
 // 「裴钱涉嫌盗窃罪一案」是法律文书里的固定结构：姓名后面直接跟「涉嫌 + 罪名」。
 // 角色词/字段锚点缺席时（独立句、句首叙述），这条结构本身就是姓名边界。
 // 只认**句首或标点/空白之后**的候选，因此不会把前一个词的后半截当姓名
-// （「雷阳中学裴钱涉嫌」不会切出「学裴钱」）；也不依赖任何姓氏/姓名清单。
+// （「望湖中学裴钱涉嫌」不会切出「学裴钱」）；也不依赖任何姓氏/姓名清单。
 const SUSPECT_ANCHOR_RE = /(?:^|[\s，,。；;、：:（）()【】\[\]“”"'‘’])([\u4e00-\u9fa5]{2,4}(?:·[\u4e00-\u9fa5]{2,8})?)(?=\s*涉嫌)/g;
 // 指示/称代开头一定不是姓名本身（该公司/本案/上述人员/其他人）。
 const ANAPHOR_HEAD_RE = /^(?:该|本|此|其|我|你|他|她|咱|各|每|全|同|前|上|另|双|两|三|四|五|六|七|八|九|十|多|若|如|以|所|据|按|依|凡|诸|均|皆)/;
@@ -624,7 +637,7 @@ function suspicionNames(text) {
 // 「本律师担任张三的辩护人」里角色词正则会从「本律师」一路贪心到句尾的
 // 「辩护人」，姓名不在前缀之后，主扫描取不到。这条锚点直接按
 // 「（谓词）+ 姓名 + 的 + 身份名词」定位，结构封闭、不查姓氏表。
-// 「杨素侠的委托」同构（委托人是当事人），代理词/委托书高频句式。
+// 「王铁柱的委托」同构（委托人是当事人），代理词/委托书高频句式。
 const POSSESSIVE_ANCHOR_RE = /(?:^|[\s，,。；;、：:（）()【】\[\]“”"'‘’]|担任|指派|委托|聘请|接受|系)([\u4e00-\u9fa5]{2,4})的((?:辩护人|诉讼代理人|委托代理人|代理人|律师|家属|亲属|监护人|法定代表人|代表人|近亲属|委托))/g;
 
 function possessiveNames(text) {
@@ -842,7 +855,7 @@ const ADDRESS_GUIDE_RE = /(?:户籍所在地及住址|户籍所在地|经常居�
 
 // 行政区划链：按 省 → 市 → 县/区 → 乡镇/街道 → 村/社区 顺序逐级可选解析。
 // 名称段须为 1~8 位纯汉字且不含行政区划后缀字与泛指代词，
-// 防止叙述前缀（「其在浙江」「全村共有」）被当成地名组成部分。
+// 防止叙述前缀（「其在汉东」「全村共有」）被当成地名组成部分。
 const ADMIN_TIERS = [
   { suffixes: ['自治区', '省'], level: '省' },
   { suffixes: ['自治州', '地区', '盟', '市'], level: '市' },
@@ -907,23 +920,28 @@ function addressAt(text, start) {
   if (!run) return null;
   // 「村委会裴庄46号」里的委会是基层组织名，不是地址组成部分；
   // 剥掉后再解析行政区划链，避免把「委会裴庄46号」整段遮成地址。
+  // 「村委会裴庄46号」里的委会是基层组织名，不是地址组成部分；
+  // 剥掉它只为解析行政区划链（会/委/村委会不是行政档位），
+  // 但遮盖范围必须包含残余前缀——扫描件断行后常以「委会裴庄46号」
+  // 独立成行，跳过不遮会漏出「委会」两字（不起诉决定书实证）。
   const orgPrefix = ADDRESS_ORG_PREFIX_RE.exec(run[0]);
   const skip = orgPrefix ? orgPrefix[0].length : 0;
-  let raw = run[0].slice(skip);
+  const raw = run[0].slice(skip);
   const bad = ADDRESS_BAD_CHAR_RE.exec(raw);
-  if (bad) raw = raw.slice(0, bad.index);
-  const chain = scanAdminChain(raw);
+  const stop = bad ? bad.index : -1;
+  const chainRaw = stop >= 0 ? raw.slice(0, stop) : raw;
+  const chain = scanAdminChain(chainRaw);
   if (!chain.level) return null;
   // 落点要素：链后须有道路/门牌/小区等单位；
-  // 仅当链止于村/社区档位时允许以村/社区收尾（如「雷州市北和镇石牌垌村」）。
-  let end = leafEndAt(raw, chain.i);
+  // 仅当链止于村/社区档位时允许以村/社区收尾（如「临江市望湖镇湖滨村」）。
+  let end = leafEndAt(chainRaw, chain.i);
   if (end >= 0) end += chain.i;
   else if (chain.lastTier === 4) end = chain.i;
   if (end < 3) return null;
-  return item('address', start + skip, start + skip + end, raw.slice(0, end), true);
+  return item('address', start, start + skip + end, run[0].slice(0, skip + end), true);
 }
 
-// 引导词与地址值之间常还夹一个动词/介词（「案发地点位于涟水县…」「现场在临江市…」）。
+// 引导词与地址值之间常还夹一个动词/介词（「案发地点位于渡溪县…」「现场在临江市…」）。
 // 这些字不是地址的一部分，留在值里会让屏蔽形态变成「某X……位于」。多字动词整词跳过；
 // 单字介词（在/从/到/往/至/向）只在跳过之后仍能解析出地址时才跳，
 // 避免把「于都县」这类以介词同形字开头的真实地名切坏。
@@ -989,13 +1007,13 @@ const ORG_SUFFIX_TEST = new RegExp(ORG_SUFFIXES.join('|'));
 const GENERIC_ORG_RE = /(?:[一二两三四五六七八九十几数多每各某这那该]家|[某该这那])$/;
 const ADMIN_UNIT_RE = /(?:自治区|省|市|县|区|旗|盟|镇|乡|街道|村|社区)/;
 
-// 职务动词紧跟机构名是案卷高频句式（「仍实际负责涟水县师资培训中心」），
+// 职务动词紧跟机构名是案卷高频句式（「仍实际负责渡溪县师资培训中心」），
 // 动词不切断就会吞进字号；单字断点表覆盖不了双字动词，这里按结尾窗口判断。
 const ORG_ROLE_VERB_RE = /(?:负责|担任|主管|分管|兼任|任职|调任|主持|主抓)$/;
 // 出示/出具类叙述动词同样不能吞进字号（「出示红日建材有限公司」曾整体入字号，
 // 前2取到「出示」而显示为「出示****公司」）。这些词只作动作，不作机构字号。
 const ORG_NARRATION_VERB_RE = /(?:出示|出具|展示|提供|提交|调取)$/;
-// 「我先是找到涟水县实验中学校长…」这类行为动词只带机构宾语，不能吞进字号。
+// 「我先是找到渡溪县实验中学校长…」这类行为动词只带机构宾语，不能吞进字号。
 const ORG_ACTION_VERB_RE = /(?:找到|前往|来到|联系|约定|入住|到达|抵达|走进|拜访|租用|途经|结识|走访|进入)$/;
 // 角色人称词的「人」同样不能吞进字号（「负责人李太白银行转账」曾得「人李太白银行」，
 // 还会在重叠消解时盖掉真姓名）。「人民银行/人民医院」的「人」前面是机构专名而非角色词，不受影响。
@@ -1014,17 +1032,21 @@ function isOrgLeftBreak(text, ch, start, brandEnd, suffixEnd) {
   if (ch === '年' && /[0-9]/.test(text[start - 2] || '')) return true;
   if (ORG_LEFT_BREAK.has(ch) || (ch === '系' && text[start] !== '统')) return true;
   const rightBrand = text.slice(start, brandEnd);
+  // 「住址汉东省渡溪县湖田镇湖滨居委会…」的「住/址」是住址引导字，不是机构字号开头；
+  // 右侧能解析出行政区划链才断开（防「住房和城乡建…」这类字号误断）。
+  if ((ch === '住' || ch === '址')
+    && scanAdminChain(text.slice(start, suffixEnd)).level) return true;
   if (ch === '经') {
-    // 「经××局/经江苏…」是介词；「经纬/经济/经开区」是字号或地名缩写，不能断。
+    // 「经××局/经汉东…」是介词；「经纬/经济/经开区」是字号或地名缩写，不能断。
     if (/^开[发区]|^纬|^济|^贸|^技/.test(rightBrand)) return false;
     return PROVINCE_HEAD_RE.test(rightBrand) || ADMIN_UNIT_RE.test(rightBrand);
   }
   if (ch === '和' || ch === '与') {
-    // 「A公司和B公司」是连接词；「和平/和顺/和县/北和镇」是地名或字号，不能断。
+    // 「A公司和B公司」是连接词；「和平/和顺/和县/望湖镇」是地名或字号，不能断。
     if (/^[平县顺田]/.test(rightBrand)) return false;
     const left = text.slice(Math.max(0, start - 14), start);
     if (/[\u4e00-\u9fa5]$/.test(left) && !ORG_SUFFIX_TEST.test(left)) return false;
-    // 右侧须是一段完整主体（≥6 字）才断开；「北和镇卫生院」的「和」只是
+    // 右侧须是一段完整主体（≥6 字）才断开；「望湖镇卫生院」的「和」只是
     // 地名用字，右侧残段（镇卫生院）过短，继续向前回溯到真正的边界。
     if (text.slice(start, suffixEnd).length < 6) return false;
     return ADMIN_UNIT_RE.test(rightBrand)
@@ -1088,8 +1110,8 @@ function detectOrgs(text) {
     if (adjacentToOrg && suffix === '公司') continue;
     let brand = text.slice(start, brandEnd);
     // 若首个行政区划单元前混入长叙述，只从该单元稳定的二字地名核心重新起头。
-    // 正常「江苏省淮安市…」首单元已经很短，不会被裁切。
-    // 全国性机构专名（「中国农业银行雷州市支行」）的层级字出现在专名之后，
+    // 正常「汉东省临江市…」首单元已经很短，不会被裁切。
+    // 全国性机构专名（「中国农业银行临江市支行」）的层级字出现在专名之后，
     // 属于机构名自身结构而非叙述前缀，不能裁切。
     const admin = ADMIN_UNIT_RE.exec(brand);
     if (admin && admin.index > 4 && !isKnownOrgName(brand)) {
@@ -1167,12 +1189,80 @@ function addLegacyPlaceHits(out, text, value) {
   }
 }
 
+/* ---------------- 籍贯：某省某县（人）片段 ---------------- */
+
+// 省级行政区全名（后可带 省/自治区 后缀）。封闭行政表，与机构/地址共用哲学：
+// 不维护县级名单，靠「省级全名 + 2~3 字地名/行政后缀 + 左右边界」约束。
+const NATIVE_PROVINCE_ALT = '北京|天津|上海|重庆|河北|山西|辽宁|吉林|黑龙江|江苏|浙江|安徽|福建|江西|山东|河南|湖北|湖南|广东|广西|海南|四川|贵州|云南|陕西|甘肃|青海|宁夏|新疆|西藏|内蒙古|香港|澳门|台湾';
+const NATIVE_PROVINCE_RE = new RegExp(`(?:${NATIVE_PROVINCE_ALT})(?:省|自治区)?`, 'g');
+// 籍贯引导词（可带冒号/为），其后直接跟片段：简历「籍贯：广东渡溪」。
+// 「出生地」属于籍贯项引导词——用户要求遮「出生地广东省渡溪县，」这类某省某县分词；
+// 「地址项」对不完整住址（无落点）不遮是另一检测项的约定，不要串用到这里。
+const NATIVE_GUIDE_TAIL_RE = /(?:户籍所在地|户籍地址|籍贯所在地|户籍|籍贯|原籍|祖籍|出生地)\s*[:：为]?\s*$/;
+// 地址引导词（现住/住在/住址…）后跟纯行政区划 + 分词符号时，也按籍贯遮：
+// 「现住广东省渡溪县，」无门牌落点，地址规则不遮，交给籍贯。
+// 这类只提供左边界合法性，不享受裸地名 6 字放宽，防「住在广东渡溪长大」被整段吞。
+const NATIVE_ADDR_GUIDE_RE = /(?:现住址|现住|住址|住所地|居住地|家住|住在|居住)\s*[:：为]?\s*$/;
+// 「系/是/来自/生于 + 片段」的软引导：文书「系广东渡溪人」
+const NATIVE_SOFT_HEAD_RE = /(?:来自|生于|系|是)$/;
+// 行政后缀收尾（有后缀允许更长片段：渡溪县/云溪市）
+const NATIVE_SUFFIX_RE = /(?:自治县|自治州|自治旗|县|市|区|旗|盟)$/;
+// 地名段以这些字开头必为叙述词（「广东人喜欢吃辣」不是籍贯地）
+const NATIVE_TIER2_BAD_RE = /^(?:各|全|的|人)/;
+// 片段以机构后缀收尾（广东银行/广东师范大学）交给机构规则，不当籍贯
+const NATIVE_ORG_TAIL_RE = new RegExp(`(?:${ORG_SUFFIXES.slice().sort((a, b) => b.length - a.length).join('|')})$`);
+
+/**
+ * 「某省某县」「某省某县人」式籍贯片段：
+ *  - 省级全名（可带 省/自治区）+ 2 字以上地名段，段后须紧跟 人/标点/空白/行尾；
+ *  - 无行政后缀的裸地名（「广东渡溪，」）只认 2~3 字（有引导词放宽到 6 字），
+ *    防止「渡溪园林甲天下」这类整串被吞；
+ *  - 带行政后缀（渡溪县/云溪市）放宽到 7 字；
+ *  - 左边界须为行首/非汉字/籍贯引导词/系·是·来自·生于，
+ *    正文叙述「他在广东渡溪长大」不按籍贯处理（那是地址/语境问题）。
+ */
+function detectNativePlaces(text) {
+  const out = [];
+  NATIVE_PROVINCE_RE.lastIndex = 0;
+  let m;
+  while ((m = NATIVE_PROVINCE_RE.exec(text)) !== null) {
+    const start = m.index;
+    const p = start + m[0].length;
+    // 地名段整体（≤8 汉字），其后必须是非汉字边界——
+    // 长地址「广东省云溪市望湖镇湖滨村46号」的汉字串超长直接失败，交地址规则。
+    const seg = /^[\u4e00-\u9fa5]{1,8}(?![\u4e00-\u9fa5])/.exec(text.slice(p));
+    if (!seg) continue;
+    let body = seg[0];
+    if (body.endsWith('人')) body = body.slice(0, -1);
+    if (!body || NATIVE_TIER2_BAD_RE.test(body)) continue;
+    const hasSuffix = NATIVE_SUFFIX_RE.test(body);
+    if (NATIVE_ORG_TAIL_RE.test(body)) continue;
+    // 左边界：行首/非汉字边界，或 籍贯 引导词 / 系·是·来自·生于 软引导 /
+    // 地址引导词（现住等，仅给左边界、不放大裸地名长度）。
+    // 裸地名上限只在「籍贯引导词」语境放宽到 6 字——仅靠标点/行首边界或地址引导词时仍限 3 字，
+    // 否则「广东人喜欢吃辣」「住在广东渡溪长大」这类普通句子会被整段吞掉。
+    const prev = text[start - 1];
+    const before = text.slice(Math.max(0, start - 12), start);
+    const byBoundary = !prev || !/[\u4e00-\u9fa5]/.test(prev);
+    const nativeGuide = NATIVE_GUIDE_TAIL_RE.test(before)
+      || NATIVE_SOFT_HEAD_RE.test(text.slice(Math.max(0, start - 4), start));
+    const addrGuide = NATIVE_ADDR_GUIDE_RE.test(before);
+    if (!byBoundary && !nativeGuide && !addrGuide) continue;
+    if (!hasSuffix && (body.length < 2 || body.length > (nativeGuide ? 6 : 3))) continue;
+    if (hasSuffix && body.length > 7) continue;
+    const end = p + seg[0].length;
+    out.push(item('native', start, end, text.slice(start, end), true));
+  }
+  return out;
+}
+
 function detectEntities(text, options = {}) {
   const source = String(text || '');
   const toggles = options.toggles || {};
   const out = [];
   if (toggles.name !== false) out.push(...detectLocalNames(source).items);
   if (toggles.address !== false) out.push(...detectAddresses(source));
+  if (toggles.native !== false) out.push(...detectNativePlaces(source));
   if (toggles.org !== false) out.push(...detectOrgs(source));
 
   // 新实体表按完整原值传播；旧 knownPlaces 仅走带左边界的兼容路径。
@@ -1186,7 +1276,7 @@ function detectEntities(text, options = {}) {
     for (const value of options.knownPlaces) addLegacyPlaceHits(out, source, value);
   }
   if (toggles.name !== false) addHashNames(out, source, options.knownNameHashes);
-  // 全案卷传播会放大「和江苏…公司」这类吞了连接词的伪机构：
+  // 全案卷传播会放大「和汉东…公司」这类吞了连接词的伪机构：
   // 机构名以经/和开头且紧跟省级地名时，几乎必为边界错误，直接丢弃（含传播项）。
   return out.filter((it) => !(
     it.type === 'org'

@@ -39,6 +39,7 @@ const CODE_LABEL = {
   phone: '手机号', idCard: '身份证', bank: '卡号', email: '邮箱', name: '姓名',
   address: '住址', passport: '护照', plate: '车牌', caseNo: '案号', license: '证号',
   org: '机构', landline: '电话', im: '账号', hkmt: '证件', uscc: '信用代码', meta: '元数据',
+  native: '籍贯',
 };
 
 const codeBracket = (type, code) => `〔${CODE_LABEL[type] || type}·${code}〕`;
@@ -48,6 +49,7 @@ const TYPE_LABEL = {
   name: '姓名', address: '住址', passport: '护照', plate: '车牌',
   caseNo: '案号', license: '执业证号', org: '机构名称',
   landline: '固定电话', im: '社交账号', hkmt: '港澳台证件', uscc: '统一社会信用代码',
+  native: '籍贯',
   meta: '文档元数据',
 };
 
@@ -204,7 +206,7 @@ function caseHeadOf(value) {
 
 /**
  * 案号头部决策（屏蔽时调用，结果存入 vault 供还原端精确匹配修饰）。
- * 案号紧邻机关实体（如「涟水县人民检察院」南检刑诉…）时按机构层级统一为
+ * 案号紧邻机关实体（如「渡溪县人民检察院」南检刑诉…）时按机构层级统一为
  * 「某市/县」，不保留机关简称；否则按 caseHeadOf 从案号自身取省市简称。
  */
 function caseNoHeadFor(item, items) {
@@ -281,6 +283,9 @@ function buildMasked(type, value, code, opts = {}) {
       break;
     case 'hkmt': // H****8：同护照风格
       body = `${value[0]}****${value.slice(-1)}`;
+      break;
+    case 'native': // 籍贯：只保留省略号，具体省市县名与「人」字都不外泄
+      body = '……';
       break;
     case 'uscc': // ****QX1T：**** + 尾4（登记部门码不外泄）
       body = `****${value.slice(-4)}`;
@@ -373,6 +378,7 @@ const FULL = {
   landline: '\\d{3}\\*{4}\\d{4}',
   im: '.{2}\\*{3}.{2}',
   hkmt: '[A-Za-z]\\*{4,6}[0-9A-Za-z]',
+  native: '……',
   uscc: '\\*{4}[0-9A-HJ-NPQRTUWXY]{4}',
 };
 

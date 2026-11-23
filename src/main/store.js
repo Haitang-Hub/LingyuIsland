@@ -42,9 +42,9 @@ const DEFAULT_SETTINGS = {
     phone: true, idCard: true, bank: true, email: true,
     name: true, address: true, passport: true, plate: true,
     caseNo: true, license: true, org: true,
-    // 固定电话、统一社会信用代码默认开启；社交账号、港澳台证件仍默认关闭
+    // 固定电话、统一社会信用代码、籍贯默认开启；社交账号仍默认关闭
     // （im 仅在聊天记录场景按需开启，避免误报普通数字串）
-    landline: true, im: false, hkmt: false, uscc: true,
+    landline: true, im: false, native: true, uscc: true,
   },
   // PDF 不可逆遮盖：dpi 控制清晰度/体积；ocrEngineDir 为空时自动探测本机 OcrFlow 引擎
   pdfRedact: { dpi: 200, ocrEngineDir: '' },
@@ -103,7 +103,8 @@ class Store {
       const raw = JSON.parse(fs.readFileSync(this.paths.settings, 'utf8'));
       this.settings = {
         ...DEFAULT_SETTINGS, ...raw,
-        toggles: { ...DEFAULT_SETTINGS.toggles, ...(raw.toggles || {}) },
+        // 港澳台证件检测项已改为籍贯（native）；旧配置的 hkmt 键在末尾置空丢弃
+        toggles: { ...DEFAULT_SETTINGS.toggles, ...(raw.toggles || {}), hkmt: undefined },
         pdfRedact: { ...DEFAULT_SETTINGS.pdfRedact, ...(raw.pdfRedact || {}) },
       };
     } catch { /* 首次运行 */ }

@@ -35,7 +35,7 @@ if (!window.island) {
       phone: true, idCard: true, bank: true, email: true,
       name: true, address: true, passport: true, plate: true,
       caseNo: true, license: true, org: true,
-      landline: false, im: false, hkmt: false, uscc: false,
+      landline: false, im: false, native: true, uscc: false,
     },
     clipboardWatch: true,
     autoCollapse: true,

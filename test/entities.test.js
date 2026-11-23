@@ -45,30 +45,30 @@ test('实体结构：句末谓语、集合指代和联系方式不成姓名', ()
 });
 
 test('实体结构：地址保留完整居住要素且不吞引导词', () => {
-  const text = '户籍所在地及住址浙江省杭州市西湖区文三路138号3幢201室，住广东省雷州市乌石镇新村振兴路18号2栋502室。';
+  const text = '户籍所在地及住址汉东省临江市云溪区滨湖路138号3幢201室，住汉东省临江市望湖镇湖滨村滨湖路18号2栋502室。';
   const addrs = vals(text, 'address');
-  assert.ok(addrs.includes('浙江省杭州市西湖区文三路138号3幢201室'), JSON.stringify(addrs));
+  assert.ok(addrs.includes('汉东省临江市云溪区滨湖路138号3幢201室'), JSON.stringify(addrs));
   assert.ok(!addrs.some((v) => v.includes('住址')), JSON.stringify(addrs));
-  assert.ok(addrs.includes('广东省雷州市乌石镇新村振兴路18号2栋502室'), JSON.stringify(addrs));
+  assert.ok(addrs.includes('汉东省临江市望湖镇湖滨村滨湖路18号2栋502室'), JSON.stringify(addrs));
 });
 
 test('实体结构：纯行政区划、泛指地点和占位地址不屏蔽', () => {
   for (const text of [
-    '江苏涟水人',
-    '籍贯：广东雷州雷城街道人',
+    '汉东渡溪人',
+    '籍贯：临江市湖西街道人',
     '案发地合肥市',
     '在南京市一家宾馆',
-    '地址嵌在括号中：（广东省A市B镇C村）',
+    '地址嵌在括号中：（汉东省A市B镇C村）',
   ]) {
     assert.strictEqual(vals(text, 'address').length, 0, `${text} → ${JSON.stringify(vals(text, 'address'))}`);
   }
 });
 
 test('实体结构：机构后缀、长度、行政区划边界共同确定机构', () => {
-  assert.deepStrictEqual(vals('多次承揽雷州市师资培训中心举办的项目', 'org'), ['雷州市师资培训中心']);
-  assert.deepStrictEqual(vals('被告系杭州友好医院职工', 'org'), ['杭州友好医院']);
+  assert.deepStrictEqual(vals('多次承揽临江市师资培训中心举办的项目', 'org'), ['临江市师资培训中心']);
+  assert.deepStrictEqual(vals('被告系临江市友好医院职工', 'org'), ['临江市友好医院']);
   assert.deepStrictEqual(vals('该公司向中国工商银行深圳支行贷款', 'org'), ['中国工商银行深圳支行']);
-  assert.deepStrictEqual(vals('涟水县师资培训中心支付九洲公司', 'org'), ['涟水县师资培训中心']);
+  assert.deepStrictEqual(vals('渡溪县师资培训中心支付九洲公司', 'org'), ['渡溪县师资培训中心']);
 });
 
 test('实体结构：国家总部、数量泛指和短简称不屏蔽', () => {
@@ -78,9 +78,9 @@ test('实体结构：国家总部、数量泛指和短简称不屏蔽', () => {
 });
 
 test('实体结构：旧地名兼容传播要求左边界，新实体表按完整值传播', () => {
-  assert.strictEqual(vals('里石牌垌子无关', 'address', { knownPlaces: new Set(['石牌垌']) }).length, 0);
-  const known = collectEntities(['住所地浙江省杭州市西湖区文三路138号']);
-  assert.ok(vals('其在浙江省杭州市西湖区文三路138号出现', 'address', { knownEntities: known }).length >= 1);
+  assert.strictEqual(vals('里湖滨子无关', 'address', { knownPlaces: new Set(['湖滨']) }).length, 0);
+  const known = collectEntities(['住所地汉东省临江市云溪区滨湖路138号']);
+  assert.ok(vals('其在汉东省临江市云溪区滨湖路138号出现', 'address', { knownEntities: known }).length >= 1);
 });
 
 // ---- 姓名规则重构 Golden Test（锚点+后边界、误判守卫、传播最长优先） ----
@@ -173,7 +173,7 @@ test('姓名·冒号语境：字段值确认，冒号引出的话语不确认', 
   }
   for (const [text, name] of [
     ['被会见人：裴钱', '裴钱'],
-    ['负责人：陈兆坤，主任。', '陈兆坤'],
+    ['负责人：李四，主任。', '李四'],
     ['书记员：张三，担任法庭记录。', '张三'],
     ['原告：张三，南检刑诉[2026]Z25号', '张三'],
   ]) {
@@ -199,7 +199,7 @@ test('姓名·谓语与罪名边界：不吞谓语、不越过动词吞罪名', 
     ['被会见人：裴钱涉嫌盗窃罪一案', '裴钱'],
     ['姓名：裴钱涉嫌盗窃罪', '裴钱'],
     ['裴钱涉嫌盗窃罪', '裴钱'],
-    ['被告人裴钱涉嫌盗窃罪，现羁押于雷州市看守所。', '裴钱'],
+    ['被告人裴钱涉嫌盗窃罪，现羁押于临江市看守所。', '裴钱'],
   ]) {
     assert.deepStrictEqual(vals(text, 'name'), [name], `${text} → ${JSON.stringify(vals(text, 'name'))}`);
     const v = new Vault();
@@ -245,10 +245,10 @@ test('姓名·律师表述：连续谓语后取宾语，所有格结构取姓名
 
 test('姓名·委托所有格：代理词/委托书高频句式（申请人X的委托）', () => {
   for (const [text, name] of [
-    ['本案申请人（劳动者）杨素侠的委托，担任其与某公司劳动争议一案的仲裁代理人', '杨素侠'],
-    ['律师接受杨素侠的委托', '杨素侠'],
+    ['本案申请人（劳动者）王铁柱的委托，担任其与某公司劳动争议一案的仲裁代理人', '王铁柱'],
+    ['律师接受王铁柱的委托', '王铁柱'],
     ['受王东的委托出具法律意见书', '王东'],
-    ['杨素侠的委托诉讼代理人', '杨素侠'],
+    ['王铁柱的委托诉讼代理人', '王铁柱'],
   ]) {
     assert.ok(vals(text, 'name').includes(name), `${text} → ${JSON.stringify(vals(text, 'name'))}`);
   }
@@ -257,8 +257,8 @@ test('姓名·委托所有格：代理词/委托书高频句式（申请人X的�
     assert.strictEqual(vals(text, 'name').length, 0, `${text} → ${JSON.stringify(vals(text, 'name'))}`);
   }
   // 「X与被Y」并列结构：连词尾候选不得借 passiveClosed 闭合
-  assert.strictEqual(vals('申请人杨素侠与被申请人阜南华文针织服饰有限公司', 'name').join(','), '',
-    '杨素侠与 不应被确认为姓名');
+  assert.strictEqual(vals('申请人王铁柱与被申请人渡南华文针织服饰有限公司', 'name').join(','), '',
+    '王铁柱与 不应被确认为姓名');
   // 否定副词开头（被申请人未足额支付…）不得经两遍式候选误确认
   const corpus = [
     '根据申请人提交的证据银行流水及劳动合同，银行流水显示，被申请人自2025年9月起，未足额、按时向申请人发放工资，至今累计拖欠5852元。',

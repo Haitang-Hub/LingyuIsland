@@ -71,7 +71,7 @@ test('maskText 不破坏 JSON 结构', () => {
 
 test('可读性：编码括号带类型标签，还原剥除标签', () => {
   const v = new Vault();
-  const t = '原告：陈阿满，手机 13812345678，住浙江省杭州市西湖区文三路138号。';
+  const t = '原告：陈阿满，手机 13812345678，住汉东省临江市云溪区滨湖路138号。';
   const { masked } = maskText(t, v);
   // 每个编码括号都带「类型·」标签
   const brackets = masked.match(/〔[^〔〕]*〕/g) || [];
@@ -89,7 +89,7 @@ test('可读性：编码括号带类型标签，还原剥除标签', () => {
 test('可读性：跨节点片段为「标签+编码」占位，可读且可还原', () => {
   const v = new Vault();
   // 实体跨两个文本节点（boundaries 模拟 Office run 拆分）
-  const t = '审判长：被告人陈阿满，你是否收到本庭向你送达的临江市清河区';
+  const t = '审判长：被告人陈阿满，你是否收到本庭向你送达的临江市望湖区';
   const r2 = '九洲有限公司南检刑诉[2026]Z25号起诉书副本。';
   const blockText = t + r2;
   const { edits } = maskEdits(blockText, v, { boundaries: [t.length] });
@@ -135,8 +135,8 @@ test('扩展·屏蔽值：各类型格式与编码内嵌（带标签）', () => 
     phone: ['13812345678', /^138\*{4}5678〔手机号·[0-9a-f]{6}〕$/],
     idCard: [ID1, /^330106\*{4}〔身份证·[0-9a-f]{6}〕$/],
     name: ['张三', /^张\*〔姓名·[0-9a-f]{6}〕$/],
-    org: ['广东雷阳律师事务所', /^某省……律师事务所〔机构·[0-9a-f]{6}〕$/],
-    address: ['浙江省杭州市西湖区文三路138号', /^某省……号〔住址·[0-9a-f]{6}〕$/],
+    org: ['汉东省望湖律师事务所', /^某省……律师事务所〔机构·[0-9a-f]{6}〕$/],
+    address: ['汉东省临江市云溪区滨湖路138号', /^某省……号〔住址·[0-9a-f]{6}〕$/],
     license: ['14401202080123456', /^\*{4}3456〔证号·[0-9a-f]{6}〕$/],
     uscc: ['91330106MA27W1QX1T', /^\*{4}QX1T〔信用代码·[0-9a-f]{6}〕$/],
   };
@@ -148,10 +148,10 @@ test('扩展·屏蔽值：各类型格式与编码内嵌（带标签）', () => 
 
 test('扩展·屏蔽值：地址统一某X……尾1，机构统一某X……后缀', () => {
   const v = new Vault();
-  const addr = buildMasked('address', '杭州市西湖区文三路138号', v.ensureCode('address', 'addr'));
+  const addr = buildMasked('address', '临江市云溪区滨湖路138号', v.ensureCode('address', 'addr'));
   assert.ok(/^某市……号〔住址·/.test(addr), `地址应为某X……尾1形态: ${addr}`);
-  assert.ok(!/文三|西湖|杭州/.test(addr), addr);
-  const org = buildMasked('org', '杭州雷阳会议服务有限公司', v.ensureCode('org', '杭州雷阳会议服务有限公司'));
+  assert.ok(!/滨湖|云溪|临江市/.test(addr), addr);
+  const org = buildMasked('org', '临江市望湖会议服务有限公司', v.ensureCode('org', '临江市望湖会议服务有限公司'));
   assert.ok(org.startsWith('某市……有限公司〔机构·'), org);
 });
 
@@ -160,9 +160,9 @@ test('扩展·机构屏蔽值：统一「某X……后缀」形态（层级取�
   const cases = [
     ['江西九洲书社教育科技有限公司', /^某省……有限公司〔机构·[0-9a-f]{6}〕$/],
     ['盛景（南京）智能装备股份有限公司', /^某市……股份有限公司〔机构·[0-9a-f]{6}〕$/],
-    ['临江市清河区红梅食品加工公司', /^某区……公司〔机构·[0-9a-f]{6}〕$/],
-    ['雷州市北和镇卫生院', /^某镇……卫生院〔机构·[0-9a-f]{6}〕$/],
-    ['石牌垌村村民委员会', /^某村……村民委员会〔机构·[0-9a-f]{6}〕$/],
+    ['临江市望湖区红梅食品加工公司', /^某区……公司〔机构·[0-9a-f]{6}〕$/],
+    ['临江市望湖镇卫生院', /^某镇……卫生院〔机构·[0-9a-f]{6}〕$/],
+    ['湖滨村村民委员会', /^某村……村民委员会〔机构·[0-9a-f]{6}〕$/],
   ];
   for (const [value, re] of cases) {
     const masked = buildMasked('org', value, v.ensureCode('org', value));
@@ -199,13 +199,13 @@ test('扩展·往返：混合文本全类型屏蔽→还原逐字一致', () => 
   const v = new Vault();
   const t = [
     `张三，身份证${ID1}，手机13812345678，卡号${BANK1}`,
-    `住浙江省杭州市西湖区文三路138号3幢201室`,
+    `住汉东省临江市云溪区滨湖路138号3幢201室`,
     `法定代表人：王芳，与李四商议`,
     `案号（2020）皖0221刑初123号，护照E12345678`,
   ].join('\n');
   const { masked } = maskText(t, v);
   assert.strictEqual(restoreText(masked, v).text, t);
-  assert.ok(!masked.includes('13812345678') && !masked.includes('文三路') && !masked.includes('王芳'));
+  assert.ok(!masked.includes('13812345678') && !masked.includes('滨湖路') && !masked.includes('王芳'));
 });
 
 test('扩展·优先级：重叠区间按类型优先级保留', () => {
@@ -236,7 +236,7 @@ test('扩展·Office：PPT 与 Excel 的文本节点拼接后识别', () => {
 
 test('Office：跨 run 拼接识别身份证与完整地址，XML 结构不变且可逐字还原', () => {
   const xml = `<?xml version="1.0"?><w:document><w:body>
-<w:p><w:r><w:t>日出生，公民身份号码</w:t></w:r><w:r><w:t xml:space="preserve"> ${ID_BAD}</w:t></w:r><w:r><w:t>，回族，户籍所在地浙江省杭州市西湖区文三路</w:t></w:r><w:r><w:t>138</w:t></w:r><w:r><w:t>号</w:t></w:r><w:r><w:t>3</w:t></w:r><w:r><w:t>幢</w:t></w:r><w:r><w:t>201</w:t></w:r><w:r><w:t>室</w:t></w:r></w:p>
+<w:p><w:r><w:t>日出生，公民身份号码</w:t></w:r><w:r><w:t xml:space="preserve"> ${ID_BAD}</w:t></w:r><w:r><w:t>，回族，户籍所在地汉东省临江市云溪区滨湖路</w:t></w:r><w:r><w:t>138</w:t></w:r><w:r><w:t>号</w:t></w:r><w:r><w:t>3</w:t></w:r><w:r><w:t>幢</w:t></w:r><w:r><w:t>201</w:t></w:r><w:r><w:t>室</w:t></w:r></w:p>
 </w:body></w:document>`;
   const blocks = xmlBlockTexts(xml).filter((b) => b.trim());
   assert.strictEqual(blocks.length, 1);
@@ -249,7 +249,7 @@ test('Office：跨 run 拼接识别身份证与完整地址，XML 结构不变�
     return { edits, count: items.length };
   }).xml;
   assert.ok(!maskedXml.includes(ID_BAD), '身份证应被屏蔽');
-  assert.ok(!maskedXml.includes('文三路') && !maskedXml.includes('138号'), '地址应被整串屏蔽');
+  assert.ok(!maskedXml.includes('滨湖路') && !maskedXml.includes('138号'), '地址应被整串屏蔽');
   assert.strictEqual(
     (maskedXml.match(/<w:t[^>]*>/g) || []).length,
     (xml.match(/<w:t[^>]*>/g) || []).length,
@@ -269,8 +269,8 @@ test('Office：跨 run 拼接识别身份证与完整地址，XML 结构不变�
 
 test('Office：跨 run 地址整串输出可读屏蔽值，且定点回填逐字节还原', () => {
   const runs = [
-    '户籍所在地', '江苏省涟水县', '岔庙镇', '安东北路', '102', '号', '4', '单元', '507', '室',
-    '，住', '涟水县', '岔庙镇', '岔庙府华府', '19', '栋', '701', '室', '。',
+    '户籍所在地', '汉东省渡溪县', '湖田镇', '朝晖路', '102', '号', '4', '单元', '507', '室',
+    '，住', '渡溪县', '湖田镇', '湖田府华府', '19', '栋', '701', '室', '。',
   ];
   const xml = `<?xml version="1.0"?><w:document><w:body><w:p>${
     runs.map((s) => `<w:r><w:t>${s}</w:t></w:r>`).join('')
@@ -305,18 +305,18 @@ test('规则：车牌 屏蔽→还原 往返', () => {
 
 test('规则：地址统一某X……尾1；机构统一某X……后缀', () => {
   const v = new Vault();
-  const org = buildMasked('org', '杭州雷阳会议服务有限公司', v.ensureCode('org', '杭州雷阳会议服务有限公司'));
+  const org = buildMasked('org', '临江市望湖会议服务有限公司', v.ensureCode('org', '临江市望湖会议服务有限公司'));
   assert.ok(org.startsWith('某市……有限公司〔机构·'), org);
-  const addr = buildMasked('address', '杭州市西湖区文三花园19栋701室', v.ensureCode('address', 'addr1'));
+  const addr = buildMasked('address', '临江市云溪区滨湖花园19栋701室', v.ensureCode('address', 'addr1'));
   assert.ok(addr.startsWith('某市……室〔住址·'), addr);
-  assert.ok(!/文三|西湖|花园/.test(addr), addr);
-  const prov = buildMasked('address', '浙江省杭州市西湖区文三路138号', v.ensureCode('address', 'addr2'));
+  assert.ok(!/滨湖|云溪|花园/.test(addr), addr);
+  const prov = buildMasked('address', '汉东省临江市云溪区滨湖路138号', v.ensureCode('address', 'addr2'));
   assert.ok(prov.startsWith('某省……号〔住址·'), prov);
 });
 
 test('规则：地址 / 机构名 屏蔽→还原 往返', () => {
   const v = new Vault();
-  const t = '户籍所在地浙江省杭州市西湖区文三路138号3幢201室，原告：陈阿满是广东雷阳律师事务所负责人。';
+  const t = '户籍所在地汉东省临江市云溪区滨湖路138号3幢201室，原告：陈阿满是汉东省望湖律师事务所负责人。';
   const { masked } = maskText(t, v);
   assert.ok(masked.includes('某省……室〔住址·') && masked.includes('某省……律师事务所〔机构·'), masked);
   assert.strictEqual(restoreText(masked, v).text, t);
@@ -333,7 +333,7 @@ test('规则·案号：统一「头 + ……号」（机关层级 / 省市简称
   const cases = [
     ['公诉机关以南检刑诉[2026]Z25号起诉', '南检……号〔案号·'],
     ['苏淮（涟）援刑指字【2026】第527号', '苏……号〔案号·'],
-    ['涟水县人民检察院南检刑诉[2026]Z25号', '某县……号〔案号·'],
+    ['渡溪县人民检察院南检刑诉[2026]Z25号', '某县……号〔案号·'],
     ['(2026)粤0591民初1234号', '(2026)粤……号〔案号·'],
   ];
   for (const [text, expect] of cases) {
@@ -358,7 +358,7 @@ test('修复·案号前缀：屏蔽形态与还原闭环（含纯数字案号）
   for (const t of [
     '公诉机关以南检刑诉[2026]Z25号起诉',
     '苏淮（涟）援刑指字【2026】第527号',
-    '临江市清河区人民检察院南检刑诉[2026]Z25号',
+    '临江市望湖区人民检察院南检刑诉[2026]Z25号',
     '根据规定（2020）1234号',
   ]) {
     const v = new Vault();
@@ -369,7 +369,7 @@ test('修复·案号前缀：屏蔽形态与还原闭环（含纯数字案号）
 
 test('优化·机构：公权力机关同样按机构屏蔽，案号仍独立编码且往返可逆', () => {
   const v = new Vault();
-  const t = '临江市清河区人民检察院南检刑诉[2026]Z25号';
+  const t = '临江市望湖区人民检察院南检刑诉[2026]Z25号';
   const m = maskText(t, v);
   assert.ok(m.masked.includes('某区……人民检察院〔机构·'), m.masked);
   assert.strictEqual((m.masked.match(CODE_BRACKET_RE) || []).length, 2, m.masked);
@@ -379,10 +379,10 @@ test('优化·机构：公权力机关同样按机构屏蔽，案号仍独立编
 test('修复·地址形态：统一某X……尾1（村尾省略中段）+ 完整往返', () => {
   const v = new Vault();
   const cases = [
-    ['石牌垌村', /^某村〔住址·[0-9a-f]{6}〕$/],
-    ['广东省雷州市乌石镇新村振兴路18号2栋502室', /^某省……室〔住址·[0-9a-f]{6}〕$/],
-    ['雷州市西湖大道138号', /^某市……号〔住址·[0-9a-f]{6}〕$/],
-    ['涟水县岔庙镇安东北路102号4单元507室', /^某县……室〔住址·[0-9a-f]{6}〕$/],
+    ['湖滨村', /^某村〔住址·[0-9a-f]{6}〕$/],
+    ['汉东省临江市望湖镇湖滨村滨湖路18号2栋502室', /^某省……室〔住址·[0-9a-f]{6}〕$/],
+    ['临江市西湖大道138号', /^某市……号〔住址·[0-9a-f]{6}〕$/],
+    ['渡溪县湖田镇朝晖路102号4单元507室', /^某县……室〔住址·[0-9a-f]{6}〕$/],
   ];
   for (const [value, re] of cases) {
     const masked = buildMasked('address', value, v.ensureCode('address', value));
@@ -392,7 +392,7 @@ test('修复·地址形态：统一某X……尾1（村尾省略中段）+ 完�
 });
 
 test('修复·地址误吞尾字：屏蔽后「村务公开栏」完整保留且可往返', () => {
-  const t = '判令二被告在石牌垌村村务公开栏张贴书面致歉声明';
+  const t = '判令二被告在湖滨村村务公开栏张贴书面致歉声明';
   const v = new Vault();
   const masked = maskText(t, v).masked;
   assert.ok(masked.includes('村务公开栏'), `村务公开栏应完整保留: ${masked}`);
@@ -411,13 +411,13 @@ test('可读性：任何屏蔽值不得退化为纯省略号形态（……〔�
     passport: 'E12345678',
     plate: '粤A12345',
     im: 'zhangsan2020',
-    hkmt: 'H12345678',
+    native: '广东云溪人',
     license: '14401202080123456',
     uscc: '91330106MA27W1QX1T',
     caseNo: '（2020）粤0882民初1234号',
-    org: '雷州市北和镇卫生院',
-    org2: '广东雷阳律师事务所',
-    address: '浙江省杭州市西湖区文三路138号',
+    org: '临江市望湖镇卫生院',
+    org2: '临江市望湖律师事务所',
+    address: '汉东省临江市云溪区滨湖路138号',
     address2: '人民广场',   // 此前层级词表缺「广场」，曾屏蔽成「……某」
     address3: '湖畔庭院',   // 同上「庭院」
   };

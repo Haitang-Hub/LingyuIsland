@@ -22,47 +22,47 @@ const vals = (text, type, options) =>
 
 /* ================= R-001 地名漏检（PLACE_FORBIDDEN 移除 和/同） ================= */
 
-test('R-001 地名漏检：北和镇/石牌垌村（无引导词链路）应检出', () => {
-  const t = '雷州市北和镇石牌垌村祠堂侧';
+test('R-001 地名漏检：望湖镇/湖滨村（无引导词链路）应检出', () => {
+  const t = '临江市望湖镇湖滨村祠堂侧';
   const addrs = vals(t, 'address');
-  assert.ok(addrs.some((v) => v.includes('北和镇') && v.includes('石牌垌村')),
+  assert.ok(addrs.some((v) => v.includes('望湖镇') && v.includes('湖滨村')),
     `应检出完整地址: ${JSON.stringify(addrs)}`);
   // 正例成对：「和」作地名字（政和县）与「同」（会同县）也应是可检出地名
   assert.ok(vals('政和县人民法院受理', 'address').length === 0,
     '政和县应整体按机构处理，不拆出残缺地址');
   // 负例成对：普通叙述仍不当地址（禁用表保留其余功能字）
-  const neg = detect('我今天要向组织我分别收受雷阳中学南校区食堂负责人李四14万元现金');
+  const neg = detect('我今天要向组织我分别收受望湖中学南校区食堂负责人李四14万元现金');
   assert.strictEqual(neg.items.filter((i) => i.type === 'address').length, 0,
     '普通叙述不应被当成地址');
 });
 
 test('R-001 链首叙述不吞入地址值，纯行政区划不屏蔽', () => {
-  assert.strictEqual(vals('被告住雷州市北和镇。', 'address').length, 0);
-  const t = '被告住雷州市北和镇石牌垌村18号。';
+  assert.strictEqual(vals('被告住临江市望湖镇。', 'address').length, 0);
+  const t = '被告住临江市望湖镇湖滨村18号。';
   const addrs = vals(t, 'address');
   assert.ok(addrs.every((v) => !/^[告住]/.test(v)), `链首叙述被吞入: ${JSON.stringify(addrs)}`);
-  assert.ok(addrs.some((v) => v === '雷州市北和镇石牌垌村18号'), JSON.stringify(addrs));
+  assert.ok(addrs.some((v) => v === '临江市望湖镇湖滨村18号'), JSON.stringify(addrs));
 });
 
 /* ================= R-002 地址-机构复合体（村+村民委员会） ================= */
 
-test('R-002 复合体：石牌垌村村民委员会整体识别为机构', () => {
-  const t = '石牌垌村村民委员会出具证明。';
+test('R-002 复合体：湖滨村村民委员会整体识别为机构', () => {
+  const t = '湖滨村村民委员会出具证明。';
   const orgs = vals(t, 'org');
-  assert.ok(orgs.includes('石牌垌村村民委员会'), JSON.stringify(orgs));
+  assert.ok(orgs.includes('湖滨村村民委员会'), JSON.stringify(orgs));
   const v = new Vault();
   const m = maskText(t, v);
-  assertNoLeak(m.masked, '石牌垌村村民委员会', 'R-002');
+  assertNoLeak(m.masked, '湖滨村村民委员会', 'R-002');
   assert.ok(m.masked.includes('某村……村民委员会〔机构·'), m.masked);
   assert.strictEqual(restoreText(m.masked, v).text, t, '复合体往返应逐字一致');
 });
 
 test('R-002 复合体：公权力机关与基层站所不再类别排除，带层级即屏蔽', () => {
-  assert.ok(vals('线索移交给北和镇派出所', 'org').includes('北和镇派出所'), '北和镇派出所');
-  assert.ok(vals('材料已交北和镇司法所备案', 'org').includes('北和镇司法所'),
-    '北和镇司法所: ' + JSON.stringify(vals('材料已交北和镇司法所备案', 'org')));
-  assert.ok(vals('临江市清河区人民法院刑事审判法庭', 'org').some((v) => v.includes('人民法院')),
-    '人民法院: ' + JSON.stringify(vals('临江市清河区人民法院刑事审判法庭', 'org')));
+  assert.ok(vals('线索移交给望湖镇派出所', 'org').includes('望湖镇派出所'), '望湖镇派出所');
+  assert.ok(vals('材料已交望湖镇司法所备案', 'org').includes('望湖镇司法所'),
+    '望湖镇司法所: ' + JSON.stringify(vals('材料已交望湖镇司法所备案', 'org')));
+  assert.ok(vals('临江市望湖区人民法院刑事审判法庭', 'org').some((v) => v.includes('人民法院')),
+    '人民法院: ' + JSON.stringify(vals('临江市望湖区人民法院刑事审判法庭', 'org')));
   // 众人皆知的大型银行无层级信息，自然不屏蔽；动词字「交」仍不得作为字号断点，
   // 否则同类字号（交投集团）会被截断。
   assert.strictEqual(vals('该公司向交通银行申请贷款', 'org').length, 0, '交通银行');
@@ -91,15 +91,15 @@ test('R-003b 负例：众人皆知的机构、单级地名、常用词、泛指�
   for (const t of ['中国建设银行', '中国农业银行', '中国移动']) {
     assert.strictEqual(vals(t, 'org').length, 0, `${t} 不应作为敏感主体: ${JSON.stringify(vals(t, 'org'))}`);
   }
-  assert.strictEqual(vals('在涟水县教师培训后勤服务', 'address').length, 0,
-    JSON.stringify(vals('在涟水县教师培训后勤服务', 'address')));
+  assert.strictEqual(vals('在渡溪县教师培训后勤服务', 'address').length, 0,
+    JSON.stringify(vals('在渡溪县教师培训后勤服务', 'address')));
   assert.strictEqual(vals('在南京市一家宾馆', 'org').length, 0,
     JSON.stringify(vals('在南京市一家宾馆', 'org')));
   assert.strictEqual(vals('在南京市一家宾馆', 'address').length, 0,
     JSON.stringify(vals('在南京市一家宾馆', 'address')));
   // 纯行政区划籍贯（省 + 县/市）属于公开信息，不按地址屏蔽
-  assert.strictEqual(vals('江苏涟水人', 'address').length, 0,
-    JSON.stringify(vals('江苏涟水人', 'address')));
+  assert.strictEqual(vals('汉东渡溪人', 'address').length, 0,
+    JSON.stringify(vals('汉东渡溪人', 'address')));
   // 「张罗」由明确身份字段确认；单句不猜，传播时只命中姓名，不命中「商议」。
   assert.strictEqual(vals('食堂负责人张罗商议', 'name').length, 0);
   const known = collectEntities(['证人：张罗。', '食堂负责人张罗商议', '我跟张罗说', '将张罗微信也删除了']);
@@ -108,10 +108,10 @@ test('R-003b 负例：众人皆知的机构、单级地名、常用词、泛指�
   assert.ok(vals('该公司向中国工商银行深圳支行贷款', 'org').includes('中国工商银行深圳支行'), '具体支行');
   assert.strictEqual(vals('案发地合肥市，另一现场在颍上县城关镇', 'address').length, 0, '纯行政区划');
   assert.ok(vals('案发地合肥市西湖大道138号', 'address').includes('合肥市西湖大道138号'), '具体地址');
-  assert.ok(vals('被告系杭州金源商务宾馆员工', 'org').includes('杭州金源商务宾馆'), '具体宾馆');
+  assert.ok(vals('被告系临江市金源商务宾馆员工', 'org').includes('临江市金源商务宾馆'), '具体宾馆');
   // 机构简称（<6 字）不单独屏蔽，且不得把前面主体与支付动词一起吞进字号
-  assert.deepStrictEqual(vals('涟水县师资培训中心支付九洲公司', 'org'), ['涟水县师资培训中心'],
-    JSON.stringify(vals('涟水县师资培训中心支付九洲公司', 'org')));
+  assert.deepStrictEqual(vals('渡溪县师资培训中心支付九洲公司', 'org'), ['渡溪县师资培训中心'],
+    JSON.stringify(vals('渡溪县师资培训中心支付九洲公司', 'org')));
   assert.deepStrictEqual(
     vals('江西九洲书社教育科技有限公司（以下简称九洲公司），后面九洲公司继续履约', 'org'),
     ['江西九洲书社教育科技有限公司'],
@@ -119,10 +119,10 @@ test('R-003b 负例：众人皆知的机构、单级地名、常用词、泛指�
   );
   assert.strictEqual(vals('九洲公司继续履约', 'org').length, 0, '简称不屏蔽');
   // 字号含「也」的酒店品牌：不能被机构断点截断成「纳」，也不能只剩地址前缀
-  assert.deepStrictEqual(vals('涟水县经开区维也纳酒店', 'org'), ['涟水县经开区维也纳酒店'],
-    JSON.stringify(vals('涟水县经开区维也纳酒店', 'org')));
-  assert.strictEqual(vals('涟水县经开区维也纳酒店', 'address').length, 0,
-    JSON.stringify(vals('涟水县经开区维也纳酒店', 'address')));
+  assert.deepStrictEqual(vals('渡溪县经开区维也纳酒店', 'org'), ['渡溪县经开区维也纳酒店'],
+    JSON.stringify(vals('渡溪县经开区维也纳酒店', 'org')));
+  assert.strictEqual(vals('渡溪县经开区维也纳酒店', 'address').length, 0,
+    JSON.stringify(vals('渡溪县经开区维也纳酒店', 'address')));
 });
 
 /* ================= R-004 新角色标签与问答体 ================= */
@@ -130,8 +130,8 @@ test('R-003b 负例：众人皆知的机构、单级地名、常用词、泛指�
 test('R-004 角色标签：主持调解人/记录人/调查人/在场人 命中', () => {
   const cases = [
     ['主持调解人：陈阿满。', '陈阿满'],
-    ['记录人：周济民', '周济民'],
-    ['调查人：梁月华', '梁月华'],
+    ['记录人：张三', '张三'],
+    ['调查人：王芳', '王芳'],
     ['在场人：邓小满', '邓小满'],
   ];
   for (const [text, name] of cases) {
@@ -158,7 +158,7 @@ test('R-005 职业词和括注不单独确认，人称字段明确确认', () =>
   assert.strictEqual(vals('陈阿满（村医）赶到现场。', 'name').length, 0);
   assert.strictEqual(vals('村医陈阿满赶到现场。', 'name').length, 0);
   assert.ok(vals('证人：陈阿满。', 'name').includes('陈阿满'));
-  assert.ok(vals('辩护人：周济民。', 'name').includes('周济民'));
+  assert.ok(vals('辩护人：张三。', 'name').includes('张三'));
   assert.strictEqual(vals('张三（之父）到庭', 'name').length, 0);
 });
 
@@ -380,7 +380,7 @@ test('身份锚点补强：头衔/关系名词、弱字段、被字句（校长�
   // ② 姓名字段没有冒号（「姓名为王东」「客户名称为“王东”」）；
   // ③ 「姓名 + 被 + 谓语」（「原校长沙悟净被组织留置」）。
   for (const [t, who] of [
-    ['涟水实验中学原校长沙悟净被组织留置后，我约人见面。', '沙悟净'],
+    ['渡溪实验中学原校长沙悟净被组织留置后，我约人见面。', '沙悟净'],
     ['某省某某有限公司总经理刘星贿赂2万元', '刘星'],
     ['这份姓名为王东的中国建设银行银行卡', '王东'],
     ['依法调取的客户名称为“王东”、交易卡号为“6217001730012324565”的流水', '王东'],
@@ -422,9 +422,9 @@ test('格式边界：案号六角括号〔〕/﹝﹞ 与 15 位老身份证（�
 
 test('地址：引导动词不被吞进地址值（案发地点位于X）', () => {
   const value = (t) => detect(t).items.filter((i) => i.type === 'address').map((i) => i.value);
-  assert.deepStrictEqual(value('案发地点位于涟水县岔庙镇祥源公园城花园里小区地下车库。'),
-    ['涟水县岔庙镇祥源公园城花园里小区地下车库']);
-  assert.deepStrictEqual(value('现场在临江市清河区人民路12号。'), ['临江市清河区人民路12号']);
+  assert.deepStrictEqual(value('案发地点位于渡溪县湖田镇湖畔花园里小区地下车库。'),
+    ['渡溪县湖田镇湖畔花园里小区地下车库']);
+  assert.deepStrictEqual(value('现场在临江市望湖区人民路12号。'), ['临江市望湖区人民路12号']);
   // 以介词同形字开头的真实地名不被切坏
   assert.ok(value('于都县贡江镇红军大道1号').some((v) => v.includes('贡江镇')));
 });
@@ -489,7 +489,7 @@ test('一致性：同案卷两份文件均屏蔽干净 → ok', () => {
   const origB = fs.readFileSync(path.join(__dirname, 'fixtures', 'case-b.txt'), 'utf8');
   const v = new Vault();
   const mA = maskText(origA, v);
-  const mB = maskText(origB, v, { knownNames: new Set(['陈阿满', '周济民', '梁月华', '邓小满']) });
+  const mB = maskText(origB, v, { knownNames: new Set(['陈阿满', '张三', '王芳', '邓小满']) });
   const r = checkConsistency([
     { file: 'case-a.txt', original: origA, masked: mA.masked },
     { file: 'case-b.txt', original: origB, masked: mB.masked },

@@ -318,7 +318,7 @@ async function pdfSuite() {
     '客户信息登记表',
     '姓名：张三  手机：13812345678',
     '身份证号：330106199001015670',
-    '地址：浙江省杭州市西湖区文三路138号3幢201室',
+    '地址：汉东省临江市云溪区滨湖路138号3幢201室',
   ];
   lines.forEach((t, i) => page.drawText(t, { x: 50, y: 780 - i * 30, size: 14, font }));
   fs.writeFileSync(src, await doc.save());

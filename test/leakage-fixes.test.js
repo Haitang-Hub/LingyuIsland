@@ -156,13 +156,39 @@ test('法律文书姓名闭合：角色+逗号谓语、普通动作、的证言�
   assert.deepStrictEqual(nameHits('被害人停放车辆后离开'), []);
 });
 
+test('人口学锚点：角色词+姓名+性别不得把角色词吞进姓名（避免过度屏蔽）', () => {
+  const nameHits = (text) => detect(text).items
+    .filter((i) => i.type === 'name').map((i) => i.value);
+
+  // 起诉书实证：曾把「犯罪嫌疑人裴毅」整段遮掉，应只遮人名
+  assert.deepStrictEqual(nameHits('犯罪嫌疑人裴毅，男，1990年生。'), ['裴毅']);
+  assert.deepStrictEqual(nameHits('同案犯张伟，男。'), ['张伟']);
+  assert.deepStrictEqual(nameHits('被告人王五，男。'), ['王五']);
+  assert.deepStrictEqual(nameHits('证人陈阿满，男。'), ['陈阿满']);
+  // 无角色词、复姓、少数民族长名不受影响
+  assert.deepStrictEqual(nameHits('裴毅，男，1990年生。'), ['裴毅']);
+  assert.deepStrictEqual(nameHits('欧阳明，男，1990年生。'), ['欧阳明']);
+  assert.deepStrictEqual(nameHits('阿依古丽·买买提，女，1990年生。'), ['阿依古丽·买买提']);
+});
+
 test('地址：村庄类「庄」+门牌可识别，普通名词不误伤', () => {
   const addressHits = (text) => detect(text).items
     .filter((i) => i.type === 'address').map((i) => i.value);
   assert.deepStrictEqual(addressHits('户籍所在地及住址裴庄46号。'), ['裴庄46号']);
   assert.deepStrictEqual(addressHits('张家庄1号'), ['张家庄1号']);
-  assert.deepStrictEqual(addressHits('委会裴庄46号。'), ['裴庄46号']);
-  assert.deepStrictEqual(addressHits('村委会裴庄46号。'), ['裴庄46号']);
+  // 断行残余「委会裴庄46号」须整段遮盖（委会残前缀包含在遮盖范围内）
+  assert.deepStrictEqual(addressHits('委会裴庄46号。'), ['委会裴庄46号']);
+  assert.deepStrictEqual(addressHits('村委会裴庄46号。'), ['村委会裴庄46号']);
+  // 完整地址与机构候选重叠时保留更大的覆盖范围（省县镇+村居委+门牌）
+  assert.deepStrictEqual(
+    addressHits('户籍所在地及住址汉东省渡溪县湖田镇湖滨居委会裴庄46号。因涉嫌盗窃罪'),
+    ['汉东省渡溪县湖田镇湖滨居委会裴庄46号']);
+  assert.deepStrictEqual(
+    addressHits('住汉东省渡溪县湖田镇湖滨居委会裴庄46号，联系方式13812345678。'),
+    ['汉东省渡溪县湖田镇湖滨居委会裴庄46号']);
+  // 不完整地址（无落点要素）不遮
+  assert.deepStrictEqual(addressHits('出生地汉东省渡溪县'), []);
+  assert.deepStrictEqual(addressHits('住汉东省'), []);
   assert.deepStrictEqual(addressHits('村庄46号'), []);
   assert.deepStrictEqual(addressHits('庄子46号'), []);
 });

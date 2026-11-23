@@ -99,7 +99,7 @@ async function run({ store, island, indexer, updater }) {
     '性别：男    年龄：35岁',
     '姓名：李娜    手机：13998765432',
   ].join('\n');
-  const contacts = '客户姓名：王芳，电话 13655557777，住址 浙江省杭州市西湖区文三路96号。\n紧急联系人：陈强 13711112222。';
+  const contacts = '客户姓名：王芳，电话 13655557777，住址 汉东省临江市云溪区滨湖路96号。\n紧急联系人：陈强 13711112222。';
   fs.writeFileSync(path.join(rootDir, '人事', '员工花名册.txt'), roster, 'utf8');
   fs.writeFileSync(path.join(rootDir, '销售', '客户通讯录.txt'), contacts, 'utf8');
   fs.writeFileSync(path.join(rootDir, '人事', '入职流程.md'), '# 入职流程\n1. 提交材料\n2. 签署合同\n', 'utf8');

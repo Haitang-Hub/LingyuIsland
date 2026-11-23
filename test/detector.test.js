@@ -62,11 +62,32 @@ test('可选检测：微信号/QQ号（关键词引导）', () => {
   assert.deepStrictEqual(items.map((i) => i.value), ['Lawyer_001', '123456789'], JSON.stringify(items));
 });
 
-test('可选检测：港澳台证件（回乡证/台胞证）', () => {
-  const text = '回乡证H12345678，台胞证：12345678。';
-  assert.strictEqual(detect(text).items.filter((i) => i.type === 'hkmt').length, 0, '默认应关闭');
-  const items = detect(text, { toggles: { hkmt: true } }).items.filter((i) => i.type === 'hkmt');
-  assert.deepStrictEqual(items.map((i) => i.value), ['H12345678', '12345678'], JSON.stringify(items));
+test('可选检测：籍贯（某省某县片段）', () => {
+  // 默认开启
+  const hits = (text, toggles) => detect(text, { toggles }).items
+    .filter((i) => i.type === 'native').map((i) => i.value);
+  assert.deepStrictEqual(hits('裴某，男，1990年生，广东渡溪，汉族，农民'), ['广东渡溪']);
+  assert.deepStrictEqual(hits('户籍：广东省渡溪县'), ['广东省渡溪县']);
+  assert.deepStrictEqual(hits('籍贯：广东渡溪，汉族'), ['广东渡溪']);
+  assert.deepStrictEqual(hits('系广东渡溪人'), ['广东渡溪人']);
+  assert.deepStrictEqual(hits('广东省云溪县人，汉族'), ['广东省云溪县人']);
+  assert.deepStrictEqual(hits('户籍|广东渡溪|民族|汉族'), ['广东渡溪']);
+  // 出生地也是籍贯引导词；长地址汉字串仍交住址规则
+  assert.deepStrictEqual(hits('出生地广东省渡溪县，户籍所在地及住址广东省渡溪县湖田镇湖滨居委会裴庄46号'), ['广东省渡溪县']);
+  // 地址引导词 + 纯行政区划 + 分词符号收尾：按籍贯遮（地址无落点不遮）
+  assert.deepStrictEqual(hits('广东渡溪人，现住广东省渡溪县，'), ['广东渡溪人', '广东省渡溪县']);
+  assert.deepStrictEqual(hits('现住广东省渡溪县。'), ['广东省渡溪县']);
+  assert.deepStrictEqual(hits('住址广东省渡溪县；'), ['广东省渡溪县']);
+  assert.deepStrictEqual(hits('现住广东省渡溪县1号楼'), []);
+  assert.deepStrictEqual(hits('住在广东渡溪长大'), []);
+  assert.deepStrictEqual(hits('他在广东渡溪长大'), []);
+  assert.deepStrictEqual(hits('广东人喜欢吃辣'), []);
+  assert.deepStrictEqual(hits('出生地广东人喜欢吃辣'), []);
+  assert.deepStrictEqual(hits('广东银行今天开盘'), []);
+  assert.deepStrictEqual(hits('广东渡溪农村商业银行，'), []);
+  assert.deepStrictEqual(hits('住广东省渡溪县湖田镇湖滨村46号'), []);
+  // 检测项可关闭
+  assert.deepStrictEqual(hits('广东渡溪，汉族', { native: false }), []);
 });
 
 test('可选检测：统一社会信用代码（校验码验算）', () => {
@@ -153,8 +174,8 @@ test('扩展·案号：标准 / 号之一 / 括号', () => {
 });
 
 test('修复·机构边界：介词「经」/ 连接词「和」不再吞入机构名', () => {
-  assert.deepStrictEqual(vals('经江苏久久律师事务所指派', 'org'), ['江苏久久律师事务所']);
-  assert.deepStrictEqual(vals('甲公司和江苏久久律师事务所', 'org'), ['江苏久久律师事务所']);
+  assert.deepStrictEqual(vals('经临江市久久律师事务所指派', 'org'), ['临江市久久律师事务所']);
+  assert.deepStrictEqual(vals('甲公司和临江市久久律师事务所', 'org'), ['临江市久久律师事务所']);
   // 负例成对：「经纬 / 和平县」是字号，不能被误截断
   assert.deepStrictEqual(vals('经纬纺织有限公司承接项目', 'org'), [],
     '无省/市/县/区/镇/村层级信息的机构不再屏蔽');
@@ -166,7 +187,7 @@ test('修复·机构边界：年份前缀不吞入字号，并列泛称学校不
   assert.deepStrictEqual(
     vals('以支付2021年中小学幼儿园教师全员培训用书费名义履行报账程序', 'org'), []);
   // 负例成对：「年例」字号不因「年」断点受影响，真实学校照常识别
-  assert.ok(vals('石牌垌村年例理事会出具证明', 'org').includes('石牌垌村年例理事会'));
+  assert.ok(vals('湖滨村年例理事会出具证明', 'org').includes('湖滨村年例理事会'));
   assert.ok(vals('北京师范大学附属中学出具证明', 'org').includes('北京师范大学附属中学'));
 });
 test('修复·机构边界：法条叙述双「法庭」不成机构（同后缀不自我锚定）', () => {
@@ -178,7 +199,7 @@ test('修复·机构边界：法条叙述双「法庭」不成机构（同后缀
     assert.deepStrictEqual(vals(t, 'org'), [], `${t} → ${JSON.stringify(vals(t, 'org'))}`);
   }
   // 负例成对：真嵌套机构靠不同后缀锚定，照常识别（公权力机关已整体排除，改用企业）
-  assert.ok(vals('临江市清河区九洲有限公司下属工厂出具', 'org')
+  assert.ok(vals('临江市望湖区九洲有限公司下属工厂出具', 'org')
     .some((v) => v.endsWith('工厂')));
 });
 
@@ -191,17 +212,17 @@ test('修复·机构边界：角色人称词「负责人」不吞入字号，不
   assert.deepStrictEqual(
     vals('负责人李太白银行转账2.09万元', 'name', { knownEntities: known }), ['李太白']);
   // 负例成对：含「人」的真机构（人民医院/人民银行）不受影响
-  assert.ok(vals('浙江省杭州市第一人民医院出具证明', 'org').includes('浙江省杭州市第一人民医院'));
+  assert.ok(vals('汉东省临江市第一人民医院出具证明', 'org').includes('汉东省临江市第一人民医院'));
   assert.strictEqual(vals('该公司向交通银行申请贷款', 'org').length, 0);
 });
 
 test('修复·机构边界：职务动词「负责/担任」不吞入字号', () => {
-  // 「负责涟水县师资培训中心」曾被整体当字号（显示为「负责****培训中心」）
+  // 「负责渡溪县师资培训中心」曾被整体当字号（显示为「负责****培训中心」）
   assert.deepStrictEqual(
-    vals('李敬舟利用其仍实际负责涟水县师资培训中心工作的职务便利', 'org'),
-    ['涟水县师资培训中心']);
-  assert.deepStrictEqual(vals('他担任雷州市红日建材公司经理期间', 'org'), ['雷州市红日建材公司']);
-  assert.deepStrictEqual(vals('其分管雷州市城东汽车工厂生产', 'org'), ['雷州市城东汽车工厂']);
+    vals('李敬舟利用其仍实际负责渡溪县师资培训中心工作的职务便利', 'org'),
+    ['渡溪县师资培训中心']);
+  assert.deepStrictEqual(vals('他担任临江市红日建材公司经理期间', 'org'), ['临江市红日建材公司']);
+  assert.deepStrictEqual(vals('其分管临江市城东汽车工厂生产', 'org'), ['临江市城东汽车工厂']);
 });
 test('修复·机构边界：出示类叙述动词不吞入字号', () => {
   // 「出示临江市红日建材有限公司」曾被整体当字号，前2取「出示」
@@ -209,7 +230,7 @@ test('修复·机构边界：出示类叙述动词不吞入字号', () => {
     vals('现向你出示临江市红日建材有限公司材料', 'org'),
     ['临江市红日建材有限公司']);
   assert.deepStrictEqual(vals('向对方出具临江市红日建材有限公司证明', 'org'), ['临江市红日建材有限公司']);
-  assert.deepStrictEqual(vals('提供了涟水县师资培训中心材料', 'org'), ['涟水县师资培训中心']);
+  assert.deepStrictEqual(vals('提供了渡溪县师资培训中心材料', 'org'), ['渡溪县师资培训中心']);
   // 端到端形态：统一「某X……后缀」
   const { Vault: V, maskText: m } = require('../src/core/masker');
   const masked = m('现向你出示临江市红日建材有限公司材料', new V()).masked;
@@ -218,7 +239,7 @@ test('修复·机构边界：出示类叙述动词不吞入字号', () => {
 test('修复·机构边界：受贿叙述动词不吞入字号，短泛称机构不屏蔽', () => {
   // 「收受第一中学」曾整体当机构屏蔽（显示为「收受****〔机构·…〕」）；
   // 「收/受/送/赠」入左边界断点后，「第一中学」这类 6 字以内泛称不再屏蔽。
-  for (const t of ['收受第一中学贿赂款', '他送雷阳中学锦旗', '收受南湖小学校服回扣']) {
+  for (const t of ['收受第一中学贿赂款', '他送望湖中学锦旗', '收受南湖小学校服回扣']) {
     assert.deepStrictEqual(vals(t, 'org'), [], `${t} → ${JSON.stringify(vals(t, 'org'))}`);
   }
 });
@@ -235,7 +256,7 @@ test('修复·案号前缀：机关简称与类别词纳入屏蔽范围（检测
   const cases = [
     ['公诉机关以南检刑诉[2026]Z25号起诉', '南检刑诉[2026]Z25号'],
     ['苏淮（涟）援刑指字【2026】第527号', '苏淮（涟）援刑指字【2026】第527号'],
-    ['临江市清河区人民检察院南检刑诉[2026]Z25号', '南检刑诉[2026]Z25号'],
+    ['临江市望湖区人民检察院南检刑诉[2026]Z25号', '南检刑诉[2026]Z25号'],
   ];
   for (const [text, expected] of cases) {
     const found = vals(text, 'caseNo');
@@ -250,13 +271,13 @@ test('扩展·执业证号：带字母前缀 / 纯数字', () => {
   assert.ok(vals('律师执业证号 A14401202080123456', 'license').length >= 1);
 });
 
-test('扩展·可选检测默认开关与开启生效（固话 / 统一码默认开；微信 / 港澳台默认关）', () => {
+test('扩展·可选检测默认开关与开启生效（固话 / 统一码 / 籍贯默认开；微信默认关）', () => {
   assert.ok(vals('电话05512345678', 'landline').length >= 1, '固话默认开');
   assert.ok(vals('统一社会信用代码91330106MA27W1QX1T', 'uscc').length >= 1, '统一码默认开');
+  assert.ok(vals('籍贯广东渡溪', 'native').length >= 1, '籍贯默认开');
   assert.strictEqual(vals('微信号 zhangsan2020', 'im').length, 0, '微信默认关');
   assert.ok(vals('微信号 zhangsan2020', 'im', { toggles: { im: true } }).length >= 1);
-  assert.strictEqual(vals('回乡证H12345678', 'hkmt').length, 0, '港澳台默认关');
-  assert.ok(vals('回乡证H12345678', 'hkmt', { toggles: { hkmt: true } }).length >= 1);
+  assert.strictEqual(vals('籍贯广东渡溪', 'native', { toggles: { native: false } }).length, 0);
   assert.strictEqual(vals('电话05512345678', 'landline', { toggles: { landline: false } }).length, 0);
 });
 
@@ -293,9 +314,9 @@ test('检测：无语境姓名不误报（张伟）', () => {
 test('检测：角色标签姓名（原告/被告人/审判长）', () => {
   const cases = [
     ['原告：陈阿满，男，2003年11月6日出生', '陈阿满'],
-    ['被告一：陈德寿，男，1962年4月11日出生', '陈德寿'],
-    ['负责人：陈兆坤，主任。', '陈兆坤'],
-    ['审　　判　　长　　　郑怀瑾', '郑怀瑾'],
+    ['被告一：张三，男，1962年4月11日出生', '张三'],
+    ['负责人：李四，主任。', '李四'],
+    ['审　　判　　长　　　李四', '李四'],
   ];
   for (const [text, name] of cases) {
     const names = detect(text).items.filter((i) => i.type === 'name').map((i) => i.value);
@@ -305,12 +326,12 @@ test('检测：角色标签姓名（原告/被告人/审判长）', () => {
 
 test('检测：地名与机构名不误判为姓名', () => {
   for (const text of [
-    '住所地广东省雷州市北和镇石牌垌村祠堂侧',
-    '被告二：雷州市北和镇石牌垌村村民委员会，负责人：陈兆坤，主任。',
-    '委托诉讼代理人：林敬舟，广东海田律师事务所律师。',
+    '住所地汉东省临江市望湖镇湖滨村祠堂侧',
+    '被告二：临江市望湖镇湖滨村村民委员会，负责人：李四，主任。',
+    '委托诉讼代理人：王芳，临江市云溪律师事务所律师。',
   ]) {
     const names = detect(text).items.filter((i) => i.type === 'name').map((i) => i.value);
-    assert.ok(!names.some((n) => /雷州|雷阳|海田/.test(n)), text + ' → ' + names.join(','));
+    assert.ok(!names.some((n) => /临江|望湖|云溪/.test(n)), text + ' → ' + names.join(','));
   }
 });
 
@@ -359,7 +380,7 @@ test('扩展·姓名：谓语不靠动作词识别，已确认姓名可传播', 
 });
 
 test('扩展·姓名：不误报常见普通词与地名', () => {
-  const t = '开庭许可回族教务处雷阳中学西湖区文三路商贸有限公司';
+  const t = '开庭许可回族教务处望湖中学云溪区滨湖路商贸有限公司';
   assert.strictEqual(vals(t, 'name').length, 0, JSON.stringify(vals(t, 'name')));
 });
 
@@ -384,17 +405,17 @@ test('规则：身份证校验码不合法也命中（语境引导）', () => {
 });
 
 test('规则：角色标签长词优先，「被告人陈阿满在…」不漏检', () => {
-  const t = '2019年至2024年，被告人：陈阿满，在先后担任雷阳中学教务处主任期间';
+  const t = '2019年至2024年，被告人：陈阿满，在先后担任望湖中学教务处主任期间';
   const names = detect(t).items.filter((i) => i.type === 'name').map((i) => i.value);
   assert.ok(names.includes('陈阿满'), names.join(','));
   assert.ok(!names.includes('教务处'), names.join(','));
 });
 
 test('规则：机构名不吞并人名、系动词与时间词', () => {
-  const t = '答：陈阿满，男，是广东雷阳律师事务所负责人。2022年9月初广东雷阳律师事务所经招投标';
+  const t = '答：陈阿满，男，是临江市望湖律师事务所负责人。2022年9月初临江市望湖律师事务所经招投标';
   const r = detect(t);
   const orgs = r.items.filter((i) => i.type === 'org').map((i) => i.value);
-  assert.deepStrictEqual(orgs, ['广东雷阳律师事务所', '广东雷阳律师事务所'], JSON.stringify(r.items));
+  assert.deepStrictEqual(orgs, ['临江市望湖律师事务所', '临江市望湖律师事务所'], JSON.stringify(r.items));
   assert.ok(r.items.some((i) => i.type === 'name' && i.value === '陈阿满'));
 });
 
@@ -452,68 +473,68 @@ test('规则：车牌补「粤」并放行汉字前后缀（文书句式）', ()
 
 test('地址检测', () => {
   const { items } = detect(SAMPLE);
-  assert.ok(items.some((i) => i.type === 'address' && i.value.includes('文三路138号')));
+  assert.ok(items.some((i) => i.type === 'address' && i.value.includes('滨湖路138号')));
 });
 
 test('规则：地址整串含门牌楼栋单元室，并按地址尾字裁剪后续叙述', () => {
-  const a = detect('户籍所在地浙江省杭州市西湖区文三路138号3幢201室，住杭州市西湖区文三花园19栋701室。');
+  const a = detect('户籍所在地汉东省临江市云溪区滨湖路138号3幢201室，住临江市云溪区滨湖花园19栋701室。');
   assert.ok(a.items.some((i) => i.type === 'address' && i.value.endsWith('3幢201室')), JSON.stringify(a.items));
   assert.ok(a.items.some((i) => i.type === 'address' && i.value.endsWith('19栋701室')), JSON.stringify(a.items));
-  const b = detect('从其位于杭州市西湖区文三花园19栋701室的住处抓获归案；');
+  const b = detect('从其位于临江市云溪区滨湖花园19栋701室的住处抓获归案；');
   const addr = b.items.find((i) => i.type === 'address');
   assert.ok(addr && addr.value.endsWith('701室') && !addr.value.includes('住处'), addr && addr.value);
 });
 
 test('规则：籍贯命中，国家机关名中的行政区划不误伤', () => {
-  const a = detect('，回族，浙江杭州人，大学文化');
+  const a = detect('，回族，临江市云溪人，大学文化');
   // 纯行政区划籍贯属于公开信息，不再按地址屏蔽
   assert.strictEqual(a.items.filter((i) => i.type === 'address').length, 0, JSON.stringify(a.items));
-  const b = detect('杭州市人民检察院查明，浙江省杭州市人民法院');
+  const b = detect('临江市人民检察院查明，汉东省临江市人民法院');
   assert.strictEqual(b.items.filter((i) => i.type === 'address').length, 0, JSON.stringify(b.items));
 });
 
 test('规则：普通叙述不被当成地址', () => {
-  const t = '答：我今天要向组织我分别收受雷阳中学南校区食堂负责人李四14万元现金';
+  const t = '答：我今天要向组织我分别收受望湖中学南校区食堂负责人李四14万元现金';
   assert.strictEqual(detect(t).items.filter((i) => i.type === 'address').length, 0);
 });
 
 test('扩展·地址：引导词整串（户籍所在地 / 住址 / 位于 / 现住）', () => {
   for (const key of ['户籍所在地', '住址', '现住', '位于']) {
-    const t = `${key}浙江省杭州市西湖区文三路138号3幢201室`;
+    const t = `${key}汉东省临江市云溪区滨湖路138号3幢201室`;
     const hit = vals(t, 'address').find((v) => v.endsWith('201室'));
     assert.ok(hit, `${key} 未整串识别: ${JSON.stringify(vals(t, 'address'))}`);
   }
 });
 
 test('扩展·地址：引导词本身不该吞进命中值', () => {
-  const t = '户籍所在地浙江省杭州市西湖区文三路138号3幢201室';
+  const t = '户籍所在地汉东省临江市云溪区滨湖路138号3幢201室';
   const hit = vals(t, 'address').find((v) => v.endsWith('201室'));
   assert.ok(hit && !/^(户籍所在地|住址|现住|位于)/.test(hit), `引导词被吞进地址值: ${hit}`);
 });
 
 test('扩展·地址：省市区县镇乡村多层级 + 门牌楼栋', () => {
-  const t = '住广东省雷州市乌石镇新村振兴路18号2栋502室';
-  const hit = vals(t, 'address').find((v) => v.includes('雷州市'));
+  const t = '住汉东省临江市望湖镇湖滨村滨湖路18号2栋502室';
+  const hit = vals(t, 'address').find((v) => v.includes('临江市'));
   assert.ok(hit && hit.includes('502室'), JSON.stringify(vals(t, 'address')));
 });
 
 test('扩展·地址：籍贯表述（纯行政区划不屏蔽，含居住要素才屏蔽）', () => {
-  assert.strictEqual(vals('，汉族，浙江杭州人，大学文化', 'address').length, 0,
-    JSON.stringify(vals('，汉族，浙江杭州人，大学文化', 'address')));
-  assert.strictEqual(vals('，回族，安徽雷州人，', 'address').length, 0,
-    JSON.stringify(vals('，回族，安徽雷州人，', 'address')));
-  assert.strictEqual(vals('，广东雷州雷城街道人，', 'address').length, 0, '纯行政区划籍贯不屏蔽');
-  assert.ok(hasValue('籍贯：广东雷州雷城街道文三路18号', 'address', '广东雷州雷城街道文三路18号'));
+  assert.strictEqual(vals('，汉族，临江市云溪人，大学文化', 'address').length, 0,
+    JSON.stringify(vals('，汉族，临江市云溪人，大学文化', 'address')));
+  assert.strictEqual(vals('，回族，临江市云溪人，', 'address').length, 0,
+    JSON.stringify(vals('，回族，临江市云溪人，', 'address')));
+  assert.strictEqual(vals('，临江市湖西街道人，', 'address').length, 0, '纯行政区划籍贯不屏蔽');
+  assert.ok(hasValue('籍贯：临江市湖西街道滨湖路18号', 'address', '临江市湖西街道滨湖路18号'));
 });
 
 test('扩展·地址：国家机关名中的行政区划不屏蔽', () => {
-  const t = '杭州市人民检察院查明，浙江省杭州市人民法院审理';
+  const t = '临江市人民检察院查明，汉东省临江市人民法院审理';
   assert.strictEqual(vals(t, 'address').length, 0, JSON.stringify(vals(t, 'address')));
 });
 
 test('扩展·机构：公司 / 律所 / 集团 / 合作社 各后缀', () => {
   for (const suffix of ['有限公司', '律师事务所', '集团', '合作社']) {
-    const t = `广东雷阳${suffix}承接项目`;
+    const t = `临江市望湖${suffix}承接项目`;
     assert.ok(vals(t, 'org').some((v) => v.endsWith(suffix)), `${suffix} 未识别: ${JSON.stringify(vals(t, 'org'))}`);
   }
 });
@@ -525,10 +546,10 @@ test('扩展·机构：数字字号不截断（山东九三书社）', () => {
 });
 
 test('扩展·机构：事业单位主体（师资培训中心 / 职业培训学校）', () => {
-  const a = vals('多次承揽雷州市师资培训中心举办的项目', 'org');
+  const a = vals('多次承揽临江市师资培训中心举办的项目', 'org');
   assert.ok(a.some((v) => v.endsWith('师资培训中心')), `师资培训中心未识别: ${JSON.stringify(a)}`);
   assert.ok(!a.some((v) => v.includes('承揽')), `动作词被吞进机构名: ${JSON.stringify(a)}`);
-  const b = vals('西湖区职业培训学校为主体', 'org');
+  const b = vals('云溪区职业培训学校为主体', 'org');
   assert.ok(b.some((v) => v.endsWith('职业培训学校')), `职业培训学校未识别: ${JSON.stringify(b)}`);
 });
 
@@ -539,8 +560,8 @@ test('扩展·机构：泛指词不识别为主体', () => {
 });
 
 test('扩展·机构：不吞并人名 / 系动词 / 时间词', () => {
-  const t = '答：陈阿满，男，是广东雷阳律师事务所负责人。2022年9月初广东雷阳律师事务所经招投标';
-  assert.deepStrictEqual(vals(t, 'org'), ['广东雷阳律师事务所', '广东雷阳律师事务所']);
+  const t = '答：陈阿满，男，是临江市望湖律师事务所负责人。2022年9月初临江市望湖律师事务所经招投标';
+  assert.deepStrictEqual(vals(t, 'org'), ['临江市望湖律师事务所', '临江市望湖律师事务所']);
 });
 
 test('扩展·负向：放宽规则后正文时间/泛指/普通词仍不误报', () => {
@@ -561,13 +582,13 @@ test('扩展·负向：放宽规则后正文时间/泛指/普通词仍不误报'
 
 test('优化·机构：公权力机关不再类别排除，带层级即屏蔽', () => {
   const expected = [
-    ['临江市清河区人民检察院南检刑诉[2026]Z25号', '临江市清河区人民检察院'],
-    ['杭州市西湖区人民法院审理', '杭州市西湖区人民法院'],
-    ['本案由雷州市人民检察院侦查终结', '雷州市人民检察院'],
-    ['现向你出示涟水县监察委员会依法调取', '涟水县监察委员会'],
-    ['线索移交给北和镇派出所', '北和镇派出所'],
-    ['材料已交北和镇司法所备案', '北和镇司法所'],
-    ['雷州市法律援助中心指派辩护人', '雷州市法律援助中心'],
+    ['临江市望湖区人民检察院南检刑诉[2026]Z25号', '临江市望湖区人民检察院'],
+    ['临江市云溪区人民法院审理', '临江市云溪区人民法院'],
+    ['本案由临江市人民检察院侦查终结', '临江市人民检察院'],
+    ['现向你出示渡溪县监察委员会依法调取', '渡溪县监察委员会'],
+    ['线索移交给望湖镇派出所', '望湖镇派出所'],
+    ['材料已交望湖镇司法所备案', '望湖镇司法所'],
+    ['临江市法律援助中心指派辩护人', '临江市法律援助中心'],
   ];
   for (const [t, want] of expected) {
     assert.ok(vals(t, 'org').includes(want), `${t} → ${JSON.stringify(vals(t, 'org'))}`);
@@ -581,15 +602,15 @@ test('优化·机构：公权力机关不再类别排除，带层级即屏蔽', 
 });
 
 test('优化·籍贯：省份名锚定的纯地名籍贯不屏蔽', () => {
-  assert.strictEqual(vals('李四，安徽仓吉人，回族，小学文化', 'address').length, 0,
-    JSON.stringify(vals('李四，安徽仓吉人，回族，小学文化', 'address')));
-  assert.strictEqual(vals('陈阿满，广东雷州人，男', 'address').length, 0);
+  assert.strictEqual(vals('李四，汉东仓吉人，回族，小学文化', 'address').length, 0,
+    JSON.stringify(vals('李四，汉东仓吉人，回族，小学文化', 'address')));
+  assert.strictEqual(vals('陈阿满，临江市人，男', 'address').length, 0);
   assert.strictEqual(vals('王五是本地人，张伟是年轻人', 'address').length, 0);
 });
 
 test('优化·机构：动作/系动词断点与多词叠加剥离', () => {
-  assert.ok(hasValue('仍实际负责雷州市师资培训中心工作', 'org', '雷州市师资培训中心'));
-  assert.ok(hasValue('徐燕系广东海田服务有限公司法定代表人', 'org', '广东海田服务有限公司'));
+  assert.ok(hasValue('仍实际负责临江市师资培训中心工作', 'org', '临江市师资培训中心'));
+  assert.ok(hasValue('张三系临江市云溪服务有限公司法定代表人', 'org', '临江市云溪服务有限公司'));
   assert.ok(hasValue('北京华创系统工程有限公司承接项目', 'org', '北京华创系统工程有限公司'));
 });
 
@@ -597,7 +618,7 @@ test('优化·地址：必须有居住要素，单级行政区划不兜底', () 
   assert.strictEqual(vals('位于仓吉县第一中学南校区食堂负责人办公室抓获', 'address').length, 0);
   assert.strictEqual(vals('案发地合肥市，另一现场在颍上县城关镇', 'address').length, 0);
   assert.ok(hasValue('案发地合肥市西湖大道138号', 'address', '合肥市西湖大道138号'));
-  assert.ok(vals('前往雷州市西湖大道138号', 'address').every((v) => !/^(前往|位于|在)/.test(v)));
+  assert.ok(vals('前往临江市西湖大道138号', 'address').every((v) => !/^(前往|位于|在)/.test(v)));
 });
 
 test('新增·银行卡：空格/横杠分隔后去分隔符 + Luhn 命中，value 存纯数字', () => {
@@ -613,13 +634,13 @@ test('新增·银行卡：空格/横杠分隔后去分隔符 + Luhn 命中，val
 
 test('新增·机构后缀：医院/支行/超市/宾馆/工厂/门市部/卫生院/书店（均带层级信息）', () => {
   const cases = [
-    ['被告系杭州友好医院职工', '杭州友好医院'],
+    ['被告系临江市友好医院职工', '临江市友好医院'],
     ['该公司向中国工商银行深圳支行贷款', '中国工商银行深圳支行'],
     ['负责人系湖州星星连锁超市法人', '湖州星星连锁超市'],
     ['被告系苏州金源商务宾馆员工', '苏州金源商务宾馆'],
     ['位于常州城东汽车工厂附近', '常州城东汽车工厂'],
     ['系南京华联百货门市部员工', '南京华联百货门市部'],
-    ['雷州市乌石镇卫生院出具证明', '雷州市乌石镇卫生院'],
+    ['临江市望湖镇卫生院出具证明', '临江市望湖镇卫生院'],
     ['南京新华书店配送教材', '南京新华书店'],
   ];
   for (const [text, want] of cases) {
@@ -628,7 +649,7 @@ test('新增·机构后缀：医院/支行/超市/宾馆/工厂/门市部/卫生
 });
 
 test('新增·公立医院「第一人民医院」整体识别，地址不残留残缺前缀', () => {
-  const text = '位于浙江省杭州市第一人民医院附近。';
+  const text = '位于汉东省临江市第一人民医院附近。';
   const items = detect(text, {}).items;
   const orgs = items.filter((i) => i.type === 'org').map((i) => i.value);
   assert.ok(orgs.some((v) => v.includes('第一人民医院')), `应整体识别公立医院: ${orgs}`);
@@ -651,9 +672,9 @@ test('优化·案号：检察院案号前缀不得被误判为姓名（检测部
 });
 
 test('修复·地址误吞尾字：村务/村民/村委等后词不吞入地名（检测部分）', () => {
-  const t = '判令二被告在石牌垌村村务公开栏张贴书面致歉声明';
+  const t = '判令二被告在湖滨村村务公开栏张贴书面致歉声明';
   const addrs = detect(t).items.filter((i) => i.type === 'address').map((i) => i.value);
-  assert.ok(addrs.includes('石牌垌村'), `地名应止于「石牌垌村」: ${addrs}`);
+  assert.ok(addrs.includes('湖滨村'), `地名应止于「湖滨村」: ${addrs}`);
   assert.ok(!addrs.some((v) => v.endsWith('村村')), `不应吞入「村务」的村字: ${addrs}`);
 });
 
@@ -743,7 +764,7 @@ test('新增·庭审指令短语不确认为姓名（开庭笔录毒哈希审计
 test('审计·地址负例：行政区划 / 括号中的「号」不误判为地址', () => {
   const negs = [
     '以行政区划链为例，真实地名替换为化名。',
-    '地址嵌在括号中：（广东省A市B镇C村）',
+    '地址嵌在括号中：（汉东省A市B镇C村）',
     '本辖区行政区划图已更新。',
   ];
   for (const t of negs) {
@@ -751,17 +772,17 @@ test('审计·地址负例：行政区划 / 括号中的「号」不误判为地
     assert.strictEqual(addrs.length, 0, `${t} → 误判地址: ${JSON.stringify(addrs)}`);
   }
   // 正例成对：真地址仍检出
-  assert.ok(vals('住所地广东省雷州市北和镇石牌垌村祠堂侧', 'address').length >= 1, '真地址应检出');
+  assert.ok(vals('住所地汉东省临江市望湖镇湖滨村祠堂侧', 'address').length >= 1, '真地址应检出');
 });
 
 test('审计·机构：年例理事会 / 委员会等基层组织整体识别', () => {
-  assert.ok(vals('石牌垌村年例理事会出具证明。', 'org').includes('石牌垌村年例理事会'),
-    JSON.stringify(vals('石牌垌村年例理事会出具证明。', 'org')));
+  assert.ok(vals('湖滨村年例理事会出具证明。', 'org').includes('湖滨村年例理事会'),
+    JSON.stringify(vals('湖滨村年例理事会出具证明。', 'org')));
   assert.ok(vals('村民选举委员会公示名单', 'org').some((v) => v.endsWith('委员会')), '选举委员会');
   // 负例成对：连词残尾（「他和工厂」）不判机构，且不影响真地名机构
   assert.strictEqual(vals('他和工厂签了合同', 'org').length, 0, '他和工厂 → 连词残尾');
   // 公权力机关不再类别排除：带层级（镇/县）即按机构屏蔽
-  assert.ok(vals('线索移交给北和镇派出所', 'org').includes('北和镇派出所'), '北和镇派出所');
+  assert.ok(vals('线索移交给望湖镇派出所', 'org').includes('望湖镇派出所'), '望湖镇派出所');
   assert.ok(vals('会同县人民法院受理', 'org').includes('会同县人民法院'), '会同县人民法院');
 });
 
@@ -771,13 +792,13 @@ test('审计·姓名：职业词不单独确认，明确人称结构可确认', 
   assert.strictEqual(vals('三月的梁家聚会', 'name').length, 0, '无语境不得误报');
 });
 
-test('审计·同文档地名传播：石牌垌下房亲邻群', () => {
-  const t = '二、判令被告在石牌垌下房亲邻群内刊登致歉声明，石牌垌村村民委员会见证。';
-  const r = detect(t, { knownPlaces: new Set(['石牌垌']) });
+test('审计·同文档地名传播：湖滨下房亲邻群', () => {
+  const t = '二、判令被告在湖滨下房亲邻群内刊登致歉声明，湖滨村村民委员会见证。';
+  const r = detect(t, { knownPlaces: new Set(['湖滨']) });
   const addrs = r.items.filter((i) => i.type === 'address').map((i) => i.value);
-  assert.ok(addrs.filter((v) => v === '石牌垌').length >= 1, `群名中的地名应命中: ${JSON.stringify(addrs)}`);
+  assert.ok(addrs.filter((v) => v === '湖滨').length >= 1, `群名中的地名应命中: ${JSON.stringify(addrs)}`);
   // 负例成对：无边界（紧贴其他汉字构成别词）时不扩散
-  const r2 = detect('里石牌垌子无关', { knownPlaces: new Set(['石牌垌']) });
+  const r2 = detect('里湖滨子无关', { knownPlaces: new Set(['湖滨']) });
   assert.strictEqual(r2.items.filter((i) => i.type === 'address').length, 0,
     '紧贴汉字无边界不应扩散');
 });
@@ -805,14 +826,14 @@ test('补强·社交账号：裸 wxid 自带格式前缀，无需「微信号：
 });
 
 test('补强·机构：银行支行名的层级字不被当叙述前缀裁掉', () => {
-  assert.deepStrictEqual(vals('在中国农业银行雷州市支行开立账户', 'org'), ['中国农业银行雷州市支行']);
-  assert.deepStrictEqual(vals('中国工商银行股份有限公司涟水县支行', 'org'),
-    ['中国工商银行股份有限公司涟水县支行']);
+  assert.deepStrictEqual(vals('在中国农业银行临江市支行开立账户', 'org'), ['中国农业银行临江市支行']);
+  assert.deepStrictEqual(vals('中国工商银行股份有限公司渡溪县支行', 'org'),
+    ['中国工商银行股份有限公司渡溪县支行']);
   // 负例成对：众人皆知的全国性机构无层级信息，按设计仍不单独屏蔽
   assert.deepStrictEqual(vals('中国建设银行', 'org'), []);
   assert.deepStrictEqual(vals('交通银行', 'org'), []);
   // 叙述前缀仍被裁掉，不因放行专名而吞进整句
-  assert.deepStrictEqual(vals('我先后通过中国农业银行雷州市支行转账', 'org'), ['中国农业银行雷州市支行']);
+  assert.deepStrictEqual(vals('我先后通过中国农业银行临江市支行转账', 'org'), ['中国农业银行临江市支行']);
 });
 
 test('补强·姓名：无角色词的「X的+随身财物」占有结构可确认', () => {

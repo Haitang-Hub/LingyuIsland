@@ -591,9 +591,9 @@ const DETECT_ITEMS = [
   ['email', '电子邮箱'], ['name', '中文姓名'], ['address', '家庭住址'],
   ['passport', '护照号'], ['plate', '车牌号'],
   ['caseNo', '案号'], ['license', '执业证号'], ['org', '机构名称'],
-  // 可选检测项：默认关闭
+  // 可选检测项：默认关闭（籍贯默认开启，见 store）
   ['landline', '固定电话/传真'], ['im', '微信/QQ'],
-  ['hkmt', '港澳台证件'], ['uscc', '统一社会信用代码'],
+  ['native', '籍贯'], ['uscc', '统一社会信用代码'],
 ];
 const BEHAVIORS = [
   ['clipboardWatch', '剪贴板自动识别', '复制了含编码的内容时，胶囊提示一键恢复'],

@@ -32,14 +32,14 @@ test('两遍式：简历版式锚点（姓名行 + 人口学证据）', () => {
   // 真实简历版式：姓名行后接职位，次行以性别·出生年开头
   const known = collectEntities([
     '冷彻   AIGC/Agent应用开发',
-    '男  ·  2001.09  ·  安徽  |  137****4764  |  2***@qq.com  |  离职-随时到岗',
+    '男  ·  2001.09  ·  汉东  |  137****4764  |  2***@qq.com  |  离职-随时到岗',
     '▌ 教育背景  ————',
     '冷彻毕业于某某大学',
   ]);
   assert.ok(known.name.has('冷彻'), JSON.stringify([...known.name]));
   assert.deepStrictEqual(names('冷彻毕业于某某大学', known), ['冷彻']);
   // 同行人口学证据也可闭合
-  assert.ok(collectEntities(['冷彻 男 · 2001.09 · 安徽']).name.has('冷彻'));
+  assert.ok(collectEntities(['冷彻 男 · 2001.09 · 汉东']).name.has('冷彻'));
   // 无人口学证据时不确认（防止任意标题/词组被收）
   assert.ok(!collectEntities(['冷彻   AIGC/Agent应用开发', '教育背景']).name.has('冷彻'));
 });
