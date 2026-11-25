@@ -21,6 +21,7 @@ const els = {
   histClearBtn: $('#histClearBtn'),
   searchInput: $('#searchInput'), rescanBtn: $('#rescanBtn'),
   catChips: $('#catChips'),   importSeg: $('#importSeg'), conflictSeg: $('#conflictSeg'),
+  maskStyleSeg: $('#maskStyleSeg'), maskStyleDesc: $('#maskStyleDesc'),
   searchList: $('#searchList'), searchEmpty: $('#searchEmpty'),
   searchMeta: $('#searchMeta'), searchHint: $('#searchHint'),
   restoreInput: $('#restoreInput'), restoreOut: $('#restoreOut'),
@@ -665,10 +666,27 @@ function renderConflictSeg(s) {
   }
 }
 
+const MASK_STYLE_DESC = {
+  labeled: '保留首尾特征并内嵌类型编码，如「李*〔姓名·a1b2c3〕」。编码可用于还原；标签较长，可能让原文档重新换行。',
+  generic: '不保留原文残字，正文只写「〔姓名·a1b2c3〕」这类类型编码。可还原，正文更短、对版式影响更小。',
+  plain: '只写「〔已屏蔽〕」，不嵌入编码。正文最短、对原版式影响最小；但屏蔽文件无法自动还原，只能靠本机映射库人工关联。',
+};
+
+function renderMaskStyleSeg(s) {
+  const v = s.maskStyle || 'labeled';
+  for (const b of els.maskStyleSeg.children) {
+    const active = b.dataset.v === v;
+    b.classList.toggle('is-active', active);
+    b.setAttribute('aria-checked', String(active));
+  }
+  if (els.maskStyleDesc) els.maskStyleDesc.textContent = MASK_STYLE_DESC[v] || MASK_STYLE_DESC.labeled;
+}
+
 function renderSettings(st) {
   const s = st.settings;
   renderImportSeg(s);
   renderConflictSeg(s);
+  renderMaskStyleSeg(s);
   // 检测项（紧凑网格，勾选框在前，折叠在 .detect-head，摘要实时更新）
   els.toggleList.innerHTML = '';
   for (const [key, label] of DETECT_ITEMS) {
@@ -1194,6 +1212,21 @@ for (const b of els.conflictSeg.children) {
     const s = await window.island.invoke('settings:set', { conflictPolicy: b.dataset.v });
     settingsCache = s;
     renderConflictSeg(s);
+  });
+}
+
+for (const b of els.maskStyleSeg.children) {
+  b.addEventListener('click', async () => {
+    if (b.dataset.v === (settingsCache && settingsCache.maskStyle)) return;
+    if (b.dataset.v === 'plain') {
+      const ok = await uiConfirm(
+        '「仅已屏蔽」不会在文件里嵌入编码，生成的屏蔽文件将无法自动还原（只能靠本机映射库人工关联）。确定切换？',
+        '确定');
+      if (!ok) return;
+    }
+    const s = await window.island.invoke('settings:set', { maskStyle: b.dataset.v });
+    settingsCache = s;
+    renderMaskStyleSeg(s);
   });
 }
 

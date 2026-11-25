@@ -129,8 +129,10 @@ async function importAndMask(inputPaths, ctx, sender) {
       } else if (intent === 'restore') {
         r = restoreFile(src, store.vault, out);
       } else {
-        r = maskFile(src, store.vault, store.settings.toggles, out, undefined,
-          { strictResidual: !!store.settings.strictResidual });
+        r = maskFile(src, store.vault, store.settings.toggles, out, undefined, {
+          strictResidual: !!store.settings.strictResidual,
+          maskStyle: store.settings.maskStyle,
+        });
       }
       r.action = intent;
       r.origPath = src;

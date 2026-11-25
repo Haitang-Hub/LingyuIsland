@@ -33,6 +33,8 @@ require('./app-units.test.js');
 require('./batch-summary.test.js');
 require('./regression.test.js');
 require('./leakage-fixes.test.js');
+require('./xmltext-entities.test.js');
+require('./mask-style.test.js');
 
 (async () => {
   try {

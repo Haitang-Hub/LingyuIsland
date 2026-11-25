@@ -15,6 +15,7 @@ const iconv = require('iconv-lite');
 const AdmZip = require('adm-zip');
 const {
   maskText, restoreText, countCodes, hasRestorableCode, maskEdits, restoreEdits, cleanEdits,
+  hasPlainMark,
 } = require('./masker');
 const { detect } = require('./detector');
 const { collectEntities, createEntities, mergeEntities } = require('./entities');
@@ -265,11 +266,11 @@ function residualCheck(maskedText, toggles, knownNames, knownEntities) {
  * 段落级拼接 → 统一检测 → 编辑映射回各 <w:t> 节点。
  * 只改 >text< 之间的内容，标签、属性、run 结构一律不动。
  */
-function maskXmlText(xml, vault, toggles, knownEntities, knownNameHashes) {
+function maskXmlText(xml, vault, toggles, knownEntities, knownNameHashes, maskStyle) {
   const counts = {};
   const r = transformXmlText(xml, (blockText, boundaries) => {
     const { edits, items, counts: bc } = maskEdits(blockText, vault, {
-      toggles, knownEntities, knownNameHashes, boundaries,
+      toggles, knownEntities, knownNameHashes, boundaries, maskStyle,
     });
     for (const t of Object.keys(bc || {})) counts[t] = (counts[t] || 0) + bc[t];
     return { edits, count: items.length };
@@ -365,6 +366,11 @@ function maskFile(filePath, vault, toggles, outPath, knownNames, opts = {}) {
   if (n.ext === 'legacy') return legacyUnavailable(filePath);
   const stat = fs.statSync(n.src);
   if (stat.size > MAX_SIZE) return { ok: false, path: filePath, skipped: 'too-large' };
+  // 「仅标已屏蔽」产物正文没有编码，detectFileIntent 会把它当明文再遮一遍。
+  // 用结果文件名 + 固定标记识别，直接跳过，避免生成 _屏蔽_屏蔽 之类的怪文件。
+  if (isResultFileName(filePath) && hasPlainMark(readFileText(filePath))) {
+    return { ok: false, path: filePath, skipped: 'already-masked' };
+  }
   const out = outPath || maskedPathOf(outputNameOf(filePath));
 
   if (OFFICE_EXTS.has(n.ext)) {
@@ -384,7 +390,7 @@ function maskFile(filePath, vault, toggles, outPath, knownNames, opts = {}) {
     const inherited = inheritedEntities(knownNames, opts);
     const knownEnt = collectFileEntities([dec.text], toggles, inherited);
     const r = maskText(dec.text, vault, {
-      toggles, knownEntities: knownEnt, knownNameHashes: knownHashes,
+      toggles, knownEntities: knownEnt, knownNameHashes: knownHashes, maskStyle: opts.maskStyle,
     });
     if (r.items.length === 0) return { ok: true, path: filePath, count: 0, counts: {}, skipped: 'no-pii' };
     fs.writeFileSync(out, encodeText(r.masked, dec.encoding, dec.bom));
@@ -459,7 +465,7 @@ function maskOffice(filePath, vault, toggles, outPath, knownNames, opts = {}) {
       }
       let xml = p.xml;
       let c = 0;
-      const r = maskXmlText(xml, vault, toggles, knownEnt, knownHashes);
+      const r = maskXmlText(xml, vault, toggles, knownEnt, knownHashes, opts.maskStyle);
       c += r.count;
       for (const t of Object.keys(r.counts || {})) counts[t] = (counts[t] || 0) + r.counts[t];
       if (c > 0) {

@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const { app, safeStorage } = require('electron');
-const { Vault } = require('../core/masker');
+const { Vault, normalizeMaskStyle } = require('../core/masker');
 const { normalizeConflictPolicy } = require('../core/imports');
 const { BASE } = require('../core/layout');
 const { normalizeAppearance, ALPHA_DEFAULT, RADIUS_DEFAULT, FONT_SCALE_DEFAULT, PILL_X_DEFAULT } = require('../core/appearance');
@@ -38,6 +38,10 @@ const DEFAULT_SETTINGS = {
   rootDir: '',                    // 用户配置的文件根目录（工作区：导入副本与屏蔽产物都在这里）
   importBehavior: 'keep',         // 导入方式：keep=保留原位置文件 | discard=处理后移入系统回收站
   conflictPolicy: 'keep',         // 根目录同名文件：keep=加序号保留两份 | overwrite=覆盖同名文件
+  // 屏蔽方式：labeled=李*〔姓名·编码〕（默认，可还原，保留残片）
+  //           generic=〔姓名·编码〕（可还原，不保留残片、版式影响小）
+  //           plain=〔已屏蔽〕（不保留残片、产物不含编码、无法自动还原）
+  maskStyle: 'labeled',
   toggles: {
     phone: true, idCard: true, bank: true, email: true,
     name: true, address: true, passport: true, plate: true,
@@ -111,6 +115,7 @@ class Store {
     // 缺字段或被外部改写的非法值统一规范化
     this.settings.autoCollapseDelay = normalizeCollapseDelay(this.settings.autoCollapseDelay);
     this.settings.conflictPolicy = normalizeConflictPolicy(this.settings.conflictPolicy);
+    this.settings.maskStyle = normalizeMaskStyle(this.settings.maskStyle);
     // 外观设置逐字段规范化（缺 appearance 字段时走全局默认）
     this.settings.appearance = normalizeAppearance(this.settings.appearance, null);
   }
@@ -127,6 +132,9 @@ class Store {
     }
     if ('conflictPolicy' in patch) {
       next.conflictPolicy = normalizeConflictPolicy(patch.conflictPolicy);
+    }
+    if ('maskStyle' in patch) {
+      next.maskStyle = normalizeMaskStyle(patch.maskStyle);
     }
     // 外观设置以主进程规范化结果为准（越界钳制 / 非法回退）
     if ('appearance' in patch) {
@@ -216,6 +224,6 @@ class Store {
 }
 
 module.exports = {
-  Store, DEFAULT_SETTINGS, normalizeCollapseDelay,
+  Store, DEFAULT_SETTINGS, normalizeCollapseDelay, normalizeMaskStyle,
   COLLAPSE_MIN_SEC, COLLAPSE_MAX_SEC, DEFAULT_COLLAPSE_SEC,
 };

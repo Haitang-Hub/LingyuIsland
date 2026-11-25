@@ -257,6 +257,16 @@
         <p class="setting-desc">结果文件与根目录中已有结果<b>同名</b>时：「保留两份」会自动加序号（如「_屏蔽_02」），旧结果不动；「覆盖同名」会直接更新那份结果文件。还原产物再次屏蔽会归回原名（「A_还原」→「A_屏蔽」），不会堆成「A_还原_屏蔽」。原位置的文件不受影响。</p>
       </div>
 
+      <div class="sec">
+        <h2>屏蔽方式</h2>
+        <div class="seg-group" id="maskStyleSeg" role="radiogroup" aria-label="屏蔽方式">
+          <button class="seg is-active" data-v="labeled" role="radio" aria-checked="true">类型编码</button>
+          <button class="seg" data-v="generic" role="radio" aria-checked="false">通用编码</button>
+          <button class="seg" data-v="plain" role="radio" aria-checked="false">仅已屏蔽</button>
+        </div>
+        <p class="setting-desc" id="maskStyleDesc"></p>
+      </div>
+
       <div class="sec" id="detectSec">
         <div class="detect-head" id="detectHead" role="button" tabindex="0" aria-expanded="false">
           <h2>检测项</h2>

@@ -16,6 +16,78 @@
 /** 只匹配 >文本< 之间的内容（标签属性里的 > 不会被误判） */
 const TEXT_NODE_RE = />([^<>]*)</g;
 
+/** XML 预定义命名实体（OOXML 文本节点里其余命名实体不合法，按原样保留） */
+const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+
+/**
+ * 解码文本节点里的字符实体，并保留「解码后每个 UTF-16 码元 → 原始片段」的映射。
+ *
+ * 有些上游导出器把整篇中文写成 &#24320;&#24237;... 数字字符引用。检测规则全部
+ * 建立在汉字 Unicode 区间上，若把原始实体串直接送进 detector，姓名/地址/机构/
+ * 案号会一条不命中，只有手机号/身份证这类纯数字正则照常工作，残留复检也跟着瞎。
+ *
+ * 解码后偏移必须贯穿 collectBlocks → transform → addEdit → renderNode 全链路，
+ * 否则跨 run 实体的 partLens 切分和还原回填都会错位。写回时再按 map 落回原文偏移。
+ *
+ * @param {string} raw 原始 <w:t> 文本（XML 实体形式）
+ * @returns {{text:string, map:Array<[number,number]>, numeric:boolean}}
+ *   text 解码后的 Unicode 文本；map[i] 为 text 第 i 个码元对应的 [rawStart, rawEnd)；
+ *   numeric 表示节点使用过数字字符引用，写回替换值时需保持该编码风格。
+ */
+function decodeNodeText(raw) {
+  let text = '';
+  const map = [];
+  let numeric = false;
+  let i = 0;
+  while (i < raw.length) {
+    if (raw[i] === '&') {
+      const rest = raw.slice(i);
+      let m = /^&#[xX]([0-9a-fA-F]+);/.exec(rest);
+      let ch = null;
+      let end = 0;
+      if (m) {
+        try { ch = String.fromCodePoint(parseInt(m[1], 16)); } catch { ch = null; }
+        if (ch !== null) { end = i + m[0].length; numeric = true; }
+      }
+      if (ch === null && (m = /^&#(\d+);/.exec(rest))) {
+        try { ch = String.fromCodePoint(Number(m[1])); } catch { ch = null; }
+        if (ch !== null) { end = i + m[0].length; numeric = true; }
+      }
+      if (ch === null && (m = /^&([a-zA-Z][a-zA-Z0-9]*);/.exec(rest))) {
+        const named = NAMED_ENTITIES[m[1]];
+        if (named !== undefined) { ch = named; end = i + m[0].length; }
+      }
+      if (ch !== null) {
+        // 一个码点可能占 2 个 UTF-16 码元（emoji 等），两格都指向同一原始片段
+        for (let k = 0; k < ch.length; k++) map.push([i, end]);
+        text += ch;
+        i = end;
+        continue;
+      }
+    }
+    map.push([i, i + 1]);
+    text += raw[i];
+    i++;
+  }
+  return { text, map, numeric };
+}
+
+/** numeric 风格节点写回替换值时，把非 ASCII 重新编码为十进制字符引用 */
+function encodeNodeReplacement(rep, numeric) {
+  const s = String(rep);
+  if (!numeric) return s;
+  let out = '';
+  for (const ch of s) {
+    const cp = ch.codePointAt(0);
+    if (cp > 0x7f) out += `&#${cp};`;
+    else if (ch === '&') out += '&amp;';
+    else if (ch === '<') out += '&lt;';
+    else if (ch === '>') out += '&gt;';
+    else out += ch;
+  }
+  return out;
+}
+
 /**
  * 段落 / 单元格级边界标签。跨边界的节点不拼在一起，
  * 避免把上一段末尾和下一段开头连成一个假地址或假机构名。
@@ -33,8 +105,18 @@ function collectBlocks(xml) {
   TEXT_NODE_RE.lastIndex = 0;
   let m;
   while ((m = TEXT_NODE_RE.exec(src)) !== null) {
-    const text = m[1];
-    nodes.push({ start: m.index + 1, end: m.index + 1 + text.length, text });
+    const raw = m[1];
+    const d = decodeNodeText(raw);
+    // start/end 仍是原始 XML 里的偏移，写回时按它替换整段 <w:t> 内容；
+    // text/map 则是解码后的视图，供检测与编辑计算使用。
+    nodes.push({
+      start: m.index + 1,
+      end: m.index + 1 + raw.length,
+      raw,
+      text: d.text,
+      map: d.map,
+      numeric: d.numeric,
+    });
   }
   if (!nodes.length) return [];
 
@@ -87,6 +169,10 @@ function addEdit(block, start, end, replacement, partLens) {
   if (Array.isArray(partLens) && partLens.length > 1) {
     const total = partLens.reduce((s, n) => s + n, 0);
     if (total === String(replacement).length && a + partLens.length <= ns.length) {
+      // 屏蔽时后续节点已被清空，重新读取时它们的 raw 里不再有实体可判断风格。
+      // 用首节点（整条实体的落点）的风格回填全部分段，否则实体编码文档还原
+      // 会把后半段写成字面中文，破坏逐字节一致。
+      const baseNumeric = ns[a] && ns[a].numeric;
       let cursor = 0;
       for (let k = 0; k < partLens.length; k++) {
         const n = ns[a + k];
@@ -95,9 +181,9 @@ function addEdit(block, start, end, replacement, partLens) {
         if (k === 0) {
           const s = Math.max(0, Math.min(n.text.length, start - n.off));
           const e = Math.max(s, Math.min(n.text.length, end - n.off));
-          n.edits.push({ s, e, rep: part });
+          n.edits.push({ s, e, rep: part, numeric: baseNumeric });
         } else {
-          n.edits.push({ s: 0, e: 0, rep: part });
+          n.edits.push({ s: 0, e: 0, rep: part, numeric: baseNumeric });
         }
       }
       return;
@@ -116,18 +202,26 @@ function addEdit(block, start, end, replacement, partLens) {
   }
 }
 
-/** 应用单节点内的编辑（区间互不重叠，按起点倒序） */
+/** 应用单节点内的编辑（区间互不重叠，按起点倒序；edits 用解码后坐标） */
 function renderNode(n) {
-  if (!n.edits.length) return n.text;
+  if (!n.edits.length) return n.raw;
   n.edits.sort((x, y) => y.s - x.s || y.e - x.e);
-  let s = n.text;
+  let raw = n.raw;
   let lastStart = Infinity;
   for (const e of n.edits) {
     if (e.e > lastStart) continue;
-    s = s.slice(0, e.s) + String(e.rep) + s.slice(e.e);
+    // map 把解码后坐标折回原始 XML 偏移；实体风格节点把替换值重新编码，
+    // 这样原件是 &#24320; 形式时，还原回去仍是完全相同的字节。
+    const rs = e.s < n.map.length ? n.map[e.s][0] : raw.length;
+    const re = e.e > 0 && e.e <= n.map.length ? n.map[e.e - 1][1] : rs;
+    if (re >= rs) {
+      // 跨节点回填的分段用首节点继承来的风格（见 addEdit），其余用节点自身风格
+      const numeric = e.numeric === undefined ? n.numeric : e.numeric;
+      raw = raw.slice(0, rs) + encodeNodeReplacement(e.rep, numeric) + raw.slice(re);
+    }
     lastStart = e.s;
   }
-  return s;
+  return raw;
 }
 
 /**
@@ -158,7 +252,7 @@ function transformXmlText(xml, transform) {
     for (const n of b.nodes) {
       if (!n.edits.length) continue;
       const next = renderNode(n);
-      if (next !== n.text) changes.push({ start: n.start, end: n.end, text: next });
+      if (next !== n.raw) changes.push({ start: n.start, end: n.end, text: next });
     }
   }
 

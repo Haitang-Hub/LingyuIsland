@@ -124,7 +124,7 @@ test('类别筛选：未配置根目录时安全返回空结果', () => {
 /* ---------------- 自定义自动收起时长（store.js） ---------------- */
 
 const {
-  Store, DEFAULT_SETTINGS, normalizeCollapseDelay,
+  Store, DEFAULT_SETTINGS, normalizeCollapseDelay, normalizeMaskStyle,
   COLLAPSE_MIN_SEC, COLLAPSE_MAX_SEC, DEFAULT_COLLAPSE_SEC,
 } = require('../src/main/store');
 
@@ -148,6 +148,37 @@ test('自动收起时长：边界裁剪与非法值回退', () => {
   assert.strictEqual(normalizeCollapseDelay(NaN), 20);
   assert.strictEqual(normalizeCollapseDelay(Infinity), 20);
   assert.strictEqual(normalizeCollapseDelay('abc', 45), 45, '非法值可指定 fallback');
+});
+
+test('屏蔽方式：默认值与规范化', () => {
+  assert.strictEqual(DEFAULT_SETTINGS.maskStyle, 'labeled');
+  assert.strictEqual(normalizeMaskStyle('labeled'), 'labeled');
+  assert.strictEqual(normalizeMaskStyle('generic'), 'generic');
+  assert.strictEqual(normalizeMaskStyle('plain'), 'plain');
+  assert.strictEqual(normalizeMaskStyle('bogus'), 'labeled');
+  assert.strictEqual(normalizeMaskStyle(undefined), 'labeled');
+});
+
+test('屏蔽方式：saveSettings / 旧配置缺字段或非法值时规范化', () => {
+  const s = new Store();
+  s.dir = TMP;
+  const file = s.paths.settings;
+  try {
+    assert.strictEqual(s.saveSettings({ maskStyle: 'plain' }).maskStyle, 'plain');
+    assert.strictEqual(JSON.parse(fs.readFileSync(file, 'utf8')).maskStyle, 'plain');
+    assert.strictEqual(s.saveSettings({ maskStyle: 'bogus' }).maskStyle, 'labeled');
+    fs.writeFileSync(file, JSON.stringify({ maskStyle: 'generic' }), 'utf8');
+    s._loadSettings();
+    assert.strictEqual(s.settings.maskStyle, 'generic', '已有值保留');
+    fs.writeFileSync(file, JSON.stringify({ rootDir: 'X:\\docs' }), 'utf8');
+    s._loadSettings();
+    assert.strictEqual(s.settings.maskStyle, 'labeled', '缺字段补默认值');
+    fs.writeFileSync(file, JSON.stringify({ maskStyle: 'bogus' }), 'utf8');
+    s._loadSettings();
+    assert.strictEqual(s.settings.maskStyle, 'labeled', '非法值回退默认');
+  } finally {
+    try { fs.rmSync(file, { force: true }); } catch { /* ignore */ }
+  }
 });
 
 test('自动收起时长：saveSettings 统一裁剪并落盘', () => {

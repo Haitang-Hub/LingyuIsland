@@ -3,7 +3,8 @@
  * 屏蔽 / 恢复引擎（纯 JS，依赖 node 内置 crypto）
  *
  * 核心设计：屏蔽值形如  138****5678〔手机号·ab12cd〕
- *  - 前后保留部分原文 + 类型标签，让用户「能判断出是什么内容」
+ *  - 类型标签（〔手机号·ab12cd〕）始终保留，让用户「能判断出是什么内容」；
+ *    是否保留前后原文残片（如 138****5678）取决于屏蔽方式（见 maskStyle）
  *  - 〔〕内「类型·6~12 位十六进制编码」是找回原文的钥匙：
  *    只要编码未被改动（哪怕从文件里复制到别处），都能还原出真实内容
  *  - 同一真实值在同一映射库中对应同一编码；跨文本节点实体因还原需要
@@ -42,7 +43,28 @@ const CODE_LABEL = {
   native: '籍贯',
 };
 
-const codeBracket = (type, code) => `〔${CODE_LABEL[type] || type}·${code}〕`;
+/**
+ * 屏蔽方式（设置项 maskStyle）：三者括号里一律写具体类型标签（姓名 / 机构 / 住址 / 籍贯…），
+ * 区别只在「是否保留原文残片（body）」：
+ *  - labeled：李*〔姓名·ab12cd〕  保留残片 + 具体类型 + 编码，可还原（默认）
+ *  - generic：〔姓名·ab12cd〕    不保留残片，正文只留类型编码，可还原，版式影响小
+ *  - plain：  〔已屏蔽〕          不保留残片、不含编码 → 无法从产物还原，需依赖映射库关联
+ */
+const MASK_STYLES = ['labeled', 'generic', 'plain'];
+const DEFAULT_MASK_STYLE = 'labeled';
+const PLAIN_MARK = '〔已屏蔽〕';
+
+function normalizeMaskStyle(value) {
+  return MASK_STYLES.includes(value) ? value : DEFAULT_MASK_STYLE;
+}
+
+function codeBracket(type, code, style) {
+  if (style === 'plain') return PLAIN_MARK;
+  return `〔${CODE_LABEL[type] || type}·${code}〕`;
+}
+
+/** 是否为不可还原的「已屏蔽」产物标记 */
+const hasPlainMark = (text) => String(text || '').includes(PLAIN_MARK);
 
 const TYPE_LABEL = {
   phone: '手机号', idCard: '身份证', bank: '银行卡', email: '邮箱',
@@ -223,6 +245,11 @@ function caseNoHeadFor(item, items) {
 }
 
 function buildMasked(type, value, code, opts = {}) {
+  // generic / plain 不保留原文残片（body），正文只留括号，版式影响最小；
+  // 编码仍在，labeled / generic 均可还原（还原端按括号兜底整段替换）。
+  if (opts.maskStyle === 'generic' || opts.maskStyle === 'plain') {
+    return codeBracket(type, code, opts.maskStyle);
+  }
   let body;
   switch (type) {
     case 'phone': { // 138****5678
@@ -301,7 +328,7 @@ function buildMasked(type, value, code, opts = {}) {
   }
   // 编码括号带类型标签（〔姓名·ab12cd〕），脱敏产物自解释、可读性更好；
   // 还原时标签随编码一并剥除（见 restoreEdits）。
-  return body + codeBracket(type, code);
+  return body + codeBracket(type, code, opts.maskStyle);
 }
 
 /* ------------------------------------------------------------------ */
@@ -351,13 +378,14 @@ function maskEdits(text, vault, options = {}) {
       edits.push({
         start: it.start,
         end: it.end,
-        replacement: buildMasked(it.type, it.value, code, { head }),
+        replacement: buildMasked(it.type, it.value, code, { head, maskStyle: options.maskStyle }),
       });
     } else {
       edits.push({
         start: it.start,
         end: it.end,
-        replacement: buildMasked(it.type, it.value, vault.ensureCode(it.type, it.value, null, head), { head }),
+        replacement: buildMasked(it.type, it.value, vault.ensureCode(it.type, it.value, null, head),
+          { head, maskStyle: options.maskStyle }),
       });
     }
   }
@@ -543,4 +571,5 @@ module.exports = {
   Vault, buildMasked, maskText, restoreText, hasCodes, countCodes, hasRestorableCode,
   maskEdits, restoreEdits, applyEdits, cleanEdits,
   CODE_RE, CODE_LABEL, TYPE_LABEL, codeBracket,
+  MASK_STYLES, DEFAULT_MASK_STYLE, normalizeMaskStyle, PLAIN_MARK, hasPlainMark,
 };
